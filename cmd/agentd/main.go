@@ -159,6 +159,10 @@ func run() int {
 		engine.SetPresenter(feishu.NewCardPresenter(fc.Client(), logger).WithStopButton(cfg.Feishu.CardActionEnabled))
 	}
 
+	var journal *store.Journal
+	if db != nil {
+		journal = store.NewJournal(db)
+	}
 	if db != nil {
 		if err := store.Migrate(ctx, db, migrationsDir()); err != nil {
 			logger.Error("migration failed", "error", err)
@@ -186,7 +190,7 @@ func run() int {
 	}
 
 	if cfg.Channel == config.ChannelFeishu {
-		feishuStatus = startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir)
+		feishuStatus = startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal)
 	}
 
 	adminStore, err := admin.NewStore(cfg.Storage.Dir)
@@ -208,7 +212,6 @@ func run() int {
 			logger.Warn("seed default profile failed", "error", err)
 		}
 	}
-	journal := store.NewJournal(db)
 	adminSrv := admin.New(cfg, engine, adminStore, admin.Options{
 		Version:      version.Version,
 		FeishuStatus: feishuStatus,
@@ -354,7 +357,7 @@ func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, profiles
 // startFeishu 装配事件来源并返回通道状态查询函数。
 //
 // @remarks 长连接与 webhook 共用同一个 Dispatcher，保证受理策略一致。
-func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server, engine *core.Engine, ch channel.Channel, attachmentsDir string) func() string {
+func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server, engine *core.Engine, ch channel.Channel, attachmentsDir string, journal *store.Journal) func() string {
 	var client *feishu.Client
 	if fc, ok := ch.(*feishu.Channel); ok {
 		client = fc.Client()
@@ -369,7 +372,66 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 		MentionFreeChats: cfg.Feishu.MentionFreeChats,
 		ModelName:        cfg.Agent.Model,
 		ModelBaseURL:     cfg.Agent.BaseURL,
+		OnAccepted: func(ctx context.Context, in channel.Inbound) {
+			if client == nil {
+				return
+			}
+			conv := in.Tenant + ":" + in.Chat.ID + ":" + in.Sender.OpenID
+			chatName, _, err := client.ChatInfo(ctx, in.Chat.ID)
+			if err != nil {
+				logger.Debug("feishu chat info failed", "chat", in.Chat.ID, "error", err)
+			}
+			userName, err := client.UserName(ctx, in.Sender.OpenID)
+			if err != nil {
+				logger.Debug("feishu user name failed", "user", in.Sender.OpenID, "error", err)
+			}
+			if chatName == "" && userName == "" {
+				return
+			}
+			engine.SetIdentity(conv, chatName, userName)
+			if journal != nil {
+				saveCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if err := journal.SaveIdentity(saveCtx, conv, chatName, userName); err != nil {
+					logger.Debug("save identity failed", "error", err)
+				}
+			}
+		},
 	}, logger)
+
+	if client != nil {
+		// 启动时补齐历史会话展示名（飞书群名/用户名）。
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			for _, info := range engine.SessionInfos() {
+				if info.ChatName != "" || info.UserName != "" {
+					continue
+				}
+				parts := strings.SplitN(info.ID, ":", 3)
+				if len(parts) != 3 {
+					continue
+				}
+				chatName, _, err := client.ChatInfo(ctx, parts[1])
+				if err != nil {
+					logger.Debug("feishu chat info failed", "chat", parts[1], "error", err)
+				}
+				userName, err := client.UserName(ctx, parts[2])
+				if err != nil {
+					logger.Debug("feishu user name failed", "user", parts[2], "error", err)
+				}
+				if chatName == "" && userName == "" {
+					continue
+				}
+				engine.SetIdentity(info.ID, chatName, userName)
+				if journal != nil {
+					if err := journal.SaveIdentity(ctx, info.ID, chatName, userName); err != nil {
+						logger.Debug("save identity failed", "error", err)
+					}
+				}
+			}
+		}()
+	}
 
 	mux := http.NewServeMux()
 	serving := false

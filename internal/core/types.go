@@ -90,6 +90,22 @@ type Presenter interface {
 	Close(ctx context.Context, handle, body string, failed bool) error
 }
 
+// Identity 是会话的展示信息。
+type Identity struct {
+	ChatName string `json:"chat_name"`
+	UserName string `json:"user_name"`
+}
+
+// SessionInfo 是管理台的会话条目。
+type SessionInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	ChatName    string `json:"chat_name"`
+	UserName    string `json:"user_name"`
+	Messages    int    `json:"messages"`
+	LastActive  string `json:"last_active"`
+}
+
 // ProfileSelection 是绑定到会话代的配置档案快照。
 type ProfileSelection struct {
 	Name   string   `json:"name"`
@@ -109,6 +125,8 @@ type Journal interface {
 	SaveDelivery(ctx context.Context, d *Delivery) error
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
 	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	SaveIdentity(ctx context.Context, conv, chatName, userName string) error
+	LoadIdentities(ctx context.Context, limit int) (map[string][2]string, error)
 	SaveProfileBinding(ctx context.Context, conv string, generation int, p ProfileSelection) error
 	LoadProfileBindings(ctx context.Context, limit int) (map[string]ProfileSelection, error)
 	SaveRunEvent(ctx context.Context, ev RunEvent) error

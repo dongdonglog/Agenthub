@@ -622,3 +622,23 @@ func TestProfileBindingSticksPerGeneration(t *testing.T) {
 		t.Fatalf("ProfileOf = %s", got)
 	}
 }
+
+func TestSessionInfosDisplayName(t *testing.T) {
+	eng := newEngine(t, &captureChannel{}, agent.Echo{})
+	ctx := context.Background()
+	if _, err := eng.Submit(ctx, inbound("om_id", "hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	conv := "tenant_1:oc_chat:ou_user"
+	eng.SetIdentity(conv, "运维群", "张三")
+	infos := eng.SessionInfos()
+	if len(infos) != 1 {
+		t.Fatalf("infos = %+v", infos)
+	}
+	if infos[0].DisplayName != "运维群 · 张三" || infos[0].Messages != 2 {
+		t.Fatalf("info = %+v", infos[0])
+	}
+}

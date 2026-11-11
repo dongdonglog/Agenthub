@@ -55,6 +55,19 @@ function table(headers, rows, onClick) {
   return el('div', { className: 'table-wrap' }, [t]);
 }
 
+function pager(total, page, size, base) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  const wrap = el('div', { className: 'pager' });
+  const prev = el('button', { className: 'ghost' }, ['上一页']);
+  prev.disabled = page <= 1;
+  prev.addEventListener('click', () => { location.hash = `${base}/${page - 1}`; });
+  const next = el('button', { className: 'ghost' }, ['下一页']);
+  next.disabled = page >= pages;
+  next.addEventListener('click', () => { location.hash = `${base}/${page + 1}`; });
+  wrap.append(prev, el('span', { className: 'muted' }, [`第 ${page} / ${pages} 页 · 共 ${total} 条`]), next);
+  return wrap;
+}
+
 function badge(text, kind = '') {
   return el('span', { className: `badge ${kind}` }, [text]);
 }
@@ -91,13 +104,13 @@ async function render() {
   } catch { /* 状态失败不阻塞页面 */ }
   try {
     if (page === 'overview') return await renderOverview(overview);
-    if (page === 'sessions') return rest[0] ? await renderSession(rest[0]) : await renderSessions();
+    if (page === 'sessions') return rest[0] ? await renderSession(decodeURIComponent(rest[0])) : await renderSessions(Number(rest[0]) || 1);
     if (page === 'runs') return await renderRun(rest[0]);
-    if (page === 'skills') return await renderSkills();
-    if (page === 'history') return rest[0] ? await renderHistoryDetail(rest[0], rest[1]) : await renderHistory();
+    if (page === 'skills') return rest[0] ? await renderSkillDetail(decodeURIComponent(rest[0])) : await renderSkills(Number(rest[1]) || 1);
+    if (page === 'history') return rest[0] ? await renderHistoryDetail(decodeURIComponent(rest[0]), rest[1]) : await renderHistory(Number(rest[1]) || 1);
     if (page === 'profiles') return await renderProfiles();
     if (page === 'audits') return await renderAudits();
-    if (page === 'mcps') return await renderMCPs();
+    if (page === 'mcps') return rest[0] ? await renderMCPDetail(decodeURIComponent(rest[0])) : await renderMCPs(Number(rest[1]) || 1);
     if (page === 'settings') return await renderSettings();
     content.replaceChildren(empty('🧭', '页面不存在'));
   } catch (err) {
@@ -151,22 +164,23 @@ async function renderOverview(data) {
   );
 }
 
-async function renderSessions() {
-  const data = await api('/sessions');
-  if (!data.items.length) {
-    content.replaceChildren(el('h2', {}, ['会话']), empty('💬', '还没有会话。在飞书里 @机器人 发一条消息就会出现在这里。'));
-    return;
-  }
-  const rows = data.items.map((s) => [
-    s.id, s.chat_id, s.sender, s.messages, s.queued,
-    s.active_run_id ? badge('运行中', 'warn') : badge('空闲'),
-  ]);
+async function renderSessions(page = 1) {
+  const size = 20;
+  const data = await api(`/sessions?page=${page}&size=${size}`);
+  const rows = data.items.map((it) => {
+    const name = el('div', { className: 'strong' }, [it.display_name || it.id]);
+    name.dataset.id = it.id;
+    return [name, it.messages || 0, it.last_active || '—', it.id];
+  });
   content.replaceChildren(
-    el('h2', {}, ['会话']),
-    el('p', { className: 'lede' }, ['当前为内存存储，重启后清空；点击行查看消息与运行。']),
-    table(['会话', 'chat', '发送者', '消息', '排队', '状态'], rows, (row) => {
-      location.hash = `#/sessions/${row[0]}`;
-    }),
+    el('h2', {}, ['在线会话']),
+    el('p', { className: 'lede' }, ['显示飞书群名与发送人；点击进入会话详情。']),
+    rows.length
+      ? table(['会话', '消息', '最近活跃', '会话 ID'], rows, (row) => {
+        location.hash = `#/sessions/${encodeURIComponent(row[0].dataset.id)}`;
+      })
+      : empty('💬', '还没有会话。'),
+    pager(data.total, page, size, '#/sessions'),
   );
 }
 
@@ -249,50 +263,16 @@ function skillStatusBadge(status) {
   return badge('已归档', 'warn');
 }
 
-async function renderSkills() {
-  const data = await api('/skills');
-  const nameInput = el('input', { placeholder: '技能名，例如 incident-report' });
-  const textarea = el('textarea', { placeholder: '# 标题\n> 一句话描述\n\n步骤…' });
-  const fileList = el('div', { className: 'file-list' });
-  const fileLabel = el('div', { className: 'muted small' }, ['当前文件：—']);
+async function renderSkills(page = 1) {
+  const size = 20;
+  const data = await api(`/skills?page=${page}&size=${size}`);
   const list = el('div');
-  let currentSkill = '';
-  let currentFile = 'SKILL.md';
-
-  async function loadFile(path) {
-    if (!currentSkill) return;
-    try {
-      const f = await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(path)}`);
-      currentFile = path;
-      textarea.value = f.content;
-      fileLabel.textContent = `当前文件：${path}`;
-    } catch (err) { toast(err.message, true); }
-  }
-
-  async function select(name) {
-    try {
-      const item = await api(`/skills/${encodeURIComponent(name)}`);
-      currentSkill = name;
-      nameInput.value = item.name;
-      const files = await api(`/skills/${encodeURIComponent(name)}/files`);
-      fileList.replaceChildren();
-      for (const f of files.items) {
-        const b = el('button', { className: 'chip' + (f.path === 'SKILL.md' ? ' primary' : '') }, [f.path]);
-        b.addEventListener('click', () => loadFile(f.path));
-        fileList.append(b);
-      }
-      await loadFile('SKILL.md');
-    } catch (err) { toast(err.message, true); }
-  }
 
   async function changeStatus(name, status) {
     try {
-      await api(`/skills/${encodeURIComponent(name)}/status`, {
-        method: 'PUT',
-        body: JSON.stringify({ status }),
-      });
+      await api(`/skills/${encodeURIComponent(name)}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
       toast(status === 'disabled' ? '已停用' : status === 'archived' ? '已归档' : '已启用');
-      await renderSkills();
+      location.reload();
     } catch (err) { toast(err.message, true); }
   }
 
@@ -301,72 +281,38 @@ async function renderSkills() {
     try {
       await api(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
       toast('已删除');
-      await renderSkills();
+      location.reload();
     } catch (err) { toast(err.message, true); }
   }
 
-  const rows = data.items.map((s) => {
+  const rows = data.items.map((sk) => {
+    const name = el('div', {}, [
+      el('div', { className: 'strong' }, [sk.name]),
+      el('div', { className: 'muted small' }, [sk.description || '—']),
+    ]);
+    name.dataset.name = sk.name;
     const actions = el('div', { className: 'row-actions', style: 'display:flex;gap:10px;white-space:nowrap' });
     const edit = el('button', { className: 'link' }, ['编辑']);
-    edit.addEventListener('click', (e) => { e.stopPropagation(); select(s.name); });
+    edit.addEventListener('click', (e) => { e.stopPropagation(); location.hash = `#/skills/${encodeURIComponent(sk.name)}`; });
     actions.append(edit);
-    if (s.status === 'active') {
+    if (sk.status === 'active') {
       const dis = el('button', { className: 'link' }, ['停用']);
-      dis.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(s.name, 'disabled'); });
-      actions.append(dis);
+      dis.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(sk.name, 'disabled'); });
       const arc = el('button', { className: 'link' }, ['归档']);
-      arc.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(s.name, 'archived'); });
-      actions.append(arc);
+      arc.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(sk.name, 'archived'); });
+      actions.append(dis, arc);
     } else {
       const en = el('button', { className: 'link' }, ['启用']);
-      en.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(s.name, 'active'); });
+      en.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(sk.name, 'active'); });
       actions.append(en);
     }
     const del = el('button', { className: 'link danger' }, ['删除']);
-    del.addEventListener('click', (e) => { e.stopPropagation(); remove(s.name); });
+    del.addEventListener('click', (e) => { e.stopPropagation(); remove(sk.name); });
     actions.append(del);
-
-    return [
-      el('div', {}, [el('div', { className: 'strong' }, [s.name]), el('div', { className: 'muted small' }, [s.description || '—'])]),
-      skillStatusBadge(s.status),
-      `${s.files} / ${formatBytes(s.bytes)}`,
-      s.executable ? '是' : '否',
-      s.references || 0,
-      s.updated_at || '—',
-      actions,
-    ];
-  });
-
-  if (rows.length) {
-    list.append(table(['名称', '状态', '文件/大小', '可执行', '引用 Profile', '更新时间', '操作'], rows));
-  } else {
-    list.append(empty('🧩', '还没有技能。下面填名称和内容保存即可。'));
-  }
-
-  const save = el('button', {}, ['保存']);
-  save.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) return toast('先填技能名', true);
-    try {
-      if (!currentSkill || currentSkill !== name) {
-        await api(`/skills/${encodeURIComponent(name)}`, {
-          method: 'PUT',
-          body: JSON.stringify({ content: textarea.value }),
-        });
-      } else {
-        await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(currentFile)}`, {
-          method: 'PUT',
-          body: JSON.stringify({ content: textarea.value }),
-        });
-      }
-      toast('已保存，下次运行生效');
-      await renderSkills();
-    } catch (err) { toast(err.message, true); }
+    return [name, skillStatusBadge(sk.status), `${sk.files} / ${formatBytes(sk.bytes)}`, sk.executable ? '是' : '否', sk.references || 0, sk.updated_at || '—', actions];
   });
 
   const importInput = el('input', { type: 'file', accept: '.zip', style: 'display:none' });
-  const importBtn = el('button', { className: 'ghost' }, ['导入 ZIP']);
-  importBtn.addEventListener('click', () => importInput.click());
   importInput.addEventListener('change', async () => {
     const file = importInput.files[0];
     if (!file) return;
@@ -374,86 +320,145 @@ async function renderSkills() {
     form.append('file', file);
     try {
       const res = await fetch('/admin/api/v1/skills/import?overwrite=1', {
-        method: 'POST',
-        body: form,
-        headers: { 'X-Requested-With': 'agenthub' },
+        method: 'POST', body: form, headers: { 'X-Requested-With': 'agenthub' },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '导入失败');
-      toast(`已导入：${data.imported.join(', ')}`);
-      await renderSkills();
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || '导入失败');
+      toast(`已导入：${body.imported.join(', ')}`);
+      location.reload();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const importBtn = el('button', { className: 'ghost' }, ['导入 ZIP']);
+  importBtn.addEventListener('click', () => importInput.click());
+
+  list.append(rows.length
+    ? table(['名称', '状态', '文件/大小', '可执行', '引用 Profile', '更新时间', '操作'], rows)
+    : empty('🧩', '还没有技能。可以导入 ZIP，或在详情页新建。'));
+
+  content.replaceChildren(
+    el('h2', {}, ['Skill']),
+    el('p', { className: 'lede' }, ['技能包按目录管理；点「编辑」进入独立编辑页。']),
+    el('div', { className: 'actions' }, [importBtn, importInput]),
+    list,
+    pager(data.total, page, size, '#/skills'),
+  );
+}
+
+async function renderSkillDetail(name) {
+  const skill = await api(`/skills/${encodeURIComponent(name)}`);
+  const files = await api(`/skills/${encodeURIComponent(name)}/files`);
+  const textarea = el('textarea', { rows: '18' });
+  const fileList = el('div', { className: 'file-list' });
+  const currentLabel = el('div', { className: 'muted small' }, ['当前文件：SKILL.md']);
+  let currentFile = 'SKILL.md';
+
+  async function loadFile(path) {
+    try {
+      const f = await api(`/skills/${encodeURIComponent(name)}/files/${encodeURI(path)}`);
+      currentFile = path;
+      textarea.value = f.content;
+      currentLabel.textContent = `当前文件：${path}`;
+    } catch (err) { toast(err.message, true); }
+  }
+
+  for (const f of files.items) {
+    const chip = el('button', { className: 'chip' }, [f.path]);
+    chip.addEventListener('click', () => loadFile(f.path));
+    fileList.append(chip);
+  }
+  await loadFile('SKILL.md');
+
+  const save = el('button', {}, ['保存文件']);
+  save.addEventListener('click', async () => {
+    try {
+      await api(`/skills/${encodeURIComponent(name)}/files/${encodeURI(currentFile)}`, {
+        method: 'PUT', body: JSON.stringify({ content: textarea.value }),
+      });
+      toast('已保存，下一次运行生效');
     } catch (err) { toast(err.message, true); }
   });
 
   const newFile = el('button', { className: 'ghost' }, ['新建文件']);
   newFile.addEventListener('click', async () => {
-    if (!currentSkill) return toast('先选择一个技能', true);
     const path = prompt('相对路径，例如 references/notes.md');
     if (!path) return;
     try {
-      await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(path)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content: '' }),
-      });
-      await select(currentSkill);
+      await api(`/skills/${encodeURIComponent(name)}/files/${encodeURI(path)}`, { method: 'PUT', body: JSON.stringify({ content: '' }) });
+      location.reload();
     } catch (err) { toast(err.message, true); }
   });
 
   const delFile = el('button', { className: 'danger' }, ['删除当前文件']);
   delFile.addEventListener('click', async () => {
-    if (!currentSkill || currentFile === 'SKILL.md') return toast('SKILL.md 不能单独删除', true);
+    if (currentFile === 'SKILL.md') return toast('SKILL.md 不能单独删除', true);
     if (!confirm(`删除 ${currentFile}？`)) return;
     try {
-      await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(currentFile)}`, { method: 'DELETE' });
-      await select(currentSkill);
+      await api(`/skills/${encodeURIComponent(name)}/files/${encodeURI(currentFile)}`, { method: 'DELETE' });
+      location.reload();
     } catch (err) { toast(err.message, true); }
   });
 
+  const back = el('a', { href: '#/skills', className: 'muted' }, ['← 返回技能列表']);
+
   content.replaceChildren(
-    el('h2', {}, ['Skill']),
-    el('p', { className: 'lede' }, ['技能存于 data/skills/：可关联的会注入提示词，停用/归档的保留文件但不参与运行。']),
-    list,
-    el('h3', {}, ['编辑']),
-    el('div', { className: 'form' }, [
-      el('label', {}, ['名称', nameInput]),
-      el('div', { className: 'file-bar' }, [fileLabel, el('div', { className: 'actions' }, [importBtn, importInput, newFile, delFile])]),
-      fileList,
-      el('label', {}, ['内容', textarea]),
-      el('div', { className: 'actions' }, [save]),
-    ]),
+    el('h2', {}, [skill.name]),
+    el('p', { className: 'lede' }, [skill.description || '—']),
+    el('div', { className: 'actions' }, [back]),
+    el('div', { className: 'file-bar' }, [currentLabel, el('div', { className: 'actions' }, [newFile, delFile])]),
+    fileList,
+    el('label', {}, ['内容', textarea]),
+    el('div', { className: 'actions' }, [save]),
   );
 }
 
-async function renderMCPs() {
-  const data = await api('/mcps');
-  const nameInput = el('input', { placeholder: '名称' });
+async function renderMCPs(page = 1) {
+  const size = 20;
+  const data = await api(`/mcps?page=${page}&size=${size}`);
+  const rows = data.items.map((m) => {
+    const name = el('div', { className: 'strong' }, [m.name]);
+    name.dataset.name = m.name;
+    return [name, m.transport, m.command || m.url || '', m.enabled ? badge('启用', 'ok') : badge('停用')];
+  });
+  const create = el('button', {}, ['新建 MCP']);
+  create.addEventListener('click', () => { location.hash = '#/mcps/new'; });
+
+  content.replaceChildren(
+    el('h2', {}, ['MCP']),
+    el('p', { className: 'lede' }, ['配置保存在 data/mcp.yaml；点「编辑」进入独立编辑页。']),
+    el('div', { className: 'actions' }, [create]),
+    rows.length
+      ? table(['名称', '传输', '目标', '状态'], rows, (row) => {
+        location.hash = `#/mcps/${encodeURIComponent(row[0].dataset.name)}`;
+      })
+      : empty('🔌', '还没有 MCP 配置。'),
+    pager(data.total, page, size, '#/mcps'),
+  );
+}
+
+async function renderMCPDetail(name) {
+  const data = await api('/mcps?size=100');
+  const existing = name === 'new' ? null : data.items.find((m) => m.name === name);
+  if (name !== 'new' && !existing) {
+    content.replaceChildren(empty('🔌', 'MCP 不存在'), el('a', { href: '#/mcps', className: 'muted' }, ['← 返回列表']));
+    return;
+  }
+
+  const nameInput = el('input', { placeholder: '名称', value: existing ? existing.name : '', disabled: !!existing });
   const transport = el('select');
   transport.append(el('option', { value: 'stdio' }, ['stdio']), el('option', { value: 'http' }, ['http']));
-  const command = el('input', { placeholder: 'stdio 命令，例如 npx' });
-  const args = el('input', { placeholder: '参数，空格分隔' });
-  const url = el('input', { placeholder: 'http 地址' });
-  const enabled = el('input', { type: 'checkbox', checked: true });
-
-  const list = data.items.length
-    ? table(['名称', '传输', '目标', '状态'], data.items.map((m) => [
-      m.name, m.transport, m.command || m.url || '', m.enabled ? badge('启用', 'ok') : badge('停用'),
-    ]), async (row) => {
-      const item = data.items.find((m) => m.name === row[0]);
-      nameInput.value = item.name;
-      transport.value = item.transport;
-      command.value = item.command || '';
-      args.value = (item.args || []).join(' ');
-      url.value = item.url || '';
-      enabled.checked = item.enabled;
-    })
-    : empty('🔌', '还没有 MCP 配置。');
+  transport.value = existing ? existing.transport : 'stdio';
+  const command = el('input', { placeholder: 'stdio 命令，例如 npx', value: existing?.command || '' });
+  const args = el('input', { placeholder: '参数，空格分隔', value: (existing?.args || []).join(' ') });
+  const url = el('input', { placeholder: 'http 地址', value: existing?.url || '' });
+  const enabled = el('input', { type: 'checkbox', checked: existing ? existing.enabled : true });
 
   const save = el('button', {}, ['保存']);
   save.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) return toast('先填名称', true);
+    const key = existing ? existing.name : nameInput.value.trim();
+    if (!key) return toast('先填名称', true);
     try {
-      await api(`/mcps/${encodeURIComponent(name)}`, {
+      await api(`/mcps/${encodeURIComponent(key)}`, {
         method: 'PUT',
         body: JSON.stringify({
           transport: transport.value,
@@ -464,26 +469,23 @@ async function renderMCPs() {
         }),
       });
       toast('已保存');
-      await renderMCPs();
+      location.hash = '#/mcps';
     } catch (err) { toast(err.message, true); }
   });
 
   const del = el('button', { className: 'danger' }, ['删除']);
   del.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name || !confirm(`删除 MCP ${name}？`)) return;
+    if (!existing || !confirm(`删除 MCP ${existing.name}？`)) return;
     try {
-      await api(`/mcps/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      await api(`/mcps/${encodeURIComponent(existing.name)}`, { method: 'DELETE' });
       toast('已删除');
-      await renderMCPs();
+      location.hash = '#/mcps';
     } catch (err) { toast(err.message, true); }
   });
 
   content.replaceChildren(
-    el('h2', {}, ['MCP']),
-    el('p', { className: 'lede' }, ['配置保存在 data/mcp.yaml。当前仅保存配置，运行时接入在下一阶段。']),
-    list,
-    el('h3', {}, ['编辑']),
+    el('h2', {}, [existing ? `MCP · ${existing.name}` : '新建 MCP']),
+    el('a', { href: '#/mcps', className: 'muted' }, ['← 返回 MCP 列表']),
     el('div', { className: 'form' }, [
       el('label', {}, ['名称', nameInput]),
       el('label', {}, ['传输方式', transport]),
@@ -491,13 +493,14 @@ async function renderMCPs() {
       el('label', {}, ['参数', args]),
       el('label', {}, ['地址', url]),
       el('label', {}, ['启用', enabled]),
-      el('div', { className: 'actions' }, [save, del]),
+      el('div', { className: 'actions' }, existing ? [save, del] : [save]),
     ]),
   );
 }
 
-async function renderHistory() {
-  const data = await api('/history');
+async function renderHistory(page = 1) {
+  const size = 20;
+  const data = await api(`/history?page=${page}&size=${size}`);
   if (!data.items.length) {
     content.replaceChildren(el('h2', {}, ['历史会话']), empty('🗂️', '还没有历史记录。'));
     return;
@@ -512,6 +515,7 @@ async function renderHistory() {
     table(['会话', '代', '消息数', '最近活跃'], rows, (row) => {
       location.hash = `#/history/${encodeURIComponent(row[0])}/${row[1]}`;
     }),
+    pager(data.total, page, size, '#/history'),
   );
 }
 

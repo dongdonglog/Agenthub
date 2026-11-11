@@ -53,6 +53,12 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 	}
 
+	if identities, err := e.journal.LoadIdentities(ctx, 5000); err == nil {
+		for conv, pair := range identities {
+			e.identities[conv] = Identity{ChatName: pair[0], UserName: pair[1]}
+		}
+	}
+
 	// 启动补偿：上次未送达的结果继续投递。
 	if pending, err := e.journal.LoadPendingDeliveries(ctx, 100); err == nil {
 		for _, d := range pending {

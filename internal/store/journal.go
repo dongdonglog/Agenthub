@@ -129,6 +129,38 @@ func defaultRole(role string) string {
 	return role
 }
 
+// SaveIdentity 记录会话的群名与用户名。
+func (j *Journal) SaveIdentity(ctx context.Context, conv, chatName, userName string) error {
+	_, err := j.pool.Exec(ctx, `
+		INSERT INTO conversation_state (conversation_id, generation, chat_name, user_name)
+		VALUES ($1, 1, $2, $3)
+		ON CONFLICT (conversation_id) DO UPDATE SET
+			chat_name = EXCLUDED.chat_name,
+			user_name = EXCLUDED.user_name`,
+		conv, chatName, userName)
+	return err
+}
+
+// LoadIdentities 读取会话展示名。
+func (j *Journal) LoadIdentities(ctx context.Context, limit int) (map[string][2]string, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT conversation_id, chat_name, user_name FROM conversation_state
+		WHERE chat_name <> '' OR user_name <> '' LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][2]string)
+	for rows.Next() {
+		var conv, chat, user string
+		if err := rows.Scan(&conv, &chat, &user); err != nil {
+			return nil, err
+		}
+		out[conv] = [2]string{chat, user}
+	}
+	return out, rows.Err()
+}
+
 // SaveProfileBinding 记录会话代绑定的配置档案。
 func (j *Journal) SaveProfileBinding(ctx context.Context, conv string, generation int, p core.ProfileSelection) error {
 	skills, _ := json.Marshal(p.Skills)

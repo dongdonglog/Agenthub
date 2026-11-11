@@ -45,6 +45,7 @@ type Engine struct {
 	generations map[string]int
 	profiles    map[string]ProfileSelection
 	profileSrc  func() ProfileSelection
+	identities  map[string]Identity
 	events      map[string][]RunEvent
 	// retryDelay 计算投递重试间隔，默认指数退避。
 	retryDelay func(attempt int) time.Duration
@@ -82,6 +83,7 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		deliveries:         make(map[string]*Delivery),
 		generations:        make(map[string]int),
 		profiles:           make(map[string]ProfileSelection),
+		identities:         make(map[string]Identity),
 		events:             make(map[string][]RunEvent),
 		maxMessagesPerConv: 100,
 		maxConversations:   200,

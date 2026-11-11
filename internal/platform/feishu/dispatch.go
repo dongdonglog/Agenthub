@@ -37,6 +37,8 @@ type Options struct {
 	Client *Client
 	// AttachmentsDir 是附件落盘根目录。
 	AttachmentsDir string
+	// OnAccepted 在消息受理成功后异步回调，用于补齐会话展示名。
+	OnAccepted func(ctx context.Context, in channel.Inbound)
 }
 
 // Dispatcher 把飞书事件转换成标准消息并交给核心。
@@ -127,6 +129,9 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 		return err
 	}
 	if inserted {
+		if d.opts.OnAccepted != nil {
+			go d.opts.OnAccepted(context.Background(), msg)
+		}
 		d.log.Info("feishu message accepted",
 			"message", msg.ExternalID, "chat", msg.Chat.ID, "kind", msg.Chat.Kind,
 			"sender", msg.Sender.OpenID, "type", msg.MsgType, "chars", len(msg.Text))

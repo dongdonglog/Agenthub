@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 )
@@ -125,3 +126,64 @@ func (e *Engine) Reset(conv string) bool {
 }
 
 // Messages 返回某个会话的消息快照（按创建时间排序）。
+
+// SetIdentity 更新会话展示信息（飞书群名/用户名）。
+func (e *Engine) SetIdentity(conv, chatName, userName string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.identities[conv] = Identity{ChatName: chatName, UserName: userName}
+}
+
+// SessionInfos 返回带展示名的会话列表。
+func (e *Engine) SessionInfos() []SessionInfo {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	out := make([]SessionInfo, 0, len(e.identities)+len(e.order))
+	seen := make(map[string]bool, len(e.order))
+	counts := make(map[string]int)
+	latestByConv := make(map[string]time.Time)
+	for _, m := range e.messages {
+		counts[m.ConversationID]++
+		if m.CreatedAt.After(latestByConv[m.ConversationID]) {
+			latestByConv[m.ConversationID] = m.CreatedAt
+		}
+	}
+	for conv := range counts {
+		seen[conv] = true
+		info := SessionInfo{ID: conv, Messages: counts[conv]}
+		if ident, ok := e.identities[conv]; ok {
+			info.ChatName = ident.ChatName
+			info.UserName = ident.UserName
+		}
+		info.DisplayName = displayName(info)
+		latest := latestByConv[conv]
+		if !latest.IsZero() {
+			info.LastActive = latest.Format("2006-01-02 15:04")
+		}
+		out = append(out, info)
+	}
+	for conv, ident := range e.identities {
+		if seen[conv] {
+			continue
+		}
+		info := SessionInfo{ID: conv, ChatName: ident.ChatName, UserName: ident.UserName}
+		info.DisplayName = displayName(info)
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastActive > out[j].LastActive })
+	return out
+}
+
+func displayName(info SessionInfo) string {
+	switch {
+	case info.ChatName != "" && info.UserName != "":
+		return info.ChatName + " · " + info.UserName
+	case info.ChatName != "":
+		return info.ChatName
+	case info.UserName != "":
+		return info.UserName
+	default:
+		return info.ID
+	}
+}

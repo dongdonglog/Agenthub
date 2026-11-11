@@ -312,7 +312,9 @@ func (s *Server) handleHistory(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	page, size := pageParams(r, 20)
+	pageItems, total := slicePage(items, page, size)
+	writeJSON(rw, http.StatusOK, map[string]any{"items": pageItems, "total": total, "page": page, "size": size})
 }
 
 func (s *Server) handleHistoryDetail(rw http.ResponseWriter, r *http.Request) {
@@ -331,7 +333,9 @@ func (s *Server) handleHistoryDetail(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	page, size := pageParams(r, 20)
+	pageItems, total := slicePage(items, page, size)
+	writeJSON(rw, http.StatusOK, map[string]any{"items": pageItems, "total": total, "page": page, "size": size})
 }
 
 func (s *Server) handleAudits(rw http.ResponseWriter, r *http.Request) {
@@ -344,7 +348,9 @@ func (s *Server) handleAudits(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	page, size := pageParams(r, 20)
+	pageItems, total := slicePage(items, page, size)
+	writeJSON(rw, http.StatusOK, map[string]any{"items": pageItems, "total": total, "page": page, "size": size})
 }
 
 func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
@@ -380,9 +386,41 @@ func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleSessions(rw http.ResponseWriter, _ *http.Request) {
-	convs := s.engine.Conversations()
-	writeJSON(rw, http.StatusOK, map[string]any{"items": convs, "total": len(convs)})
+func (s *Server) handleSessions(rw http.ResponseWriter, r *http.Request) {
+	infos := s.engine.SessionInfos()
+	page, size := pageParams(r, 20)
+	items, total := slicePage(infos, page, size)
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": total, "page": page, "size": size})
+}
+
+// pageParams 解析 page/size，限制 size 上限。
+func pageParams(r *http.Request, defSize int) (int, int) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+	if size <= 0 {
+		size = defSize
+	}
+	if size > 100 {
+		size = 100
+	}
+	return page, size
+}
+
+// slicePage 返回当前页与总数。
+func slicePage[T any](items []T, page, size int) ([]T, int) {
+	total := len(items)
+	start := (page - 1) * size
+	if start >= total {
+		return []T{}, total
+	}
+	end := start + size
+	if end > total {
+		end = total
+	}
+	return items[start:end], total
 }
 
 func (s *Server) handleSession(rw http.ResponseWriter, r *http.Request) {
@@ -483,7 +521,9 @@ func (s *Server) handleSkills(rw http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	page, size := pageParams(r, 20)
+	pageItems, total := slicePage(items, page, size)
+	writeJSON(rw, http.StatusOK, map[string]any{"items": pageItems, "total": total, "page": page, "size": size})
 }
 
 func (s *Server) handleSkill(rw http.ResponseWriter, r *http.Request) {
@@ -628,7 +668,9 @@ func (s *Server) handleMCPs(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	page, size := pageParams(r, 20)
+	pageItems, total := slicePage(items, page, size)
+	writeJSON(rw, http.StatusOK, map[string]any{"items": pageItems, "total": total, "page": page, "size": size})
 }
 
 func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {

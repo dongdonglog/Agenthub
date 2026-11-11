@@ -352,3 +352,33 @@ func splitText(text string, limit int) []string {
 	}
 	return chunks
 }
+
+// ChatInfo 返回群名称与类型。
+func (c *Client) ChatInfo(ctx context.Context, chatID string) (string, string, error) {
+	var out struct {
+		Data struct {
+			Name     string `json:"name"`
+			ChatType string `json:"chat_type"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/open-apis/im/v1/chats/"+chatID, nil, &out); err != nil {
+		return "", "", err
+	}
+	return out.Data.Name, out.Data.ChatType, nil
+}
+
+// UserName 返回用户姓名（需要通讯录权限；无权限时返回错误）。
+func (c *Client) UserName(ctx context.Context, openID string) (string, error) {
+	var out struct {
+		Data struct {
+			User struct {
+				Name string `json:"name"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	path := "/open-apis/contact/v3/users/" + openID + "?user_id_type=open_id"
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return "", err
+	}
+	return out.Data.User.Name, nil
+}
