@@ -53,6 +53,30 @@ AGENTHUB_AGENT_MODEL=deepseek-v3-250324
 
 不填 `AGENTHUB_AGENT_API_KEY` 时使用回显执行器（收到什么回什么），方便先验证链路。
 
+## 技能与 MCP
+
+技能目录支持两种布局，`SKILL.md` 的 YAML frontmatter 优先：
+
+```text
+data/skills/
+  tiangong-troubleshoot/
+    SKILL.md          # --- name / description --- 正文
+  incident-report.md  # 兼容扁平格式
+```
+
+MCP 走 stdio，启动时拉起进程并 `initialize` + `tools/list`，工具以 `mcp_<server>_<tool>` 暴露给模型：
+
+```yaml
+# data/mcp.yaml
+- name: demo
+  transport: stdio
+  command: python3
+  args: ["examples/mcp/time_server.py"]
+  enabled: true
+```
+
+工具调用过程会写日志 `tool call`，失败返回「工具执行失败」给模型自行处理。
+
 ## 本地模拟（不需要真实飞书应用）
 
 `go test ./...` 覆盖了完整链路，不访问外网：

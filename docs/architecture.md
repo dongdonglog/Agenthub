@@ -106,7 +106,7 @@ queued ──▶ running ──▶ completed
 | `run` | 执行状态 | **部分唯一索引**保证同会话单活动 Run |
 | `run_input` | 批次绑定 | `(run, position)` 唯一，只插不改 |
 | `run_event` | 追加写事件 | 不可变 |
-| `tool_call` | 工具调用审计 | 记录参数摘要与耗时 |
+| `tool_call` | 工具调用审计 | 记录参数摘要与耗时（内存阶段先写日志） |
 | `delivery` | 投递箱 | `idempotency_key` 唯一 |
 | `reaction_projection` | 表情投影 | 期望态/已应用态 |
 | `usage_record` | token 与成本 | 按 run 聚合 |

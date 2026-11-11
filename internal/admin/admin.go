@@ -27,6 +27,8 @@ type Options struct {
 	FeishuStatus func() string
 	// Agent 用于管理台的在线试跑。
 	Agent agent.Agent
+	// Tools 是当前可用工具，用于概览展示。
+	Tools []agent.Tool
 }
 
 // Server 提供管理页面与管理 API。
@@ -161,6 +163,7 @@ func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 			"runs":          len(runs),
 			"skills":        len(skills),
 			"mcps":          len(mcps),
+			"tools":         len(s.opts.Tools),
 		},
 	})
 }

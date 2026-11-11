@@ -8,10 +8,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// Tool 是可被模型调用的工具。
+type Tool interface {
+	// Name 是工具名，必须匹配 ^[a-zA-Z0-9_-]+$。
+	Name() string
+	// Description 告诉模型何时使用。
+	Description() string
+	// Schema 是 JSON Schema 形式的参数定义。
+	Schema() map[string]any
+	// Call 执行工具并返回文本结果。
+	Call(ctx context.Context, args json.RawMessage) (string, error)
+}
 
 // Chat 是 OpenAI 兼容的对话执行器（OpenAI / Ark / DeepSeek / 自建网关均可）。
 type Chat struct {
@@ -25,67 +38,160 @@ type Chat struct {
 	SystemPrompt string
 	// SkillsDir 是技能目录；每次运行读取，改动无需重启。
 	SkillsDir string
-	// HTTP 客户端，默认 120 秒超时。
+	// Tools 是可用工具集合。
+	Tools []Tool
+	// MaxToolRounds 限制工具调用轮数，默认 6。
+	MaxToolRounds int
+	// Logger 记录工具调用，可为空。
+	Logger *slog.Logger
+	// HTTP 客户端，默认 180 秒超时。
 	HTTP *http.Client
 }
 
-// Run 调用 chat/completions 并返回首条回复。
+// Run 调用 chat/completions，并在需要时执行工具后继续对话。
 func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	if c.APIKey == "" {
 		return Output{}, errors.New("未配置模型 API Key")
 	}
-	messages := make([]chatMessage, 0, len(in.Messages)+1)
-	messages = append(messages, chatMessage{Role: "system", Content: c.systemPrompt()})
+	messages := make([]map[string]any, 0, len(in.Messages)+1)
+	messages = append(messages, map[string]any{"role": "system", "content": c.systemPrompt()})
 	for _, m := range in.Messages {
-		messages = append(messages, chatMessage{Role: "user", Content: renderMessage(m)})
+		messages = append(messages, map[string]any{"role": "user", "content": renderMessage(m)})
 	}
 
+	rounds := c.MaxToolRounds
+	if rounds <= 0 {
+		rounds = 6
+	}
+	var last string
+	for round := 0; round < rounds; round++ {
+		msg, err := c.complete(ctx, messages)
+		if err != nil {
+			return Output{}, err
+		}
+		last = msg.Content
+		if len(msg.ToolCalls) == 0 {
+			if msg.Content == "" {
+				return Output{}, errors.New("模型未返回内容")
+			}
+			return Output{Text: msg.Content}, nil
+		}
+
+		messages = append(messages, map[string]any{
+			"role":       "assistant",
+			"content":    msg.Content,
+			"tool_calls": msg.ToolCalls,
+		})
+		for _, call := range msg.ToolCalls {
+			result := c.executeTool(ctx, call)
+			messages = append(messages, map[string]any{
+				"role":         "tool",
+				"tool_call_id": call.ID,
+				"content":      result,
+			})
+		}
+	}
+	if last == "" {
+		return Output{}, errors.New("工具调用轮数超限")
+	}
+	return Output{Text: last}, nil
+}
+
+type toolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type assistantMessage struct {
+	Content   string     `json:"content"`
+	ToolCalls []toolCall `json:"tool_calls"`
+}
+
+func (c *Chat) complete(ctx context.Context, messages []map[string]any) (assistantMessage, error) {
 	payload := map[string]any{
 		"model":       c.Model,
 		"messages":    messages,
 		"temperature": 0.3,
 	}
+	if len(c.Tools) > 0 {
+		specs := make([]map[string]any, 0, len(c.Tools))
+		for _, t := range c.Tools {
+			specs = append(specs, map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name":        t.Name(),
+					"description": t.Description(),
+					"parameters":  t.Schema(),
+				},
+			})
+		}
+		payload["tools"] = specs
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return Output{}, err
+		return assistantMessage{}, err
 	}
 
 	url := strings.TrimRight(c.BaseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
-		return Output{}, err
+		return assistantMessage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
+		client = &http.Client{Timeout: 180 * time.Second}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Output{}, fmt.Errorf("模型请求失败: %w", err)
+		return assistantMessage{}, fmt.Errorf("模型请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode != http.StatusOK {
-		return Output{}, fmt.Errorf("模型返回 %d: %s", resp.StatusCode, truncate(string(body), 300))
+		return assistantMessage{}, fmt.Errorf("模型返回 %d: %s", resp.StatusCode, truncate(string(body), 300))
 	}
 
 	var out struct {
 		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
+			Message assistantMessage `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return Output{}, fmt.Errorf("解析模型响应失败: %w", err)
+		return assistantMessage{}, fmt.Errorf("解析模型响应失败: %w", err)
 	}
-	if len(out.Choices) == 0 || out.Choices[0].Message.Content == "" {
-		return Output{}, errors.New("模型未返回内容")
+	if len(out.Choices) == 0 {
+		return assistantMessage{}, errors.New("模型未返回 choices")
 	}
-	return Output{Text: out.Choices[0].Message.Content}, nil
+	return out.Choices[0].Message, nil
+}
+
+func (c *Chat) executeTool(ctx context.Context, call toolCall) string {
+	for _, t := range c.Tools {
+		if t.Name() != call.Function.Name {
+			continue
+		}
+		args := json.RawMessage(call.Function.Arguments)
+		if len(args) == 0 || !json.Valid(args) {
+			args = json.RawMessage(`{}`)
+		}
+		start := time.Now()
+		out, err := t.Call(ctx, args)
+		if c.Logger != nil {
+			c.Logger.Info("tool call", "tool", t.Name(), "duration_ms", time.Since(start).Milliseconds(), "error", err != nil)
+		}
+		if err != nil {
+			return "工具执行失败：" + err.Error()
+		}
+		return out
+	}
+	return "未知工具：" + call.Function.Name
 }
 
 func (c *Chat) systemPrompt() string {
@@ -121,11 +227,6 @@ func renderMessage(m Message) string {
 		fmt.Fprintf(&b, "\n[附件：%s（%s）]", a.Name, a.Kind)
 	}
 	return b.String()
-}
-
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
 }
 
 func truncate(s string, n int) string {

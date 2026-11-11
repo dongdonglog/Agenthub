@@ -40,7 +40,10 @@ gantt
 **已完成（长连接）**：`FEISHU_TRANSPORT=websocket` 为默认；SDK 握手/心跳/自动重连，
 服务侧指数退避，`/healthz` 暴露连接状态；已用真实飞书端点验证鉴权与重试路径。
 
-**进行中**：附件流式下载、真实模型接入。
+**已完成（模型与工具）**：OpenAI 兼容执行器（已接公司内部网关）、SKILL.md 技能注入、
+MCP stdio 客户端与 tool calling 循环（`mcp_<server>_<tool>`）。
+
+**进行中**：附件流式下载、PostgreSQL 持久化。
 
 **任务**
 1. 引入 `larksuite/oapi-sdk-go/v3`，长连接接入与重连；

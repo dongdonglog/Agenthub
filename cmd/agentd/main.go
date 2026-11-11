@@ -17,6 +17,7 @@ import (
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/httpapi"
+	"github.com/moying/agenthub/internal/mcp"
 	"github.com/moying/agenthub/internal/obs"
 	"github.com/moying/agenthub/internal/platform/feishu"
 	"github.com/moying/agenthub/internal/store"
@@ -75,7 +76,13 @@ func run() int {
 		ch = feishu.NewChannel(client)
 	}
 
-	runner := newAgent(cfg, skillsDir, logger)
+	mcpManager := mcp.StartAll(ctx, filepath.Join(cfg.Storage.Dir, "mcp.yaml"), logger)
+	defer mcpManager.Close()
+	if summary := mcpManager.Summary(); summary != "" {
+		logger.Info("mcp loaded", "summary", summary)
+	}
+
+	runner := newAgent(cfg, skillsDir, mcpManager.Tools(), logger)
 	engine := core.New(runner, ch, logger)
 	metrics := obs.NewMetrics()
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
@@ -93,6 +100,7 @@ func run() int {
 		Version:      version.Version,
 		FeishuStatus: feishuStatus,
 		Agent:        runner,
+		Tools:        mcpManager.Tools(),
 	}, logger)
 
 	go func() {
@@ -122,7 +130,7 @@ func run() int {
 	return 0
 }
 
-func newAgent(cfg *config.Config, skillsDir string, logger *slog.Logger) agent.Agent {
+func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, logger *slog.Logger) agent.Agent {
 	if cfg.Agent.APIKey == "" {
 		logger.Warn("model api key not configured; falling back to echo agent")
 		return agent.Echo{}
@@ -134,6 +142,8 @@ func newAgent(cfg *config.Config, skillsDir string, logger *slog.Logger) agent.A
 		Model:        cfg.Agent.Model,
 		SystemPrompt: cfg.Agent.SystemPrompt,
 		SkillsDir:    skillsDir,
+		Tools:        tools,
+		Logger:       logger,
 	}
 }
 

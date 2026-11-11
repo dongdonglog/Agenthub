@@ -127,6 +127,7 @@ async function renderOverview(data) {
       card('运行', data.counts.runs),
       card('技能', data.counts.skills),
       card('MCP', data.counts.mcps),
+      card('工具', data.counts.tools),
     ]),
     el('div', { className: 'panel' }, [
       el('div', { className: 'head' }, [el('b', {}, ['模型'])]),
