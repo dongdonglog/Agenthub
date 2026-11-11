@@ -171,8 +171,10 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 	if resp.StatusCode != http.StatusOK {
 		return &APIError{StatusCode: resp.StatusCode, Msg: string(data)}
 	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("解析飞书响应失败: %w", err)
+	if out != nil {
+		if err := json.Unmarshal(data, out); err != nil {
+			return fmt.Errorf("解析飞书响应失败: %w", err)
+		}
 	}
 	var head struct {
 		Code int    `json:"code"`
@@ -182,6 +184,35 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 		return &APIError{StatusCode: resp.StatusCode, Code: head.Code, Msg: head.Msg}
 	}
 	return nil
+}
+
+// CreateCard 发送一张交互卡片，返回消息 ID。
+//
+// @param content 卡片 JSON
+// @param replyTo 非空时以回复形式发送
+func (c *Client) CreateCard(ctx context.Context, chatID, replyTo, content string) (string, error) {
+	body := map[string]any{"msg_type": "interactive", "content": content}
+	path := "/open-apis/im/v1/messages?receive_id_type=chat_id"
+	if replyTo != "" {
+		path = "/open-apis/im/v1/messages/" + url.PathEscape(replyTo) + "/reply"
+	} else {
+		body["receive_id"] = chatID
+	}
+	var out struct {
+		Data struct {
+			MessageID string `json:"message_id"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
+		return "", err
+	}
+	return out.Data.MessageID, nil
+}
+
+// UpdateCard 更新已发送的卡片内容。
+func (c *Client) UpdateCard(ctx context.Context, messageID, content string) error {
+	return c.do(ctx, http.MethodPatch, "/open-apis/im/v1/messages/"+url.PathEscape(messageID),
+		map[string]any{"content": content}, nil)
 }
 
 // Quoted 是被引用消息的摘要。

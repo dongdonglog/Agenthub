@@ -53,6 +53,25 @@ type Delivery struct {
 	Text           string
 	State          string // sent | failed
 	Error          string
+	ExternalID     string
+}
+
+// Presentation 描述一次运行对应的可更新输出。
+type Presentation struct {
+	ConversationID string
+	ChatID         string
+	ReplyTo        string
+	RunID          string
+	Inputs         int
+}
+
+// Presenter 是可更新输出的展示层。
+//
+// @remarks Open 失败时调用方退回纯文本；Close 成功表示结果已由卡片承载。
+type Presenter interface {
+	Open(ctx context.Context, p Presentation) (string, error)
+	Update(ctx context.Context, handle, phase, detail string) error
+	Close(ctx context.Context, handle, body string, failed bool) error
 }
 
 // Journal 是核心状态的持久化接口。
@@ -86,6 +105,7 @@ type Engine struct {
 	seq        map[string]int64
 	runSeq     int64
 	journal    Journal
+	presenter  Presenter
 }
 
 // New 构造执行引擎。
@@ -114,6 +134,11 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		sent:       make(map[string]bool),
 		seq:        make(map[string]int64),
 	}
+}
+
+// SetPresenter 注入可更新输出；为空时只发文本。
+func (e *Engine) SetPresenter(p Presenter) {
+	e.presenter = p
 }
 
 // SetJournal 注入持久化实现；为空表示纯内存运行。
@@ -443,7 +468,37 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		}
 	}
 
-	input := agent.Input{ConversationID: conv}
+	var cardHandle string
+	if e.presenter != nil {
+		handle, err := e.presenter.Open(ctx, Presentation{
+			ConversationID: conv,
+			ChatID:         batch[0].ChatID,
+			ReplyTo:        batch[0].ExternalID,
+			RunID:          run.ID,
+			Inputs:         len(batch),
+		})
+		if err != nil {
+			e.log.Warn("presenter open failed; fallback to text", "error", err, "run", run.ID)
+		} else {
+			cardHandle = handle
+		}
+	}
+
+	lastProgress := time.Time{}
+	progress := func(phase string) {
+		if cardHandle == "" || e.presenter == nil || phase == "" {
+			return
+		}
+		if time.Since(lastProgress) < 800*time.Millisecond {
+			return
+		}
+		lastProgress = time.Now()
+		if err := e.presenter.Update(ctx, cardHandle, phase, ""); err != nil {
+			e.log.Debug("presenter update failed", "error", err)
+		}
+	}
+
+	input := agent.Input{ConversationID: conv, Progress: progress}
 	for _, m := range batch {
 		input.Messages = append(input.Messages, agent.Message{ID: m.ID, Text: m.Text, Attachments: m.Attachments})
 	}
@@ -482,6 +537,15 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	}
 	delete(e.active, conv)
 	delete(e.cancels, conv)
+	cardDone := false
+	if cardHandle != "" && e.presenter != nil {
+		if err := e.presenter.Close(ctx, cardHandle, text, run.State != "completed"); err != nil {
+			e.log.Warn("presenter close failed; fallback to text", "error", err, "run", run.ID)
+		} else {
+			cardDone = true
+		}
+	}
+
 	delivery := &Delivery{
 		RunID:          run.ID,
 		IdempotencyKey: run.ID + ":result",
@@ -489,6 +553,10 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		ReplyTo:        batch[0].ExternalID,
 		Text:           text,
 		State:          "pending",
+	}
+	if cardDone {
+		delivery.State = "sent"
+		delivery.ExternalID = cardHandle
 	}
 	e.deliveries[delivery.IdempotencyKey] = delivery
 	alreadySent := e.sent[delivery.IdempotencyKey]
@@ -506,7 +574,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		}
 	}
 
-	if alreadySent {
+	if alreadySent || cardDone {
 		return nil
 	}
 	e.send(ctx, delivery)

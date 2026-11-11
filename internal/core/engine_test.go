@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -224,5 +225,73 @@ func (a *blockingAgent) Run(ctx context.Context, _ agent.Input) (agent.Output, e
 		return agent.Output{}, ctx.Err()
 	case <-a.release:
 		return agent.Output{Text: "done"}, nil
+	}
+}
+
+type fakePresenter struct {
+	opened   int
+	updated  int
+	closed   int
+	body     string
+	closeErr error
+}
+
+func (f *fakePresenter) Open(context.Context, core.Presentation) (string, error) {
+	f.opened++
+	return "card_1", nil
+}
+
+func (f *fakePresenter) Update(context.Context, string, string, string) error {
+	f.updated++
+	return nil
+}
+
+func (f *fakePresenter) Close(_ context.Context, _ string, body string, _ bool) error {
+	f.closed++
+	f.body = body
+	return f.closeErr
+}
+
+func TestPresenterCarriesResultInsteadOfText(t *testing.T) {
+	ch := &captureChannel{}
+	eng := newEngine(t, ch, agent.Echo{})
+	presenter := &fakePresenter{}
+	eng.SetPresenter(presenter)
+
+	if _, err := eng.Submit(context.Background(), inbound("om_p", "卡片")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if presenter.opened != 1 || presenter.closed != 1 {
+		t.Fatalf("presenter opened=%d closed=%d", presenter.opened, presenter.closed)
+	}
+	if ch.count() != 0 {
+		t.Fatalf("卡片成功后不应再发文本，实际 %d", ch.count())
+	}
+	if !strings.Contains(presenter.body, "卡片") {
+		t.Fatalf("卡片正文 = %q", presenter.body)
+	}
+	d := eng.Deliveries()
+	if len(d) != 1 || d[0].State != "sent" {
+		t.Fatalf("delivery = %+v", d)
+	}
+}
+
+func TestPresenterFailureFallsBackToText(t *testing.T) {
+	ch := &captureChannel{}
+	eng := newEngine(t, ch, agent.Echo{})
+	eng.SetPresenter(&fakePresenter{closeErr: errors.New("card failed")})
+
+	if _, err := eng.Submit(context.Background(), inbound("om_pf", "回退")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ch.count() != 1 {
+		t.Fatalf("卡片失败应回退文本，实际 %d", ch.count())
 	}
 }

@@ -89,6 +89,9 @@ func run() int {
 
 	runner := newAgent(cfg, skillsDir, tools, logger)
 	engine := core.New(runner, ch, logger)
+	if fc, ok := ch.(*feishu.Channel); ok {
+		engine.SetPresenter(feishu.NewCardPresenter(fc.Client(), logger))
+	}
 
 	if db != nil {
 		if err := store.Migrate(ctx, db, migrationsDir()); err != nil {

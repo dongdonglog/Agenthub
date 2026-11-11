@@ -61,6 +61,12 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		messages = append(messages, map[string]any{"role": "user", "content": renderMessage(m)})
 	}
 
+	progress := in.Progress
+	if progress == nil {
+		progress = func(string) {}
+	}
+	progress("正在分析")
+
 	rounds := c.MaxToolRounds
 	if rounds <= 0 {
 		rounds = 6
@@ -85,6 +91,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 			"tool_calls": msg.ToolCalls,
 		})
 		for _, call := range msg.ToolCalls {
+			progress("正在调用工具：" + call.Function.Name)
 			result := c.executeTool(ctx, call)
 			messages = append(messages, map[string]any{
 				"role":         "tool",
@@ -93,6 +100,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 			})
 		}
 	}
+	progress("正在整理结果")
 	if last == "" {
 		return Output{}, errors.New("工具调用轮数超限")
 	}

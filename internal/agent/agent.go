@@ -20,6 +20,8 @@ type Message struct {
 type Input struct {
 	ConversationID string
 	Messages       []Message
+	// Progress 是阶段回调，可为空；实现方不得阻塞。
+	Progress func(phase string)
 }
 
 // Output 是一次运行的产出。
