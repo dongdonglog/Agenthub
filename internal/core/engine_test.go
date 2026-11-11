@@ -133,6 +133,7 @@ func TestFlushIsIdempotentForDelivery(t *testing.T) {
 func TestDeliveryFailureIsRecorded(t *testing.T) {
 	ch := &captureChannel{fail: errors.New("network down")}
 	eng := newEngine(t, ch, agent.Echo{})
+	eng.SetRetryDelay(func(int) time.Duration { return 5 * time.Millisecond })
 	ctx := context.Background()
 
 	if _, err := eng.Submit(ctx, inbound("om_b", "hi")); err != nil {
@@ -141,10 +142,19 @@ func TestDeliveryFailureIsRecorded(t *testing.T) {
 	if err := eng.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	d := eng.Deliveries()
-	if len(d) != 1 || d[0].State != "failed" {
-		t.Fatalf("delivery = %+v", d)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		d := eng.Deliveries()
+		if len(d) == 1 && d[0].State == "failed" {
+			if d[0].Attempts < 2 {
+				t.Fatalf("重试次数不足: %+v", d[0])
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("投递应在重试后进入 failed: %+v", eng.Deliveries())
 }
 
 func TestAgentErrorBecomesFailedRun(t *testing.T) {
@@ -359,5 +369,51 @@ func TestResetStartsNewGeneration(t *testing.T) {
 	}
 	if gen := eng.Generation("tenant_1:oc_chat:ou_user"); gen != 2 {
 		t.Fatalf("generation = %d, want 2", gen)
+	}
+}
+
+type flakyChannel struct {
+	fails int
+	sent  int
+	mu    sync.Mutex
+}
+
+func (c *flakyChannel) SendText(context.Context, channel.Outbound) (channel.Receipt, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fails > 0 {
+		c.fails--
+		return channel.Receipt{}, errors.New("temporary failure")
+	}
+	c.sent++
+	return channel.Receipt{ExternalID: "om_ok"}, nil
+}
+
+func TestDeliveryRetriesThenSucceeds(t *testing.T) {
+	ch := &flakyChannel{fails: 2}
+	eng := newEngine(t, ch, agent.Echo{})
+	eng.SetRetryDelay(func(int) time.Duration { return 10 * time.Millisecond })
+
+	if _, err := eng.Submit(context.Background(), inbound("om_retry", "重试")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ch.mu.Lock()
+		sent := ch.sent
+		ch.mu.Unlock()
+		if sent == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	if ch.sent != 1 {
+		t.Fatalf("重试后应成功投递一次，实际 %d", ch.sent)
 	}
 }

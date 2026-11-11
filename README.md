@@ -96,6 +96,12 @@ AGENTHUB_AGENT_MODEL=deepseek-v3-250324
 - 小于 64KB 的文本类附件（`.log/.txt/.md/.json/.yaml/.csv` 等）直接内联进提示词；
 - 其他附件给出本地路径，模型用内置 `read_file` 工具读取（限制在附件目录内，默认 256KB）。
 
+## 投递可靠性
+
+- 发送失败按指数退避重试（1s → 2s → 4s，封顶 30s），最多 3 次；
+- 每次尝试与状态写入 `delivery_state`，进程重启后对 `pending/retrying` 的记录继续投递；
+- 3 次仍失败标记 `failed` 并写日志，不会无限重试。
+
 ## 持久化
 
 配置 `AGENTHUB_DB_URL` 后，消息、运行与投递写库；启动时自动执行 `migrations/` 下未应用的 SQL，并恢复最近状态（`processing` 的消息会重新排队）。不配置数据库时仍是内存模式。

@@ -2,3 +2,5 @@
 
 ALTER TABLE message_state ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 1;
 ALTER TABLE conversation_state ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 1;
+
+ALTER TABLE delivery_state ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;

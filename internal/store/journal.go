@@ -63,12 +63,13 @@ func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 // SaveDelivery 新建或更新投递记录。
 func (j *Journal) SaveDelivery(ctx context.Context, d *core.Delivery) error {
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, state, error)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, state, error, attempts)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (idempotency_key) DO UPDATE SET
 			state = EXCLUDED.state,
-			error = EXCLUDED.error`,
-		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.State, d.Error)
+			error = EXCLUDED.error,
+			attempts = EXCLUDED.attempts`,
+		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.State, d.Error, d.Attempts)
 	return err
 }
 
@@ -113,6 +114,26 @@ func defaultRole(role string) string {
 		return "user"
 	}
 	return role
+}
+
+// LoadPendingDeliveries 返回未完成投递，用于启动补偿。
+func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT idempotency_key, run_id, chat_id, reply_to, text, state, attempts
+		FROM delivery_state WHERE state IN ('pending','retrying') LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*core.Delivery
+	for rows.Next() {
+		d := &core.Delivery{}
+		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.State, &d.Attempts); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。

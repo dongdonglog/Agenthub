@@ -54,9 +54,10 @@ type Delivery struct {
 	ChatID         string
 	ReplyTo        string
 	Text           string
-	State          string // sent | failed
+	State          string // pending | retrying | sent | failed
 	Error          string
 	ExternalID     string
+	Attempts       int
 }
 
 // Presentation 描述一次运行对应的可更新输出。
@@ -88,6 +89,7 @@ type Journal interface {
 	SaveRun(ctx context.Context, r *Run) error
 	SaveDelivery(ctx context.Context, d *Delivery) error
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
+	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
 }
 
 // Engine 负责把入站消息收敛成批次并驱动执行与投递。
@@ -112,6 +114,8 @@ type Engine struct {
 	journal     Journal
 	presenter   Presenter
 	generations map[string]int
+	// retryDelay 计算投递重试间隔，默认指数退避。
+	retryDelay func(attempt int) time.Duration
 }
 
 // New 构造执行引擎。
@@ -138,8 +142,22 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		cancels:     make(map[string]context.CancelFunc),
 		deliveries:  make(map[string]*Delivery),
 		generations: make(map[string]int),
-		sent:        make(map[string]bool),
-		seq:         make(map[string]int64),
+		retryDelay: func(attempt int) time.Duration {
+			d := time.Duration(1<<uint(attempt)) * time.Second
+			if d > 30*time.Second {
+				d = 30 * time.Second
+			}
+			return d
+		},
+		sent: make(map[string]bool),
+		seq:  make(map[string]int64),
+	}
+}
+
+// SetRetryDelay 覆盖投递重试间隔，主要用于测试。
+func (e *Engine) SetRetryDelay(fn func(attempt int) time.Duration) {
+	if fn != nil {
+		e.retryDelay = fn
 	}
 }
 
@@ -165,7 +183,6 @@ func (e *Engine) Restore(ctx context.Context) error {
 		return err
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	for _, m := range msgs {
 		if m.Status == "processing" {
 			m.Status = "queued"
@@ -194,6 +211,18 @@ func (e *Engine) Restore(ctx context.Context) error {
 		e.runOrder = append(e.runOrder, r.ID)
 		if n := seqSuffix(r.ID); n > e.runSeq {
 			e.runSeq = n
+		}
+	}
+	e.mu.Unlock()
+
+	// 启动补偿：上次未送达的结果继续投递。
+	if pending, err := e.journal.LoadPendingDeliveries(ctx, 100); err == nil {
+		for _, d := range pending {
+			e.mu.Lock()
+			e.deliveries[d.IdempotencyKey] = d
+			e.mu.Unlock()
+			e.log.Info("resuming pending delivery", "delivery", d.IdempotencyKey)
+			go e.send(ctx, d)
 		}
 	}
 	return nil
@@ -689,6 +718,9 @@ func (e *Engine) appendAssistant(conv, runID, text string) {
 	}
 }
 
+// maxDeliveryAttempts 是投递重试上限。
+const maxDeliveryAttempts = 3
+
 func (e *Engine) send(ctx context.Context, d *Delivery) {
 	if e.ch == nil {
 		e.mu.Lock()
@@ -700,16 +732,35 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 	}
 	_, err := e.ch.SendText(ctx, channel.Outbound{ChatID: d.ChatID, ReplyTo: d.ReplyTo, Text: d.Text})
 	e.mu.Lock()
-	if err != nil {
-		d.State = "failed"
-		d.Error = err.Error()
-		e.log.Warn("delivery failed", "run", d.RunID, "error", err)
-	} else {
+	d.Attempts++
+	if err == nil {
 		d.State = "sent"
+		d.Error = ""
 		e.sent[d.IdempotencyKey] = true
+		e.mu.Unlock()
+		e.persistDelivery(ctx, d)
+		return
 	}
+	d.Error = err.Error()
+	retry := d.Attempts < maxDeliveryAttempts
+	if retry {
+		d.State = "retrying"
+	} else {
+		d.State = "failed"
+	}
+	attempt := d.Attempts
 	e.mu.Unlock()
 	e.persistDelivery(ctx, d)
+
+	if !retry {
+		e.log.Warn("delivery failed permanently", "run", d.RunID, "attempts", attempt, "error", err)
+		return
+	}
+	delay := e.retryDelay(attempt)
+	e.log.Warn("delivery failed; scheduling retry", "run", d.RunID, "attempt", attempt, "delay", delay, "error", err)
+	time.AfterFunc(delay, func() {
+		e.send(context.Background(), d)
+	})
 }
 
 func (e *Engine) persistDelivery(ctx context.Context, d *Delivery) {
