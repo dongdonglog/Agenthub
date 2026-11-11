@@ -230,13 +230,13 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 	}
 
 	if cfg.Feishu.Transport == "webhook" {
-		hook := feishu.NewWebhook(dispatcher, cfg.Feishu.VerificationToken, logger)
+		hook := feishu.NewWebhook(dispatcher, cfg.Feishu.VerificationToken, cfg.Feishu.EncryptKey, logger)
 		mux.Handle("/feishu/events", hook)
 		logger.Info("feishu transport", "mode", "webhook", "addr", cfg.Webhook.Addr)
 		health.RegisterCheck("feishu", func() (bool, string) { return true, "webhook" })
 	}
 	if cfg.Feishu.CardActionEnabled {
-		mux.Handle("/feishu/card", feishu.NewCardAction(engine, cfg.Feishu.VerificationToken, logger))
+		mux.Handle("/feishu/card", feishu.NewCardAction(engine, cfg.Feishu.VerificationToken, cfg.Feishu.EncryptKey, logger))
 		logger.Info("card action endpoint enabled", "path", "/feishu/card")
 	}
 	if cfg.Feishu.Transport == "webhook" || cfg.Feishu.CardActionEnabled {

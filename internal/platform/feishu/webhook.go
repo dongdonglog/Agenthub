@@ -13,17 +13,18 @@ import (
 type Webhook struct {
 	dispatcher        *Dispatcher
 	verificationToken string
+	encryptKey        string
 	log               *slog.Logger
 }
 
 // NewWebhook 构造回调入口。
 //
 // @param verificationToken 非空时校验事件来源；为空表示不校验（仅限内网调试）
-func NewWebhook(dispatcher *Dispatcher, verificationToken string, log *slog.Logger) *Webhook {
+func NewWebhook(dispatcher *Dispatcher, verificationToken, encryptKey string, log *slog.Logger) *Webhook {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Webhook{dispatcher: dispatcher, verificationToken: verificationToken, log: log}
+	return &Webhook{dispatcher: dispatcher, verificationToken: verificationToken, encryptKey: encryptKey, log: log}
 }
 
 // ServeHTTP 处理一次事件回调。
@@ -38,6 +39,18 @@ func (w *Webhook) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(rw, "bad request", http.StatusBadRequest)
 		return
+	}
+
+	if !VerifySignature(w.encryptKey, r.Header, body) {
+		w.log.Warn("feishu webhook signature mismatch")
+		http.Error(rw, "forbidden", http.StatusForbidden)
+		return
+	}
+	if decrypted, err := DecryptPayload(w.encryptKey, body); err != nil {
+		http.Error(rw, "bad payload", http.StatusBadRequest)
+		return
+	} else {
+		body = decrypted
 	}
 
 	var p Payload

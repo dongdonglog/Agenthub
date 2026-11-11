@@ -13,17 +13,18 @@ import (
 //
 // @remarks 回调需要公网可达地址；未配置时卡片不显示按钮。
 type CardAction struct {
-	engine *core.Engine
-	token  string
-	log    *slog.Logger
+	engine     *core.Engine
+	token      string
+	encryptKey string
+	log        *slog.Logger
 }
 
 // NewCardAction 构造卡片回调处理器。
-func NewCardAction(engine *core.Engine, verificationToken string, log *slog.Logger) *CardAction {
+func NewCardAction(engine *core.Engine, verificationToken, encryptKey string, log *slog.Logger) *CardAction {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &CardAction{engine: engine, token: verificationToken, log: log}
+	return &CardAction{engine: engine, token: verificationToken, encryptKey: encryptKey, log: log}
 }
 
 type cardCallback struct {
@@ -62,6 +63,17 @@ func (c *CardAction) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "bad request", http.StatusBadRequest)
 		return
 	}
+	if !VerifySignature(c.encryptKey, r.Header, body) {
+		http.Error(rw, "forbidden", http.StatusForbidden)
+		return
+	}
+	if decrypted, err := DecryptPayload(c.encryptKey, body); err != nil {
+		http.Error(rw, "bad payload", http.StatusBadRequest)
+		return
+	} else {
+		body = decrypted
+	}
+
 	var cb cardCallback
 	if err := json.Unmarshal(body, &cb); err != nil {
 		http.Error(rw, "bad json", http.StatusBadRequest)

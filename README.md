@@ -199,6 +199,7 @@ AGENTHUB_TEST_DATABASE_URL=postgres://... \
 | 现象 | 排查 |
 |---|---|
 | 发消息没反应 | 看日志 `feishu message ignored reason=...`；群聊未 @ 或不在白名单 |
+| 回调 403 | 配置了 `FEISHU_ENCRYPT_KEY` 但签名不匹配，或 Verification Token 不一致 |
 | 长连接反复重连 | 应用凭据错误（`app_id is invalid`）或出网 443 不通 |
 | 卡片不更新 | 卡片权限/模板；失败会自动回退文本 |
 | 图片看不到 | 未配置 `AGENTHUB_AGENT_VISION_MODEL`，或模型不支持视觉 |
@@ -221,6 +222,9 @@ docs/                      PRD、架构、运维、路线图
 ```
 
 ## 安全
+
+- 配置 `FEISHU_ENCRYPT_KEY` 后，Webhook 与卡片回调校验 `X-Lark-Signature` 并解密 `encrypt` 载荷；
+- 管理面可配 `AGENTHUB_ADMIN_TOKEN`，写操作要求 CSRF 头；
 
 - 密钥只从环境变量读取，日志与归档不落明文；
 - `read_file` 限制在附件目录内；

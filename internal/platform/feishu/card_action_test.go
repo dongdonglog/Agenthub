@@ -59,7 +59,7 @@ func postCard(t *testing.T, h http.Handler, body string) *httptest.ResponseRecor
 
 func TestCardStopByOwner(t *testing.T) {
 	engine, _, done := startRun(t)
-	h := feishu.NewCardAction(engine, "vt", nil)
+	h := feishu.NewCardAction(engine, "vt", "", nil)
 
 	body := `{"header":{"token":"vt"},"event":{"operator":{"open_id":"ou_owner"},"action":{"value":{"action":"stop","run_id":"run_1"}}}}`
 	rec := postCard(t, h, body)
@@ -79,7 +79,7 @@ func TestCardStopByOwner(t *testing.T) {
 
 func TestCardStopRejectsOthers(t *testing.T) {
 	engine, _, done := startRun(t)
-	h := feishu.NewCardAction(engine, "vt", nil)
+	h := feishu.NewCardAction(engine, "vt", "", nil)
 
 	body := `{"header":{"token":"vt"},"event":{"operator":{"open_id":"ou_other"},"action":{"value":{"action":"stop","run_id":"run_1"}}}}`
 	rec := postCard(t, h, body)
@@ -98,7 +98,7 @@ func TestCardStopRejectsOthers(t *testing.T) {
 
 func TestCardStopRejectsBadToken(t *testing.T) {
 	engine, _, done := startRun(t)
-	h := feishu.NewCardAction(engine, "vt", nil)
+	h := feishu.NewCardAction(engine, "vt", "", nil)
 	body := `{"header":{"token":"bad"},"event":{"operator":{"open_id":"ou_owner"},"action":{"value":{"action":"stop","run_id":"run_1"}}}}`
 	rec := postCard(t, h, body)
 	if rec.Code != http.StatusForbidden {

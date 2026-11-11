@@ -125,7 +125,7 @@ func newHookWithDir(t *testing.T) (*feishu.Webhook, *core.Engine, *fakeAPI, stri
 		Client:         client,
 		AttachmentsDir: attachments,
 	}, logger)
-	hook := feishu.NewWebhook(dispatcher, "vt", logger)
+	hook := feishu.NewWebhook(dispatcher, "vt", "", logger)
 	return hook, engine, api, attachments
 }
 
@@ -356,7 +356,7 @@ func TestMentionFreeChatAcceptsGroupMessage(t *testing.T) {
 		RequireMention:   true,
 		MentionFreeChats: []string{"oc_free"},
 	}, logger)
-	hook := feishu.NewWebhook(dispatcher, "vt", logger)
+	hook := feishu.NewWebhook(dispatcher, "vt", "", logger)
 
 	post(t, hook, messageJSON("ev_free", "om_free", "oc_free", "group", "不 @ 也要回", false))
 	if msgs := engine.Messages("tenant_1:oc_free:ou_user"); len(msgs) != 1 {
