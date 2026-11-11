@@ -44,6 +44,8 @@ type Chat struct {
 	Tools []Tool
 	// MaxToolRounds 限制工具调用轮数，默认 6。
 	MaxToolRounds int
+	// FallbackModel 在主模型连续失败后使用，可为空。
+	FallbackModel string
 	// Logger 记录工具调用，可为空。
 	Logger *slog.Logger
 	// HTTP 客户端，默认 180 秒超时。
@@ -80,7 +82,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	}
 	var last string
 	for round := 0; round < rounds; round++ {
-		msg, err := c.complete(ctx, messages)
+		msg, err := c.completeWithRetry(ctx, messages)
 		if err != nil {
 			return Output{}, err
 		}
@@ -135,9 +137,54 @@ type assistantMessage struct {
 	ToolCalls []toolCall `json:"tool_calls"`
 }
 
-func (c *Chat) complete(ctx context.Context, messages []map[string]any) (assistantMessage, error) {
+// completeWithRetry 在 429/5xx 时退避重试，仍失败则尝试备用模型。
+func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any) (assistantMessage, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		msg, err := c.complete(ctx, messages, c.Model)
+		if err == nil {
+			return msg, nil
+		}
+		lastErr = err
+		if !retryable(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return assistantMessage{}, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 500 * time.Millisecond):
+		}
+	}
+	if c.FallbackModel != "" && c.FallbackModel != c.Model {
+		if msg, err := c.complete(ctx, messages, c.FallbackModel); err == nil {
+			return msg, nil
+		}
+	}
+	return assistantMessage{}, lastErr
+}
+
+// retryable 判断错误是否值得重试。
+func retryable(err error) bool {
+	var apiErr *modelError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status == 429 || apiErr.Status >= 500
+	}
+	return false
+}
+
+// modelError 携带模型接口的 HTTP 状态码。
+type modelError struct {
+	Status int
+	Body   string
+}
+
+func (e *modelError) Error() string {
+	return fmt.Sprintf("模型返回 %d: %s", e.Status, truncate(e.Body, 300))
+}
+
+func (c *Chat) complete(ctx context.Context, messages []map[string]any, model string) (assistantMessage, error) {
 	payload := map[string]any{
-		"model":       c.Model,
+		"model":       model,
 		"messages":    messages,
 		"temperature": 0.3,
 	}
@@ -179,7 +226,7 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any) (assista
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode != http.StatusOK {
-		return assistantMessage{}, fmt.Errorf("模型返回 %d: %s", resp.StatusCode, truncate(string(body), 300))
+		return assistantMessage{}, &modelError{Status: resp.StatusCode, Body: string(body)}
 	}
 
 	var out struct {

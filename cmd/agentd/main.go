@@ -165,13 +165,14 @@ func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, logger *
 	}
 	logger.Info("model configured", "provider", cfg.Agent.Provider, "model", cfg.Agent.Model, "base_url", cfg.Agent.BaseURL)
 	return &agent.Chat{
-		BaseURL:      cfg.Agent.BaseURL,
-		APIKey:       cfg.Agent.APIKey,
-		Model:        cfg.Agent.Model,
-		SystemPrompt: cfg.Agent.SystemPrompt,
-		SkillsDir:    skillsDir,
-		Tools:        tools,
-		Logger:       logger,
+		BaseURL:       cfg.Agent.BaseURL,
+		APIKey:        cfg.Agent.APIKey,
+		Model:         cfg.Agent.Model,
+		FallbackModel: cfg.Agent.FallbackModel,
+		SystemPrompt:  cfg.Agent.SystemPrompt,
+		SkillsDir:     skillsDir,
+		Tools:         tools,
+		Logger:        logger,
 	}
 }
 

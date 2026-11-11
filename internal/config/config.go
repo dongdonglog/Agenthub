@@ -94,6 +94,8 @@ type AgentConfig struct {
 	Model    string `yaml:"model"`
 	// BaseURL 是 OpenAI 兼容接口地址，例如 https://ark.cn-beijing.volces.com/api/v3。
 	BaseURL string `yaml:"base_url"`
+	// FallbackModel 在主模型失败时兜底，可为空。
+	FallbackModel string `yaml:"fallback_model"`
 	// APIKey 为空时退回回显执行器，不调用模型。
 	APIKey string `yaml:"api_key"`
 	// SystemPrompt 是基础系统提示词；技能内容会追加在其后。
@@ -183,6 +185,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
+	setStr(&cfg.Agent.FallbackModel, "AGENTHUB_AGENT_FALLBACK_MODEL")
 	setStr(&cfg.Agent.APIKey, "AGENTHUB_AGENT_API_KEY")
 	setStr(&cfg.Agent.SystemPrompt, "AGENTHUB_AGENT_SYSTEM_PROMPT")
 	setStr(&cfg.Agent.SkillsDir, "AGENTHUB_AGENT_SKILLS_DIR")

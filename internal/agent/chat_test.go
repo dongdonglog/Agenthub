@@ -183,3 +183,76 @@ func TestChatIncludesHistoryRoles(t *testing.T) {
 		t.Fatalf("roles = %+v", captured.Messages)
 	}
 }
+
+func TestChatRetriesOnServerError(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			http.Error(w, "boom", http.StatusBadGateway)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "m"}
+	out, err := c.Run(context.Background(), agent.Input{Messages: []agent.Message{{Text: "hi"}}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Text != "ok" || attempts != 3 {
+		t.Fatalf("attempts = %d, output = %q", attempts, out.Text)
+	}
+}
+
+func TestChatDoesNotRetryClientError(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "m"}
+	if _, err := c.Run(context.Background(), agent.Input{Messages: []agent.Message{{Text: "hi"}}}); err == nil {
+		t.Fatal("400 应直接失败")
+	}
+	if attempts != 1 {
+		t.Fatalf("400 不应重试，实际 %d 次", attempts)
+	}
+}
+
+func TestChatFallsBackToSecondaryModel(t *testing.T) {
+	var models []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		models = append(models, body.Model)
+		if body.Model == "primary" {
+			http.Error(w, "overloaded", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "fallback-ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "primary", FallbackModel: "secondary"}
+	out, err := c.Run(context.Background(), agent.Input{Messages: []agent.Message{{Text: "hi"}}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Text != "fallback-ok" {
+		t.Fatalf("output = %q", out.Text)
+	}
+	if models[len(models)-1] != "secondary" {
+		t.Fatalf("最后一次模型 = %s", models[len(models)-1])
+	}
+}
