@@ -7,7 +7,7 @@
 # 冒烟（不接飞书）：COMPOSE_CHANNEL=off docker compose up -d
 services:
   postgres:
-    image: postgres:15
+    image: postgres:17
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?需要设置 POSTGRES_PASSWORD}

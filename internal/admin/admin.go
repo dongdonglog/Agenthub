@@ -200,6 +200,7 @@ func (s *Server) handleIndex(rw http.ResponseWriter, r *http.Request) {
 		http.NotFound(rw, r)
 		return
 	}
+	rw.Header().Set("Cache-Control", "no-cache")
 	data, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
 		http.Error(rw, "missing index", http.StatusInternalServerError)
@@ -217,6 +218,7 @@ func (s *Server) handleAsset(name, contentType string) http.HandlerFunc {
 			return
 		}
 		rw.Header().Set("Content-Type", contentType)
+		rw.Header().Set("Cache-Control", "no-cache")
 		_, _ = rw.Write(data)
 	}
 }

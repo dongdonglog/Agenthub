@@ -3,6 +3,7 @@
 ## 依赖
 
 - Docker 24+ / Docker Compose v2
+- PostgreSQL 17（compose 内置）
 - 一台能出网访问飞书与模型网关的机器（出网 443）
 
 ## 首次部署
