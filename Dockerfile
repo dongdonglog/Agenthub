@@ -19,4 +19,5 @@ ENV AGENTHUB_HTTP_ADDR=0.0.0.0:8787
 ENV AGENTHUB_DATA_DIR=/data
 EXPOSE 8787 8788
 USER nonroot:nonroot
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["/app/agentd", "-healthcheck"]
 ENTRYPOINT ["/app/agentd"]

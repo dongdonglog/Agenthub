@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -34,6 +35,26 @@ func main() {
 //
 // @remarks 配置错误返回 2（便于编排系统区分「配置问题」与「运行故障」），
 // 其他启动失败返回 1，正常退出返回 0。
+// healthcheck 供容器 HEALTHCHECK 使用：探测本机 /healthz。
+func healthcheck() int {
+	addr := os.Getenv("AGENTHUB_HTTP_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8787"
+	}
+	addr = strings.Replace(addr, "0.0.0.0", "127.0.0.1", 1)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + addr + "/healthz")
+	if err != nil {
+		return 1
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"status":"ok"`) {
+		return 1
+	}
+	return 0
+}
+
 func run() int {
 	envFile := os.Getenv("AGENTHUB_ENV_FILE")
 	if envFile == "" {
@@ -132,6 +153,16 @@ func run() int {
 	metrics := obs.NewMetrics()
 	engine.SetMetrics(metrics)
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
+	if db != nil {
+		srv.RegisterCheck("db", func() (bool, string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := db.Pool().Ping(ctx); err != nil {
+				return false, err.Error()
+			}
+			return true, "ok"
+		})
+	}
 
 	if cfg.Channel == config.ChannelFeishu {
 		feishuStatus = startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir)

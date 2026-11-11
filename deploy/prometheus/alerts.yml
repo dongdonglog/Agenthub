@@ -1,0 +1,46 @@
+# AgentHub 告警规则（Prometheus）
+# 抓取目标示例：
+#   - job_name: agenthub
+#     static_configs: [{ targets: ["127.0.0.1:8787"] }]
+groups:
+  - name: agenthub
+    rules:
+      - alert: AgentHubDown
+        expr: up{job="agenthub"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "AgentHub 无法抓取"
+          description: "{{ $labels.instance }} 已连续 2 分钟不可达。"
+
+      - alert: FeishuDisconnected
+        expr: agenthub_health_check{check="feishu"} == 0
+        for: 3m
+        labels: { severity: warning }
+        annotations:
+          summary: "飞书长连接断开"
+          description: "健康检查 feishu 连续 3 分钟失败，检查凭据与出网。"
+
+      - alert: RunsFailing
+        expr: increase(agenthub_runs_total{state="failed"}[10m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "出现失败的运行"
+          description: "10 分钟内失败运行数：{{ $value }}。"
+
+      - alert: DeliveriesFailing
+        expr: increase(agenthub_deliveries_total{result="failed"}[10m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "消息投递失败"
+          description: "10 分钟内投递失败数：{{ $value }}。"
+
+      - alert: HighTokenBurn
+        expr: increase(agenthub_runs_total[1h]) > 500
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "运行量异常偏高"
+          description: "1 小时内运行 {{ $value }} 次，确认是否有异常调用。"

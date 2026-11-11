@@ -54,7 +54,10 @@ func (s *Server) RegisterCheck(name string, fn func() (bool, string)) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
-	mux.Handle("GET /metrics", s.metrics.Handler())
+	mux.HandleFunc("GET /metrics", func(rw http.ResponseWriter, r *http.Request) {
+		s.recordHealthGauges()
+		s.metrics.Handler().ServeHTTP(rw, r)
+	})
 	mux.HandleFunc("GET /", s.handleIndex)
 	return s.withAccessLog(mux)
 }
@@ -113,4 +116,22 @@ func (s *Server) withAccessLog(next http.Handler) http.Handler {
 		})
 		s.log.Debug("http request", "method", r.Method, "path", r.URL.Path, "duration_ms", time.Since(start).Milliseconds())
 	})
+}
+
+// recordHealthGauges 把健康检查结果写为 gauge，供 Prometheus 告警使用。
+func (s *Server) recordHealthGauges() {
+	s.mu.RLock()
+	checks := make(map[string]func() (bool, string), len(s.checks))
+	for name, fn := range s.checks {
+		checks[name] = fn
+	}
+	s.mu.RUnlock()
+	for name, fn := range checks {
+		ok, _ := fn()
+		value := 0.0
+		if ok {
+			value = 1
+		}
+		s.metrics.Set("agenthub_health_check", value, map[string]string{"check": name})
+	}
 }
