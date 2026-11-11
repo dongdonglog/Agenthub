@@ -100,7 +100,7 @@ func run() int {
 
 	tools := make([]agent.Tool, 0, len(mcpManager.Tools())+1)
 	tools = append(tools, mcpManager.Tools()...)
-	tools = append(tools, &agent.ReadFileTool{Root: attachmentsDir})
+	tools = append(tools, &agent.ReadFileTool{Roots: []string{attachmentsDir, skillsDir}})
 	if summary := mcpManager.Summary(); summary != "" {
 		logger.Info("mcp loaded", "summary", summary)
 	}

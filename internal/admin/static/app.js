@@ -229,12 +229,36 @@ async function renderSkills() {
   const data = await api('/skills');
   const nameInput = el('input', { placeholder: '技能名，例如 incident-report' });
   const textarea = el('textarea', { placeholder: '# 标题\n> 一句话描述\n\n步骤…' });
+  const fileList = el('div', { className: 'file-list' });
+  const fileLabel = el('div', { className: 'muted small' }, ['当前文件：—']);
   const list = el('div');
+  let currentSkill = '';
+  let currentFile = 'SKILL.md';
+
+  async function loadFile(path) {
+    if (!currentSkill) return;
+    try {
+      const f = await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(path)}`);
+      currentFile = path;
+      textarea.value = f.content;
+      fileLabel.textContent = `当前文件：${path}`;
+    } catch (err) { toast(err.message, true); }
+  }
 
   async function select(name) {
-    const item = await api(`/skills/${encodeURIComponent(name)}`);
-    nameInput.value = item.name;
-    textarea.value = item.content;
+    try {
+      const item = await api(`/skills/${encodeURIComponent(name)}`);
+      currentSkill = name;
+      nameInput.value = item.name;
+      const files = await api(`/skills/${encodeURIComponent(name)}/files`);
+      fileList.replaceChildren();
+      for (const f of files.items) {
+        const b = el('button', { className: 'chip' + (f.path === 'SKILL.md' ? ' primary' : '') }, [f.path]);
+        b.addEventListener('click', () => loadFile(f.path));
+        fileList.append(b);
+      }
+      await loadFile('SKILL.md');
+    } catch (err) { toast(err.message, true); }
   }
 
   async function changeStatus(name, status) {
@@ -300,12 +324,43 @@ async function renderSkills() {
     const name = nameInput.value.trim();
     if (!name) return toast('先填技能名', true);
     try {
-      await api(`/skills/${encodeURIComponent(name)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content: textarea.value }),
-      });
+      if (!currentSkill || currentSkill !== name) {
+        await api(`/skills/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ content: textarea.value }),
+        });
+      } else {
+        await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(currentFile)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ content: textarea.value }),
+        });
+      }
       toast('已保存，下次运行生效');
       await renderSkills();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const newFile = el('button', { className: 'ghost' }, ['新建文件']);
+  newFile.addEventListener('click', async () => {
+    if (!currentSkill) return toast('先选择一个技能', true);
+    const path = prompt('相对路径，例如 references/notes.md');
+    if (!path) return;
+    try {
+      await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(path)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content: '' }),
+      });
+      await select(currentSkill);
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const delFile = el('button', { className: 'danger' }, ['删除当前文件']);
+  delFile.addEventListener('click', async () => {
+    if (!currentSkill || currentFile === 'SKILL.md') return toast('SKILL.md 不能单独删除', true);
+    if (!confirm(`删除 ${currentFile}？`)) return;
+    try {
+      await api(`/skills/${encodeURIComponent(currentSkill)}/files/${encodeURI(currentFile)}`, { method: 'DELETE' });
+      await select(currentSkill);
     } catch (err) { toast(err.message, true); }
   });
 
@@ -316,6 +371,8 @@ async function renderSkills() {
     el('h3', {}, ['编辑']),
     el('div', { className: 'form' }, [
       el('label', {}, ['名称', nameInput]),
+      el('div', { className: 'file-bar' }, [fileLabel, el('div', { className: 'actions' }, [newFile, delFile])]),
+      fileList,
       el('label', {}, ['内容', textarea]),
       el('div', { className: 'actions' }, [save]),
     ]),

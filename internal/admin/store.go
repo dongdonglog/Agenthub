@@ -337,3 +337,119 @@ func (s *Store) writeMCPs(items []MCP) error {
 	}
 	return os.WriteFile(s.mcpFile, raw, 0o644)
 }
+
+// SkillFile 是技能包内的一个文件。
+type SkillFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// skillBaseDir 返回技能所在目录（扁平文件返回其所在目录）。
+func (s *Store) skillBaseDir(name string) (string, error) {
+	path, _, err := s.findSkill(name)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return path, nil
+	}
+	return "", errors.New("扁平技能不支持多文件")
+}
+
+// ListFiles 列出技能目录内的全部文件（相对路径）。
+func (s *Store) ListFiles(name string) ([]SkillFile, error) {
+	base, err := s.skillBaseDir(name)
+	if err != nil {
+		return nil, err
+	}
+	var out []SkillFile
+	err = filepath.WalkDir(base, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(base, path)
+		if err != nil {
+			return err
+		}
+		out = append(out, SkillFile{Path: filepath.ToSlash(rel), Size: info.Size()})
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, err
+}
+
+// resolveSkillFile 把相对路径限制在技能目录内。
+func (s *Store) resolveSkillFile(name, rel string) (string, error) {
+	base, err := s.skillBaseDir(name)
+	if err != nil {
+		return "", err
+	}
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		return "", errors.New("非法文件路径")
+	}
+	full := filepath.Join(base, clean)
+	if !strings.HasPrefix(full, base+string(os.PathSeparator)) {
+		return "", errors.New("非法文件路径")
+	}
+	return full, nil
+}
+
+// ReadFile 读取技能内的文件。
+func (s *Store) ReadFile(name, rel string) (string, error) {
+	full, err := s.resolveSkillFile(name, rel)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > 512*1024 {
+		return "", errors.New("文件超过 512KB，不支持在线编辑")
+	}
+	raw, err := os.ReadFile(full)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// WriteFile 写入技能内的文件（仅文本，最大 512KB）。
+func (s *Store) WriteFile(name, rel, content string) error {
+	if len(content) > 512*1024 {
+		return errors.New("内容超过 512KB")
+	}
+	full, err := s.resolveSkillFile(name, rel)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(full, []byte(content), 0o644)
+}
+
+// DeleteFile 删除技能内的文件。
+func (s *Store) DeleteFile(name, rel string) error {
+	if filepath.ToSlash(rel) == "SKILL.md" {
+		return errors.New("SKILL.md 不能单独删除，请删除整个技能")
+	}
+	full, err := s.resolveSkillFile(name, rel)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(full)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}

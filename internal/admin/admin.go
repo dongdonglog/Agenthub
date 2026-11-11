@@ -80,6 +80,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/skills/{name}", s.handleSkill)
 	mux.HandleFunc("PUT /admin/api/v1/skills/{name}", s.handleSkill)
 	mux.HandleFunc("PUT /admin/api/v1/skills/{name}/status", s.handleSkillStatus)
+	mux.HandleFunc("GET /admin/api/v1/skills/{name}/files", s.handleSkillFiles)
+	mux.HandleFunc("GET /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
+	mux.HandleFunc("PUT /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
+	mux.HandleFunc("DELETE /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
 	mux.HandleFunc("DELETE /admin/api/v1/skills/{name}", s.handleSkill)
 
 	mux.HandleFunc("GET /admin/api/v1/mcps", s.handleMCPs)
@@ -427,6 +431,52 @@ func (s *Server) handleSkill(rw http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("skill deleted", "name", name)
 		s.audit("skill.delete", name, "")
+		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+	default:
+		writeError(rw, http.StatusMethodNotAllowed, "方法不支持")
+	}
+}
+
+func (s *Server) handleSkillFiles(rw http.ResponseWriter, r *http.Request) {
+	files, err := s.store.ListFiles(r.PathValue("name"))
+	if err != nil {
+		writeError(rw, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": files, "total": len(files)})
+}
+
+func (s *Server) handleSkillFile(rw http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	rel := r.PathValue("path")
+	switch r.Method {
+	case http.MethodGet:
+		content, err := s.store.ReadFile(name, rel)
+		if err != nil {
+			writeError(rw, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSON(rw, http.StatusOK, map[string]string{"path": rel, "content": content})
+	case http.MethodPut:
+		var body struct {
+			Content string `json:"content"`
+		}
+		if err := decode(r, &body); err != nil {
+			writeError(rw, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.store.WriteFile(name, rel, body.Content); err != nil {
+			writeError(rw, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.audit("skill.file.save", name, rel)
+		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+	case http.MethodDelete:
+		if err := s.store.DeleteFile(name, rel); err != nil {
+			writeError(rw, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.audit("skill.file.delete", name, rel)
 		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 	default:
 		writeError(rw, http.StatusMethodNotAllowed, "方法不支持")

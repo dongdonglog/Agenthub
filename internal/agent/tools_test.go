@@ -56,3 +56,28 @@ func TestReadFileToolTruncates(t *testing.T) {
 		t.Fatalf("应包含截断提示: %q", out)
 	}
 }
+
+func TestReadFileToolMultipleRoots(t *testing.T) {
+	attach := t.TempDir()
+	skills := t.TempDir()
+	ref := filepath.Join(skills, "demo", "references", "modes.md")
+	if err := os.MkdirAll(filepath.Dir(ref), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ref, []byte("# 模式\n单机"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &agent.ReadFileTool{Roots: []string{attach, skills}}
+	out, err := tool.Call(context.Background(), json.RawMessage(`{"path":"`+ref+`"}`))
+	if err != nil {
+		t.Fatalf("应允许读取技能目录: %v", err)
+	}
+	if out != "# 模式\n单机" {
+		t.Fatalf("output = %q", out)
+	}
+
+	if _, err := tool.Call(context.Background(), json.RawMessage(`{"path":"/etc/passwd"}`)); err == nil {
+		t.Fatal("仍应拒绝根目录之外的文件")
+	}
+}

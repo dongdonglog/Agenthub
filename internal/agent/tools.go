@@ -13,8 +13,10 @@ import (
 //
 // @remarks 只允许访问 Root 之下的路径，避免越权读取宿主文件。
 type ReadFileTool struct {
-	// Root 是允许访问的根目录。
+	// Root 是允许访问的根目录（单根兼容用法）。
 	Root string
+	// Roots 是允许访问的多个根目录，任一匹配即可。
+	Roots []string
 	// MaxBytes 是单次读取上限，默认 256KB。
 	MaxBytes int
 }
@@ -75,20 +77,29 @@ func (t *ReadFileTool) Call(_ context.Context, raw json.RawMessage) (string, err
 }
 
 func (t *ReadFileTool) resolve(input string) (string, error) {
-	root, err := filepath.Abs(t.Root)
-	if err != nil {
-		return "", err
+	roots := t.Roots
+	if len(roots) == 0 && t.Root != "" {
+		roots = []string{t.Root}
 	}
-	path := input
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
+	if len(roots) == 0 {
+		return "", errors.New("未配置可读目录")
 	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return "", err
+	for _, root := range roots {
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		path := input
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(absRoot, path)
+		}
+		path, err = filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		if path == absRoot || strings.HasPrefix(path, absRoot+string(os.PathSeparator)) {
+			return path, nil
+		}
 	}
-	if path != root && !strings.HasPrefix(path, root+string(os.PathSeparator)) {
-		return "", errors.New("只能读取附件目录内的文件")
-	}
-	return path, nil
+	return "", errors.New("只能读取附件或技能目录内的文件")
 }

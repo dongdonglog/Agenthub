@@ -301,6 +301,11 @@ func (c *Chat) systemPrompt() string {
 		b.WriteString(c.Model)
 		b.WriteString("（由部署配置决定；被问到用时如实回答）。")
 	}
+	if c.SkillsDir != "" {
+		b.WriteString("\n\n技能文件目录：")
+		b.WriteString(c.SkillsDir)
+		b.WriteString("（SKILL.md 中引用的 references 可用 read_file 读取）。")
+	}
 
 	loaded, err := LoadSkills(c.SkillsDir)
 	if err != nil || len(loaded) == 0 {

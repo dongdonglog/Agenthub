@@ -111,3 +111,74 @@ func TestHistoryAndAuditEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func newServerWithStore(t *testing.T, st *admin.Store) http.Handler {
+	t.Helper()
+	cfg := &config.Config{Storage: config.StorageConfig{Dir: t.TempDir()}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return admin.New(cfg, core.New(nil, nil, logger), st, admin.Options{}, logger).Handler()
+}
+
+func TestSkillFileTree(t *testing.T) {
+	dir := t.TempDir()
+	st, err := admin.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutSkill("demo", "# demo\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.WriteFile("demo", "references/notes.md", "参考内容"); err != nil {
+		t.Fatal(err)
+	}
+	files, err := st.ListFiles("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("files = %+v", files)
+	}
+	content, err := st.ReadFile("demo", "references/notes.md")
+	if err != nil || content != "参考内容" {
+		t.Fatalf("read = %q err=%v", content, err)
+	}
+	if _, err := st.ReadFile("demo", "../escape.md"); err == nil {
+		t.Fatal("应拒绝路径穿越")
+	}
+	if err := st.DeleteFile("demo", "references/notes.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReadFile("demo", "references/notes.md"); err == nil {
+		t.Fatal("删除后不应可读")
+	}
+}
+
+func TestSkillFileAPI(t *testing.T) {
+	dir := t.TempDir()
+	st, err := admin.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutSkill("demo", "# demo\n"); err != nil {
+		t.Fatal(err)
+	}
+	h := newServerWithStore(t, st)
+
+	rec := do(t, h, http.MethodGet, "/admin/api/v1/skills/demo/files", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "SKILL.md") {
+		t.Fatalf("list = %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodPut, "/admin/api/v1/skills/demo/files/references/a.md", `{"content":"hi"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/admin/api/v1/skills/demo/files/references/a.md", "")
+	if !strings.Contains(rec.Body.String(), `"hi"`) {
+		t.Fatalf("get = %s", rec.Body.String())
+	}
+	rec = do(t, h, http.MethodDelete, "/admin/api/v1/skills/demo/files/references/a.md", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete = %d", rec.Code)
+	}
+}
