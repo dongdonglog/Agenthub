@@ -148,6 +148,9 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 |---|---|---|
 | `agenthub_uptime_seconds` | gauge | 运行时长 |
 | `agenthub_http_requests_total` | counter | 按 method/path |
+| `agenthub_messages_accepted_total` | counter | 受理消息数 |
+| `agenthub_runs_total` | counter | 按 state（completed/failed/interrupted） |
+| `agenthub_deliveries_total` | counter | 按 result（sent/retrying/failed） |
 | `agenthub_runs_total` | counter | 按 state |
 | `agenthub_delivery_total` | counter | 按 result |
 | `agenthub_message_accepted_total` | counter | 受理消息数 |

@@ -62,6 +62,11 @@ type Delivery struct {
 	Attempts       int
 }
 
+// Metrics 是核心向指标系统上报的最小接口。
+type Metrics interface {
+	Inc(name string, labels map[string]string)
+}
+
 // RunEvent 是一条运行事件，用于管理台回放。
 type RunEvent struct {
 	RunID      string    `json:"run_id"`
@@ -127,6 +132,7 @@ type Engine struct {
 	runSeq      int64
 	journal     Journal
 	presenter   Presenter
+	metrics     Metrics
 	generations map[string]int
 	events      map[string][]RunEvent
 	// retryDelay 计算投递重试间隔，默认指数退避。
@@ -175,6 +181,11 @@ func (e *Engine) SetRetryDelay(fn func(attempt int) time.Duration) {
 	if fn != nil {
 		e.retryDelay = fn
 	}
+}
+
+// SetMetrics 注入指标上报；为空时不上报。
+func (e *Engine) SetMetrics(m Metrics) {
+	e.metrics = m
 }
 
 // SetPresenter 注入可更新输出；为空时只发文本。
@@ -298,6 +309,9 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 	e.dedupe[dedupeKey] = msg.ID
 	e.order[conv] = append(e.order[conv], msg.ID)
 	e.mu.Unlock()
+	if e.metrics != nil {
+		e.metrics.Inc("agenthub_messages_accepted_total", nil)
+	}
 
 	if e.journal != nil {
 		inserted, err := e.journal.SaveMessage(ctx, msg)
@@ -450,7 +464,12 @@ func (e *Engine) StopRun(runID string) bool {
 func (e *Engine) RunByID(runID string) *Run {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.runs[runID]
+	r := e.runs[runID]
+	if r == nil {
+		return nil
+	}
+	c := *r
+	return &c
 }
 
 // DeliveriesFor 返回某次运行的投递记录。
@@ -460,7 +479,8 @@ func (e *Engine) DeliveriesFor(runID string) []*Delivery {
 	var out []*Delivery
 	for _, d := range e.deliveries {
 		if d.RunID == runID {
-			out = append(out, d)
+			c := *d
+			out = append(out, &c)
 		}
 	}
 	return out
@@ -527,7 +547,12 @@ func (e *Engine) Messages(conv string) []*Message {
 		}
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
-	return out
+	copies := make([]*Message, len(out))
+	for i, m := range out {
+		c := *m
+		copies[i] = &c
+	}
+	return copies
 }
 
 // Conversation 是管理面使用的会话摘要。
@@ -580,7 +605,8 @@ func (e *Engine) Runs() []*Run {
 	out := make([]*Run, 0, len(e.runOrder))
 	for _, id := range e.runOrder {
 		if r := e.runs[id]; r != nil {
-			out = append(out, r)
+			c := *r
+			out = append(out, &c)
 		}
 	}
 	return out
@@ -592,7 +618,8 @@ func (e *Engine) Deliveries() []*Delivery {
 	defer e.mu.Unlock()
 	out := make([]*Delivery, 0, len(e.deliveries))
 	for _, d := range e.deliveries {
-		out = append(out, d)
+		c := *d
+		out = append(out, &c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].IdempotencyKey < out[j].IdempotencyKey })
 	return out
@@ -754,6 +781,9 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	e.mu.Unlock()
 
 	e.appendAssistant(conv, run.ID, text)
+	if e.metrics != nil {
+		e.metrics.Inc("agenthub_runs_total", map[string]string{"state": run.State})
+	}
 
 	if e.journal != nil {
 		if err := e.journal.SaveRun(ctx, run); err != nil {
@@ -867,6 +897,9 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 	attempt := d.Attempts
 	e.mu.Unlock()
 	e.persistDelivery(ctx, d)
+	if e.metrics != nil {
+		e.metrics.Inc("agenthub_deliveries_total", map[string]string{"result": d.State})
+	}
 
 	if !retry {
 		e.log.Warn("delivery failed permanently", "run", d.RunID, "attempts", attempt, "error", err)

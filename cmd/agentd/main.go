@@ -116,6 +116,7 @@ func run() int {
 		logger.Info("state restored")
 	}
 	metrics := obs.NewMetrics()
+	engine.SetMetrics(metrics)
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 
 	if cfg.Channel == config.ChannelFeishu {
