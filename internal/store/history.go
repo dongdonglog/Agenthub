@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"time"
+
+	"github.com/moying/agenthub/internal/core"
 )
 
 // Generation 是一个会话代的历史摘要。
@@ -38,6 +40,29 @@ func (j *Journal) ListGenerations(ctx context.Context, limit int) ([]Generation,
 	return out, rows.Err()
 }
 
+// ListGenerationMessages 读取某个会话代的消息。
+func (j *Journal) ListGenerationMessages(ctx context.Context, conv string, generation, limit int) ([]core.Message, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
+		FROM message_state
+		WHERE conversation_id = $1 AND generation = $2
+		ORDER BY created_at ASC LIMIT $3`, conv, generation, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.Message
+	for rows.Next() {
+		var m core.Message
+		if err := rows.Scan(&m.ID, &m.Role, &m.Generation, &m.TraceID, &m.ConversationID, &m.ChatID,
+			&m.ExternalID, &m.SenderOpenID, &m.Text, &m.MsgType, &m.Status, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // AuditEntry 是一条管理面审计记录。
 type AuditEntry struct {
 	ID        int64     `json:"id"`
@@ -49,9 +74,9 @@ type AuditEntry struct {
 }
 
 // SaveAudit 追加一条审计记录。
-func (j *Journal) SaveAudit(ctx context.Context, action, target, detail string) error {
+func (j *Journal) SaveAudit(ctx context.Context, actor, action, target, detail string) error {
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO audit_log (action, target, detail) VALUES ($1,$2,$3)`, action, target, detail)
+		INSERT INTO audit_log (actor, action, target, detail) VALUES ($1,$2,$3,$4)`, actor, action, target, detail)
 	return err
 }
 

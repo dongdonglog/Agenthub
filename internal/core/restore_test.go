@@ -2,7 +2,9 @@ package core_test
 
 import (
 	"context"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,10 +15,7 @@ import (
 )
 
 func TestJournalPersistenceAndRestore(t *testing.T) {
-	url := os.Getenv("AGENTHUB_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("未设置 AGENTHUB_TEST_DATABASE_URL，跳过真实数据库用例")
-	}
+	url := testDatabaseURL(t)
 	ctx := context.Background()
 	db, err := store.Open(ctx, url, 4)
 	if err != nil {
@@ -83,10 +82,7 @@ func TestJournalPersistenceAndRestore(t *testing.T) {
 }
 
 func TestRunEventsSurviveRestart(t *testing.T) {
-	url := os.Getenv("AGENTHUB_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("未设置 AGENTHUB_TEST_DATABASE_URL，跳过真实数据库用例")
-	}
+	url := testDatabaseURL(t)
 	ctx := context.Background()
 	db, err := store.Open(ctx, url, 4)
 	if err != nil {
@@ -126,4 +122,19 @@ func TestRunEventsSurviveRestart(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("重启后事件数 = %d", len(events))
 	}
+}
+
+// testDatabaseURL 返回测试库地址；未配置或指向应用库时跳过。
+//
+// @remarks 测试会清空表数据，必须使用独立数据库，避免误删线上/开发数据。
+func testDatabaseURL(t *testing.T) string {
+	t.Helper()
+	raw := os.Getenv("AGENTHUB_TEST_DATABASE_URL")
+	if raw == "" {
+		t.Skip("未设置 AGENTHUB_TEST_DATABASE_URL，跳过真实数据库用例")
+	}
+	if u, err := url.Parse(raw); err == nil && strings.TrimPrefix(u.Path, "/") == "postgres" {
+		t.Skip("测试库不能指向 postgres（会清空数据），请使用独立数据库")
+	}
+	return raw
 }

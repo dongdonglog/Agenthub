@@ -5,11 +5,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/moying/agenthub/internal/admin"
 	"github.com/moying/agenthub/internal/agent"
+	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/store"
@@ -207,5 +209,83 @@ func TestProfileApplyEndpoint(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/admin/api/v1/profiles", "")
 	if !strings.Contains(rec.Body.String(), `"active":"ops"`) {
 		t.Fatalf("profiles = %s", rec.Body.String())
+	}
+}
+
+func TestSessionProfileRebind(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	ps := store.NewProfileStore(dir)
+	if err := ps.PutProfile(store.Profile{Name: "ops", Skills: []string{"demo"}}); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	engine := core.New(agent.Echo{}, nil, logger)
+	ctx := context.Background()
+	in := channel.Inbound{
+		Channel: "feishu", Tenant: "t", ExternalID: "e1",
+		Chat:   channel.Chat{ID: "c1", Kind: "p2p"},
+		Sender: channel.Sender{OpenID: "u1"}, Text: "hi",
+	}
+	if _, err := engine.Submit(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	conv := "t:c1:u1"
+	cfg := &config.Config{Storage: config.StorageConfig{Dir: dir}}
+	h := admin.New(cfg, engine, st, admin.Options{Profiles: ps}, logger).Handler()
+
+	rec := do(t, h, http.MethodPut, "/admin/api/v1/sessions/"+conv+"/profile", `{"name":"ops"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rebind = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := engine.ProfileOf(conv); got != "ops" {
+		t.Fatalf("ProfileOf = %s", got)
+	}
+}
+
+func TestAuditActorFromHeader(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	if err := st.PutSkill("demo", "# demo"); err != nil {
+		t.Fatal(err)
+	}
+	var gotActor string
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := admin.New(&config.Config{Storage: config.StorageConfig{Dir: dir}}, core.New(nil, nil, logger), st, admin.Options{
+		AuditRecord: func(actor, action, target, detail string) { gotActor = actor },
+	}, logger).Handler()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/skills/demo", strings.NewReader(`{"content":"# demo"}`))
+	req.Header.Set("X-AA-Operator", "alice")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if gotActor != "alice" {
+		t.Fatalf("actor = %q", gotActor)
+	}
+}
+
+func TestHistoryDetailEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := admin.New(&config.Config{Storage: config.StorageConfig{Dir: dir}}, core.New(nil, nil, logger), st, admin.Options{
+		HistoryMessages: func(context.Context, string, int) ([]core.Message, error) {
+			return []core.Message{{ID: "m1", Role: "user", Text: "你好"}}, nil
+		},
+	}, logger).Handler()
+
+	rec := do(t, h, http.MethodGet, "/admin/api/v1/history/t:c1:u1/2", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "你好") {
+		t.Fatalf("detail = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/admin/api/v1/history/t:c1:u1/abc", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("非法代 = %d", rec.Code)
 	}
 }

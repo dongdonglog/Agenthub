@@ -169,13 +169,19 @@ func run() int {
 			}
 			return journal.ListGenerations(ctx, 100)
 		},
-		AuditRecord: func(action, target, detail string) {
+		HistoryMessages: func(ctx context.Context, conv string, generation int) ([]core.Message, error) {
+			if journal == nil {
+				return nil, nil
+			}
+			return journal.ListGenerationMessages(ctx, conv, generation, 200)
+		},
+		AuditRecord: func(actor, action, target, detail string) {
 			if journal == nil {
 				return
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			if err := journal.SaveAudit(ctx, action, target, detail); err != nil {
+			if err := journal.SaveAudit(ctx, actor, action, target, detail); err != nil {
 				logger.Debug("audit write failed", "error", err)
 			}
 		},

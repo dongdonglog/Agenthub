@@ -94,7 +94,7 @@ async function render() {
     if (page === 'sessions') return rest[0] ? await renderSession(rest[0]) : await renderSessions();
     if (page === 'runs') return await renderRun(rest[0]);
     if (page === 'skills') return await renderSkills();
-    if (page === 'history') return await renderHistory();
+    if (page === 'history') return rest[0] ? await renderHistoryDetail(rest[0], rest[1]) : await renderHistory();
     if (page === 'profiles') return await renderProfiles();
     if (page === 'audits') return await renderAudits();
     if (page === 'mcps') return await renderMCPs();
@@ -171,12 +171,36 @@ async function renderSessions() {
 }
 
 async function renderSession(id) {
-  const data = await api(`/sessions/${encodeURIComponent(id)}`);
+  const [data, profiles] = await Promise.all([
+    api(`/sessions/${encodeURIComponent(id)}`),
+    api('/profiles'),
+  ]);
   const msgRows = data.messages.map((m) => [m.ID || m.id, m.Status || m.status, (m.Text || m.text || '').slice(0, 60)]);
   const runRows = data.runs.map((r) => [r.ID || r.id, r.State || r.state, (r.Output || r.output || '').slice(0, 60)]);
+  const profileSelect = el('select');
+  for (const p of profiles.items) {
+    profileSelect.append(el('option', { value: p.name }, [p.name]));
+  }
+  if (data.profile) profileSelect.value = data.profile;
+  const applyProfile = el('button', {}, ['应用 Profile']);
+  applyProfile.addEventListener('click', async () => {
+    try {
+      await api(`/sessions/${encodeURIComponent(id)}/profile`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: profileSelect.value }),
+      });
+      toast(`已应用到 ${profileSelect.value}`);
+      await renderSession(id);
+    } catch (err) { toast(err.message, true); }
+  });
+
   content.replaceChildren(
     el('h2', {}, ['会话详情']),
     el('p', { className: 'lede' }, [id, data.profile ? ` · Profile：${data.profile}` : '']),
+    el('div', { className: 'panel' }, [
+      el('div', { className: 'head' }, [el('b', {}, ['配置档案']), el('span', { className: 'muted' }, ['只影响当前会话代'])]),
+      el('div', { className: 'actions' }, [profileSelect, applyProfile]),
+    ]),
     el('h3', {}, ['消息']),
     msgRows.length ? table(['ID', '状态', '内容'], msgRows) : empty('📭', '没有消息'),
     el('h3', {}, ['运行']),
@@ -464,7 +488,24 @@ async function renderHistory() {
   content.replaceChildren(
     el('h2', {}, ['历史会话']),
     el('p', { className: 'lede' }, ['按会话与代聚合；/reset 后旧代仍保留在这里。']),
-    table(['会话', '代', '消息数', '最近活跃'], rows),
+    table(['会话', '代', '消息数', '最近活跃'], rows, (row) => {
+      location.hash = `#/history/${encodeURIComponent(row[0])}/${row[1]}`;
+    }),
+  );
+}
+
+async function renderHistoryDetail(conv, gen) {
+  const data = await api(`/history/${encodeURIComponent(conv)}/${gen}`);
+  const rows = data.items.map((m) => [
+    new Date(m.CreatedAt || m.created_at).toLocaleString(),
+    m.Role || m.role,
+    (m.Text || m.text || '').slice(0, 120),
+  ]);
+  content.replaceChildren(
+    el('h2', {}, ['历史详情']),
+    el('p', { className: 'lede' }, [`${conv} · 第 ${gen} 代 · ${data.total} 条消息`]),
+    rows.length ? table(['时间', '角色', '内容'], rows) : empty('📭', '没有消息'),
+    el('div', { className: 'actions' }, [el('a', { href: '#/history', className: 'muted' }, ['← 返回历史列表'])]),
   );
 }
 
@@ -557,12 +598,12 @@ async function renderAudits() {
     return;
   }
   const rows = data.items.map((a) => [
-    new Date(a.created_at).toLocaleString(), a.action, a.target, a.detail || '',
+    new Date(a.created_at).toLocaleString(), a.actor || '—', a.action, a.target, a.detail || '',
   ]);
   content.replaceChildren(
     el('h2', {}, ['审计']),
     el('p', { className: 'lede' }, ['管理面写操作只追加记录，用于追溯。']),
-    table(['时间', '动作', '对象', '详情'], rows),
+    table(['时间', '操作者', '动作', '对象', '详情'], rows),
   );
 }
 

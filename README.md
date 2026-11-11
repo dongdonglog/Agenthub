@@ -166,12 +166,12 @@ data/skills/
 | 页面 | 内容 |
 |---|---|
 | 运行概览 | 通道状态、模型、计数、在线试跑 |
-| 在线会话 | 会话列表 → 消息与运行 |
-| 历史会话 | 按会话代聚合的历史记录 |
+| 在线会话 | 会话列表 → 消息与运行；可对当前会话代重新应用 Profile |
+| 历史会话 | 按会话代聚合，可点进消息详情 |
 | Profile | 技能/MCP 组合档案；「应用」后新会话代绑定该档案，旧代保持原配置（`/reset` 后切换） |
 | Skill | 名称/状态/文件数/大小/可执行/引用/更新时间；编辑、停用、启用、归档、删除 |
 | MCP | 增删改 MCP 配置 |
-| 审计 | 管理面写操作记录（技能、MCP、Profile 变更） |
+| 审计 | 管理面写操作记录（技能、MCP、Profile、会话配置变更），支持 `X-AA-Operator` 透传操作者 |
 | 设置 | 当前生效配置（只读） |
 
 设置 `AGENTHUB_ADMIN_TOKEN` 后，管理面要求 Bearer Token 或先访问
@@ -194,10 +194,14 @@ data/skills/
 ## 测试
 
 ```bash
-go test ./...                                   # 单元 + 集成（部分跳过）
-AGENTHUB_TEST_DATABASE_URL=postgres://... \
-  go test ./internal/core ./internal/store      # 真实 PostgreSQL 用例
+go test ./...                                   # 单元 + 集成（数据库用例自动跳过）
+
+# 真实 PostgreSQL：必须用独立测试库（测试会清空表），并串行跑包
+AGENTHUB_TEST_DATABASE_URL='postgres://.../agenthub_test?sslmode=disable' \
+  go test -p 1 ./internal/core ./internal/store
 ```
+
+> 指向 `postgres` 库的测试会被自动跳过，避免误删应用数据。
 
 ## 常见问题
 

@@ -136,7 +136,10 @@ func (j *Journal) SaveProfileBinding(ctx context.Context, conv string, generatio
 	_, err := j.pool.Exec(ctx, `
 		INSERT INTO conversation_profile (conversation_id, generation, profile_name, skills, mcps)
 		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (conversation_id, generation) DO NOTHING`,
+		ON CONFLICT (conversation_id, generation) DO UPDATE SET
+			profile_name = EXCLUDED.profile_name,
+			skills = EXCLUDED.skills,
+			mcps = EXCLUDED.mcps`,
 		conv, generation, p.Name, skills, mcps)
 	return err
 }

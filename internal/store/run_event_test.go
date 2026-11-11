@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -11,10 +10,7 @@ import (
 )
 
 func TestRunEventRoundTrip(t *testing.T) {
-	url := os.Getenv("AGENTHUB_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("未设置 AGENTHUB_TEST_DATABASE_URL，跳过真实数据库用例")
-	}
+	url := testDatabaseURL(t)
 	ctx := context.Background()
 	db, err := store.Open(ctx, url, 4)
 	if err != nil {

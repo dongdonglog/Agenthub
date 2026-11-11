@@ -21,9 +21,12 @@ docker compose up -d --build   # 本地部署（app + postgres）
 真实 PostgreSQL 用例：
 
 ```bash
-AGENTHUB_TEST_DATABASE_URL='postgres://postgres:pass@127.0.0.1:5432/postgres?sslmode=disable' \
-  go test ./internal/core ./internal/store -count=1
+AGENTHUB_TEST_DATABASE_URL='postgres://postgres:pass@127.0.0.1:5432/agenthub_test?sslmode=disable' \
+  go test -p 1 ./internal/core ./internal/store -count=1
 ```
+
+- 必须用**独立测试库**：测试会 `TRUNCATE` 表；指向 `postgres` 库会自动跳过。
+- 多个包共用一个测试库时用 `-p 1` 串行执行，避免互相清表。
 
 CI 执行 `gofmt -l` / `go vet` / `go test` / `go build`，提交前本地跑一遍。
 

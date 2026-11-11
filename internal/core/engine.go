@@ -177,6 +177,21 @@ func (e *Engine) profileFor(ctx context.Context, conv string, generation int) Pr
 	return src
 }
 
+// RebindProfile 把会话当前代重新绑定到指定 Profile。
+//
+// @remarks 只影响当前代；下一批运行即生效。数据库写入失败时内存已更新，返回错误供调用方提示。
+func (e *Engine) RebindProfile(ctx context.Context, conv string, p ProfileSelection) error {
+	gen := e.Generation(conv)
+	key := conv + "#" + strconv.Itoa(gen)
+	e.mu.Lock()
+	e.profiles[key] = p
+	e.mu.Unlock()
+	if e.journal != nil {
+		return e.journal.SaveProfileBinding(ctx, conv, gen, p)
+	}
+	return nil
+}
+
 // ProfileOf 返回会话当前代绑定的 Profile 名称。
 func (e *Engine) ProfileOf(conv string) string {
 	e.mu.Lock()
