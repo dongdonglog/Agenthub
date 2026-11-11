@@ -23,6 +23,7 @@ type Message struct {
 	ID string
 	// Role 是 user 或 assistant。
 	Role           string
+	Generation     int
 	ConversationID string
 	ChatID         string
 	ExternalID     string
@@ -82,6 +83,8 @@ type Presenter interface {
 type Journal interface {
 	SaveMessage(ctx context.Context, m *Message) (bool, error)
 	SetMessageStatus(ctx context.Context, ids []string, status string) error
+	SaveGeneration(ctx context.Context, conversationID string, generation int) error
+	LoadGenerations(ctx context.Context) (map[string]int, error)
 	SaveRun(ctx context.Context, r *Run) error
 	SaveDelivery(ctx context.Context, d *Delivery) error
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
@@ -95,19 +98,20 @@ type Engine struct {
 	log   *slog.Logger
 	now   func() time.Time
 
-	messages   map[string]*Message
-	order      map[string][]string
-	dedupe     map[string]string
-	runs       map[string]*Run
-	runOrder   []string
-	active     map[string]string
-	cancels    map[string]context.CancelFunc
-	deliveries map[string]*Delivery
-	sent       map[string]bool
-	seq        map[string]int64
-	runSeq     int64
-	journal    Journal
-	presenter  Presenter
+	messages    map[string]*Message
+	order       map[string][]string
+	dedupe      map[string]string
+	runs        map[string]*Run
+	runOrder    []string
+	active      map[string]string
+	cancels     map[string]context.CancelFunc
+	deliveries  map[string]*Delivery
+	sent        map[string]bool
+	seq         map[string]int64
+	runSeq      int64
+	journal     Journal
+	presenter   Presenter
+	generations map[string]int
 }
 
 // New 构造执行引擎。
@@ -122,19 +126,20 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		log = slog.Default()
 	}
 	return &Engine{
-		agent:      a,
-		ch:         ch,
-		log:        log,
-		now:        time.Now,
-		messages:   make(map[string]*Message),
-		order:      make(map[string][]string),
-		dedupe:     make(map[string]string),
-		runs:       make(map[string]*Run),
-		active:     make(map[string]string),
-		cancels:    make(map[string]context.CancelFunc),
-		deliveries: make(map[string]*Delivery),
-		sent:       make(map[string]bool),
-		seq:        make(map[string]int64),
+		agent:       a,
+		ch:          ch,
+		log:         log,
+		now:         time.Now,
+		messages:    make(map[string]*Message),
+		order:       make(map[string][]string),
+		dedupe:      make(map[string]string),
+		runs:        make(map[string]*Run),
+		active:      make(map[string]string),
+		cancels:     make(map[string]context.CancelFunc),
+		deliveries:  make(map[string]*Delivery),
+		generations: make(map[string]int),
+		sent:        make(map[string]bool),
+		seq:         make(map[string]int64),
 	}
 }
 
@@ -165,6 +170,9 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if m.Status == "processing" {
 			m.Status = "queued"
 		}
+		if m.Generation > e.generations[m.ConversationID] {
+			e.generations[m.ConversationID] = m.Generation
+		}
 		e.messages[m.ID] = m
 		e.dedupe[m.ConversationID+"|"+m.ExternalID] = m.ID
 		if n := seqSuffix(m.ID); n > e.seq[m.ConversationID] {
@@ -172,6 +180,13 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 		if m.Status == "queued" {
 			e.order[m.ConversationID] = append(e.order[m.ConversationID], m.ID)
+		}
+	}
+	if gens, err := e.journal.LoadGenerations(ctx); err == nil {
+		for conv, gen := range gens {
+			if gen > e.generations[conv] {
+				e.generations[conv] = gen
+			}
 		}
 	}
 	for _, r := range runs {
@@ -225,6 +240,7 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 		ConversationID: conv,
 		ChatID:         in.Chat.ID,
 		Role:           "user",
+		Generation:     e.generation(conv),
 		ExternalID:     in.ExternalID,
 		SenderOpenID:   in.Sender.OpenID,
 		Text:           in.Text,
@@ -303,6 +319,22 @@ func (e *Engine) Stop(conv string) bool {
 	return true
 }
 
+// Generation 返回会话当前代。
+func (e *Engine) Generation(conv string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.generationLocked(conv)
+}
+
+func (e *Engine) generation(conv string) int { return e.generationLocked(conv) }
+
+func (e *Engine) generationLocked(conv string) int {
+	if g := e.generations[conv]; g > 0 {
+		return g
+	}
+	return 1
+}
+
 // Status 返回会话的排队数与当前运行。
 func (e *Engine) Status(conv string) (queued int, runID string) {
 	e.mu.Lock()
@@ -330,10 +362,21 @@ func (e *Engine) Clear(conv string) int {
 	return cancelled
 }
 
-// Reset 停止当前运行并清空排队。
+// Reset 停止当前运行、清空排队并开启新会话代。
+//
+// @remarks 新代不再携带旧历史；旧消息仍保留在库中供追溯。
 func (e *Engine) Reset(conv string) bool {
 	stopped := e.Stop(conv)
 	e.Clear(conv)
+	e.mu.Lock()
+	e.generations[conv] = e.generationLocked(conv) + 1
+	gen := e.generations[conv]
+	e.mu.Unlock()
+	if e.journal != nil {
+		if err := e.journal.SaveGeneration(context.Background(), conv, gen); err != nil {
+			e.log.Error("persist generation failed", "error", err)
+		}
+	}
 	return stopped
 }
 
@@ -605,6 +648,9 @@ func (e *Engine) history(conv string, batch []*Message) []agent.Message {
 		if m.Status != "done" && m.Status != "failed" && m.Status != "stopped" {
 			continue
 		}
+		if m.Generation != e.generationLocked(conv) {
+			continue
+		}
 		msgs = append(msgs, m)
 	}
 	sort.Slice(msgs, func(i, j int) bool { return msgs[i].CreatedAt.Before(msgs[j].CreatedAt) })
@@ -626,6 +672,7 @@ func (e *Engine) appendAssistant(conv, runID, text string) {
 	msg := &Message{
 		ID:             "asst_" + runID,
 		Role:           "assistant",
+		Generation:     e.Generation(conv),
 		ConversationID: conv,
 		ChatID:         "",
 		Status:         "done",

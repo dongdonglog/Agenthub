@@ -26,10 +26,10 @@ func NewJournal(db *DB) *Journal {
 // SaveMessage 写入消息；重复（同会话同外部 ID）返回 false。
 func (j *Journal) SaveMessage(ctx context.Context, m *core.Message) (bool, error) {
 	tag, err := j.pool.Exec(ctx, `
-		INSERT INTO message_state (id, role, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		INSERT INTO message_state (id, role, generation, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (conversation_id, external_id) DO NOTHING`,
-		m.ID, defaultRole(m.Role), m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.Text, m.MsgType, m.Status, m.CreatedAt)
+		m.ID, defaultRole(m.Role), defaultGeneration(m.Generation), m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.Text, m.MsgType, m.Status, m.CreatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -72,6 +72,42 @@ func (j *Journal) SaveDelivery(ctx context.Context, d *core.Delivery) error {
 	return err
 }
 
+func defaultGeneration(gen int) int {
+	if gen <= 0 {
+		return 1
+	}
+	return gen
+}
+
+// SaveGeneration 记录会话当前代。
+func (j *Journal) SaveGeneration(ctx context.Context, conversationID string, generation int) error {
+	_, err := j.pool.Exec(ctx, `
+		INSERT INTO conversation_state (id, chat_id, sender, generation)
+		VALUES ($1, '', '', $2)
+		ON CONFLICT (id) DO UPDATE SET generation = EXCLUDED.generation, last_active = now()`,
+		conversationID, generation)
+	return err
+}
+
+// LoadGenerations 读取全部会话的当前代。
+func (j *Journal) LoadGenerations(ctx context.Context) (map[string]int, error) {
+	rows, err := j.pool.Query(ctx, `SELECT id, generation FROM conversation_state`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]int)
+	for rows.Next() {
+		var id string
+		var gen int
+		if err := rows.Scan(&id, &gen); err != nil {
+			return nil, err
+		}
+		out[id] = gen
+	}
+	return out, rows.Err()
+}
+
 func defaultRole(role string) string {
 	if role == "" {
 		return "user"
@@ -82,7 +118,7 @@ func defaultRole(role string) string {
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。
 func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, []*core.Run, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT id, role, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
+		SELECT id, role, generation, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
 		FROM message_state ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
@@ -90,7 +126,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	var messages []*core.Message
 	for rows.Next() {
 		m := &core.Message{}
-		if err := rows.Scan(&m.ID, &m.Role, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
+		if err := rows.Scan(&m.ID, &m.Role, &m.Generation, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
 			&m.Text, &m.MsgType, &m.Status, &m.CreatedAt); err != nil {
 			rows.Close()
 			return nil, nil, err

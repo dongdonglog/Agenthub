@@ -334,3 +334,30 @@ func TestSecondTurnCarriesHistory(t *testing.T) {
 		t.Fatalf("历史应包含助手回复，实际 %+v", recorder.history[1])
 	}
 }
+
+func TestResetStartsNewGeneration(t *testing.T) {
+	ch := &captureChannel{}
+	recorder := &recordingAgent{}
+	eng := newEngine(t, ch, recorder)
+	ctx := context.Background()
+
+	if _, err := eng.Submit(ctx, inbound("om_g1", "旧话题")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eng.Reset("tenant_1:oc_chat:ou_user")
+	if _, err := eng.Submit(ctx, inbound("om_g2", "新话题")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.history) != 0 {
+		t.Fatalf("reset 后不应带旧历史，实际 %d 条", len(recorder.history))
+	}
+	if gen := eng.Generation("tenant_1:oc_chat:ou_user"); gen != 2 {
+		t.Fatalf("generation = %d, want 2", gen)
+	}
+}

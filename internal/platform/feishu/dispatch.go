@@ -171,7 +171,7 @@ func (d *Dispatcher) handleCommand(ctx context.Context, msg channel.Inbound) {
 		}
 	case "/reset":
 		d.engine.Reset(conv)
-		reply = "已停止当前处理并清空排队。"
+		reply = "已停止当前处理、清空排队，并开启新的会话上下文。"
 	default:
 		reply = "未知命令，发送 /help 查看可用命令。"
 	}
