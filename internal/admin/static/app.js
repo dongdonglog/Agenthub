@@ -176,7 +176,7 @@ async function renderSession(id) {
   const runRows = data.runs.map((r) => [r.ID || r.id, r.State || r.state, (r.Output || r.output || '').slice(0, 60)]);
   content.replaceChildren(
     el('h2', {}, ['会话详情']),
-    el('p', { className: 'lede' }, [id]),
+    el('p', { className: 'lede' }, [id, data.profile ? ` · Profile：${data.profile}` : '']),
     el('h3', {}, ['消息']),
     msgRows.length ? table(['ID', '状态', '内容'], msgRows) : empty('📭', '没有消息'),
     el('h3', {}, ['运行']),

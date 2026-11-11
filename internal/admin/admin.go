@@ -366,6 +366,7 @@ func (s *Server) handleSession(rw http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"id":       id,
+		"profile":  s.engine.ProfileOf(id),
 		"messages": messages,
 		"runs":     runs,
 	})

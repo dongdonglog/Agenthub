@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,6 +43,8 @@ type Engine struct {
 	presenter   Presenter
 	metrics     Metrics
 	generations map[string]int
+	profiles    map[string]ProfileSelection
+	profileSrc  func() ProfileSelection
 	events      map[string][]RunEvent
 	// retryDelay 计算投递重试间隔，默认指数退避。
 	retryDelay func(attempt int) time.Duration
@@ -78,6 +81,7 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		cancels:            make(map[string]context.CancelFunc),
 		deliveries:         make(map[string]*Delivery),
 		generations:        make(map[string]int),
+		profiles:           make(map[string]ProfileSelection),
 		events:             make(map[string][]RunEvent),
 		maxMessagesPerConv: 100,
 		maxConversations:   200,
@@ -138,6 +142,49 @@ func (e *Engine) SetJournal(j Journal) {
 // Restore 从持久化恢复最近消息与运行。
 //
 // @remarks 重启时处于 processing 的消息重新排队，避免中断后卡住。
+// SetProfileSource 设置新会话代绑定配置的来源（通常是当前生效 Profile）。
+func (e *Engine) SetProfileSource(fn func() ProfileSelection) {
+	e.profileSrc = fn
+}
+
+// profileFor 返回会话代绑定的配置；首次出现时按当前来源固化。
+func (e *Engine) profileFor(ctx context.Context, conv string, generation int) ProfileSelection {
+	key := conv + "#" + strconv.Itoa(generation)
+	e.mu.Lock()
+	if p, ok := e.profiles[key]; ok {
+		e.mu.Unlock()
+		return p
+	}
+	e.mu.Unlock()
+
+	var src ProfileSelection
+	if e.profileSrc != nil {
+		src = e.profileSrc()
+	}
+	e.mu.Lock()
+	if p, ok := e.profiles[key]; ok {
+		e.mu.Unlock()
+		return p
+	}
+	e.profiles[key] = src
+	e.mu.Unlock()
+
+	if e.journal != nil {
+		if err := e.journal.SaveProfileBinding(ctx, conv, generation, src); err != nil {
+			e.log.Debug("persist profile binding failed", "error", err)
+		}
+	}
+	return src
+}
+
+// ProfileOf 返回会话当前代绑定的 Profile 名称。
+func (e *Engine) ProfileOf(conv string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	p := e.profiles[conv+"#"+strconv.Itoa(e.generationLocked(conv))]
+	return p.Name
+}
+
 // newTraceID 生成短 trace 标识，用于贯通消息 → 运行 → 投递日志。
 func newTraceID() string {
 	var b [4]byte

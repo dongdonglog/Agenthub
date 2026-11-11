@@ -70,8 +70,32 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		model = c.VisionModel
 	}
 
+	skillAllowed := func(name string) bool {
+		if len(in.SkillAllow) > 0 {
+			return contains(in.SkillAllow, name)
+		}
+		if c.SkillFilter != nil {
+			return c.SkillFilter(name)
+		}
+		return true
+	}
+	toolAllowed := func(name string) bool {
+		if len(in.MCPAllow) > 0 && strings.HasPrefix(name, "mcp_") {
+			for _, server := range in.MCPAllow {
+				if toolBelongsTo(name, server) {
+					return true
+				}
+			}
+			return false
+		}
+		if c.ToolFilter != nil && len(in.MCPAllow) == 0 {
+			return c.ToolFilter(name)
+		}
+		return true
+	}
+
 	messages := make([]map[string]any, 0, len(in.Messages)+1)
-	messages = append(messages, map[string]any{"role": "system", "content": c.systemPrompt()})
+	messages = append(messages, map[string]any{"role": "system", "content": c.systemPrompt(skillAllowed)})
 	for _, m := range in.History {
 		role := m.Role
 		if role != "assistant" {
@@ -100,7 +124,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	var last string
 	var usage Usage
 	for round := 0; round < rounds; round++ {
-		msg, err := c.completeWithRetry(ctx, messages, model)
+		msg, err := c.completeWithRetry(ctx, messages, model, toolAllowed)
 		if err != nil {
 			return Output{}, err
 		}
@@ -122,7 +146,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		for _, call := range msg.ToolCalls {
 			progress("正在调用工具：" + call.Function.Name)
 			started := time.Now()
-			result, callErr := c.executeTool(ctx, call, log)
+			result, callErr := c.executeTool(ctx, call, log, toolAllowed)
 			if in.OnTool != nil {
 				in.OnTool(call.Function.Name, time.Since(started), callErr)
 			}
@@ -162,10 +186,10 @@ type assistantMessage struct {
 }
 
 // completeWithRetry 在 429/5xx 时退避重试，仍失败则尝试备用模型。
-func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any, model string) (assistantMessage, error) {
+func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any, model string, toolAllowed func(string) bool) (assistantMessage, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		msg, err := c.complete(ctx, messages, model)
+		msg, err := c.complete(ctx, messages, model, toolAllowed)
 		if err == nil {
 			return msg, nil
 		}
@@ -180,7 +204,7 @@ func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any,
 		}
 	}
 	if c.FallbackModel != "" && c.FallbackModel != model {
-		if msg, err := c.complete(ctx, messages, c.FallbackModel); err == nil {
+		if msg, err := c.complete(ctx, messages, c.FallbackModel, toolAllowed); err == nil {
 			return msg, nil
 		}
 	}
@@ -206,7 +230,7 @@ func (e *modelError) Error() string {
 	return fmt.Sprintf("模型返回 %d: %s", e.Status, truncate(e.Body, 300))
 }
 
-func (c *Chat) complete(ctx context.Context, messages []map[string]any, model string) (assistantMessage, error) {
+func (c *Chat) complete(ctx context.Context, messages []map[string]any, model string, toolAllowed func(string) bool) (assistantMessage, error) {
 	payload := map[string]any{
 		"model":       model,
 		"messages":    messages,
@@ -215,7 +239,7 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any, model st
 	if len(c.Tools) > 0 {
 		specs := make([]map[string]any, 0, len(c.Tools))
 		for _, t := range c.Tools {
-			if c.ToolFilter != nil && !c.ToolFilter(t.Name()) {
+			if !toolAllowed(t.Name()) {
 				continue
 			}
 			specs = append(specs, map[string]any{
@@ -277,12 +301,12 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any, model st
 	return msg, nil
 }
 
-func (c *Chat) executeTool(ctx context.Context, call toolCall, log *slog.Logger) (string, error) {
+func (c *Chat) executeTool(ctx context.Context, call toolCall, log *slog.Logger, toolAllowed func(string) bool) (string, error) {
 	for _, t := range c.Tools {
 		if t.Name() != call.Function.Name {
 			continue
 		}
-		if c.ToolFilter != nil && !c.ToolFilter(t.Name()) {
+		if !toolAllowed(t.Name()) {
 			return "", errors.New("工具未启用：" + t.Name())
 		}
 		args := json.RawMessage(call.Function.Arguments)
@@ -299,7 +323,7 @@ func (c *Chat) executeTool(ctx context.Context, call toolCall, log *slog.Logger)
 	return "", errors.New("未知工具：" + call.Function.Name)
 }
 
-func (c *Chat) systemPrompt() string {
+func (c *Chat) systemPrompt(skillAllowed func(string) bool) string {
 	base := c.SystemPrompt
 	if base == "" {
 		base = "你是团队助手 AgentHub，在飞书里回答问题。回答简洁、可执行；不确定时说明缺少什么信息。"
@@ -326,7 +350,7 @@ func (c *Chat) systemPrompt() string {
 	used := 0
 	skipped := 0
 	for _, s := range loaded {
-		if c.SkillFilter != nil && !c.SkillFilter(s.Name) {
+		if !skillAllowed(s.Name) {
 			skipped++
 			continue
 		}
@@ -351,6 +375,29 @@ func (c *Chat) systemPrompt() string {
 		b.WriteString(fmt.Sprintf("\n（%d 个技能未在当前 Profile 中启用）\n", skipped))
 	}
 	return b.String()
+}
+
+func contains(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+// toolBelongsTo 判断工具是否属于指定 MCP 服务（mcp_<server>_ 前缀）。
+func toolBelongsTo(toolName, server string) bool {
+	prefix := "mcp_"
+	for _, r := range server {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			prefix += string(r)
+		} else {
+			prefix += "_"
+		}
+	}
+	prefix += "_"
+	return strings.HasPrefix(toolName, prefix)
 }
 
 // hasImages 判断本批是否包含可读图片。

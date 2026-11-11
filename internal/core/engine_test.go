@@ -565,3 +565,60 @@ func TestTraceIDPropagates(t *testing.T) {
 		t.Fatalf("投递 trace 不一致: %+v", d)
 	}
 }
+
+type profileAgent struct {
+	last agent.Input
+}
+
+func (p *profileAgent) Run(_ context.Context, in agent.Input) (agent.Output, error) {
+	p.last = in
+	return agent.Output{Text: "ok"}, nil
+}
+
+func TestProfileBindingSticksPerGeneration(t *testing.T) {
+	pa := &profileAgent{}
+	eng := newEngine(t, &captureChannel{}, pa)
+	ctx := context.Background()
+
+	eng.SetProfileSource(func() core.ProfileSelection {
+		return core.ProfileSelection{Name: "ops", Skills: []string{"a"}, MCPs: []string{"demo"}}
+	})
+	if _, err := eng.Submit(ctx, inbound("om_p1", "第一问")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(pa.last.SkillAllow) != 1 || pa.last.SkillAllow[0] != "a" || len(pa.last.MCPAllow) != 1 {
+		t.Fatalf("首轮绑定 = %+v", pa.last)
+	}
+
+	// 切换全局 Profile，当前代不应受影响。
+	eng.SetProfileSource(func() core.ProfileSelection {
+		return core.ProfileSelection{Name: "dev", Skills: []string{"b"}}
+	})
+	if _, err := eng.Submit(ctx, inbound("om_p2", "第二问")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if pa.last.SkillAllow[0] != "a" {
+		t.Fatalf("同一代不应切换: %+v", pa.last)
+	}
+
+	// /reset 后新代采用新的全局 Profile。
+	eng.Reset("tenant_1:oc_chat:ou_user")
+	if _, err := eng.Submit(ctx, inbound("om_p3", "新代")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if pa.last.SkillAllow[0] != "b" {
+		t.Fatalf("新代应使用新 Profile: %+v", pa.last)
+	}
+	if got := eng.ProfileOf("tenant_1:oc_chat:ou_user"); got != "dev" {
+		t.Fatalf("ProfileOf = %s", got)
+	}
+}

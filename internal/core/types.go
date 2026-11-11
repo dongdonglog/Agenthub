@@ -90,6 +90,13 @@ type Presenter interface {
 	Close(ctx context.Context, handle, body string, failed bool) error
 }
 
+// ProfileSelection 是绑定到会话代的配置档案快照。
+type ProfileSelection struct {
+	Name   string   `json:"name"`
+	Skills []string `json:"skills"`
+	MCPs   []string `json:"mcps"`
+}
+
 // Journal 是核心状态的持久化接口。
 //
 // @remarks 实现方负责幂等：同一会话同一外部消息 ID 只应写入一次。
@@ -102,6 +109,8 @@ type Journal interface {
 	SaveDelivery(ctx context.Context, d *Delivery) error
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
 	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	SaveProfileBinding(ctx context.Context, conv string, generation int, p ProfileSelection) error
+	LoadProfileBindings(ctx context.Context, limit int) (map[string]ProfileSelection, error)
 	SaveRunEvent(ctx context.Context, ev RunEvent) error
 	LoadRunEvents(ctx context.Context, runID string) ([]RunEvent, error)
 }

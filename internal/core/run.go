@@ -90,13 +90,16 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		}
 	}
 
-	e.log.Info("run started", "run", run.ID, "trace", run.TraceID, "inputs", len(batch))
+	binding := e.profileFor(ctx, conv, batch[0].Generation)
+	e.log.Info("run started", "run", run.ID, "trace", run.TraceID, "inputs", len(batch), "profile", binding.Name)
 	input := agent.Input{
 		TraceID:        run.TraceID,
 		RunID:          run.ID,
 		ConversationID: conv,
 		Progress:       progress,
 		History:        e.history(conv, batch),
+		SkillAllow:     binding.Skills,
+		MCPAllow:       binding.MCPs,
 		OnTool: func(name string, dur time.Duration, err error) {
 			detail := "ok"
 			if err != nil {

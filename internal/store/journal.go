@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -126,6 +127,47 @@ func defaultRole(role string) string {
 		return "user"
 	}
 	return role
+}
+
+// SaveProfileBinding 记录会话代绑定的配置档案。
+func (j *Journal) SaveProfileBinding(ctx context.Context, conv string, generation int, p core.ProfileSelection) error {
+	skills, _ := json.Marshal(p.Skills)
+	mcps, _ := json.Marshal(p.MCPs)
+	_, err := j.pool.Exec(ctx, `
+		INSERT INTO conversation_profile (conversation_id, generation, profile_name, skills, mcps)
+		VALUES ($1,$2,$3,$4,$5)
+		ON CONFLICT (conversation_id, generation) DO NOTHING`,
+		conv, generation, p.Name, skills, mcps)
+	return err
+}
+
+// LoadProfileBindings 读取全部会话代绑定。
+func (j *Journal) LoadProfileBindings(ctx context.Context, limit int) (map[string]core.ProfileSelection, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT conversation_id, generation, profile_name, skills, mcps
+		FROM conversation_profile ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]core.ProfileSelection)
+	for rows.Next() {
+		var conv, name string
+		var gen int
+		var skillsRaw, mcpsRaw []byte
+		if err := rows.Scan(&conv, &gen, &name, &skillsRaw, &mcpsRaw); err != nil {
+			return nil, err
+		}
+		p := core.ProfileSelection{Name: name}
+		_ = json.Unmarshal(skillsRaw, &p.Skills)
+		_ = json.Unmarshal(mcpsRaw, &p.MCPs)
+		out[profileKey(conv, gen)] = p
+	}
+	return out, rows.Err()
+}
+
+func profileKey(conv string, generation int) string {
+	return conv + "#" + strconv.Itoa(generation)
 }
 
 // SaveRunEvent 追加一条运行事件。

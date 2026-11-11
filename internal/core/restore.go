@@ -47,6 +47,12 @@ func (e *Engine) Restore(ctx context.Context) error {
 	}
 	e.mu.Unlock()
 
+	if bindings, err := e.journal.LoadProfileBindings(ctx, 1000); err == nil {
+		for key, p := range bindings {
+			e.profiles[key] = p
+		}
+	}
+
 	// 启动补偿：上次未送达的结果继续投递。
 	if pending, err := e.journal.LoadPendingDeliveries(ctx, 100); err == nil {
 		for _, d := range pending {

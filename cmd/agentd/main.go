@@ -109,6 +109,10 @@ func run() int {
 	profiles := store.NewProfileStore(cfg.Storage.Dir)
 	runner := newAgent(cfg, skillsDir, tools, profiles, logger)
 	engine := core.New(runner, ch, logger)
+	engine.SetProfileSource(func() core.ProfileSelection {
+		active := profiles.Active()
+		return core.ProfileSelection{Name: active.Name, Skills: active.Skills, MCPs: active.MCPs}
+	})
 	if fc, ok := ch.(*feishu.Channel); ok {
 		engine.SetPresenter(feishu.NewCardPresenter(fc.Client(), logger).WithStopButton(cfg.Feishu.CardActionEnabled))
 	}
