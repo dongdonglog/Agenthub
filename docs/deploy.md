@@ -84,6 +84,42 @@ BACKUP_DIR=/backup KEEP_DAYS=30 ./scripts/backup.sh
 
 恢复到已有库会覆盖数据，脚本会要求输入 `yes`。
 
+## 镜像发布
+
+打 tag 才会构建并推送（分支提交不发布）：
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+GitHub Actions（`.github/workflows/release.yml`）会先跑测试，再构建 `linux/amd64` + `linux/arm64`
+镜像并推送到 `donglog/agenthub`，生成三个 tag：`1.2.3`、`1.2`、`latest`（预发布版本不带 `latest`）。
+
+需要在仓库 Secrets 配置：
+
+| Secret | 说明 |
+|---|---|
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名（donglog） |
+| `DOCKERHUB_TOKEN` | Docker Hub Access Token（不要用密码） |
+
+用发布镜像部署（不本地构建）：
+
+```bash
+AGENTHUB_TAG=1.2.3 docker compose pull
+AGENTHUB_TAG=1.2.3 docker compose up -d
+```
+
+或直接运行：
+
+```bash
+docker run -d --name agenthub \
+  --env-file .env \
+  -v agenthub-data:/data \
+  -p 127.0.0.1:8787:8787 -p 127.0.0.1:8788:8788 \
+  donglog/agenthub:1.2.3
+```
+
 ## 升级
 
 ```bash
