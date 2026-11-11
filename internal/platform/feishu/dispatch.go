@@ -76,9 +76,9 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 	if !ok {
 		return nil
 	}
-	if !d.allowed(msg) {
-		d.log.Warn("feishu message rejected by policy: 把 sender 加入 FEISHU_ALLOWED_USERS 后重启",
-			"chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
+	if ok, reason := d.allowed(msg); !ok {
+		d.log.Warn("feishu message ignored",
+			"reason", reason, "chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
 		return nil
 	}
 	if len(msg.Attachments) > 0 && d.opts.Client != nil && d.opts.AttachmentsDir != "" {
@@ -147,21 +147,21 @@ func (d *Dispatcher) fetchAttachments(ctx context.Context, msg *channel.Inbound)
 	}
 }
 
-func (d *Dispatcher) allowed(msg channel.Inbound) bool {
+func (d *Dispatcher) allowed(msg channel.Inbound) (bool, string) {
 	if len(d.allowedChats) > 0 {
 		if _, ok := d.allowedChats[msg.Chat.ID]; !ok {
-			return false
+			return false, "chat_not_allowed"
 		}
 	}
 	if len(d.allowedUsers) > 0 {
 		if _, ok := d.allowedUsers[msg.Sender.OpenID]; !ok {
-			return false
+			return false, "sender_not_allowed"
 		}
 	}
 	if d.opts.RequireMention && msg.Chat.Kind != "p2p" && !msg.MentionsBot {
-		return false
+		return false, "group_message_without_mention"
 	}
-	return true
+	return true, ""
 }
 
 func toSet(items []string) map[string]struct{} {

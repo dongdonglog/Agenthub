@@ -201,12 +201,18 @@ func (c *Chat) systemPrompt() string {
 	if base == "" {
 		base = "你是团队助手 AgentHub，在飞书里回答问题。回答简洁、可执行；不确定时说明缺少什么信息。"
 	}
-	loaded, err := LoadSkills(c.SkillsDir)
-	if err != nil || len(loaded) == 0 {
-		return base
-	}
 	var b strings.Builder
 	b.WriteString(base)
+	if c.Model != "" {
+		b.WriteString("\n\n当前底层模型：")
+		b.WriteString(c.Model)
+		b.WriteString("（由部署配置决定；被问到用时如实回答）。")
+	}
+
+	loaded, err := LoadSkills(c.SkillsDir)
+	if err != nil || len(loaded) == 0 {
+		return b.String()
+	}
 	b.WriteString("\n\n# 可用技能\n在回答前判断是否适用；适用时遵循其步骤与输出格式。\n")
 	for _, s := range loaded {
 		b.WriteString("\n## ")
