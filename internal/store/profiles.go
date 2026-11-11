@@ -90,3 +90,46 @@ func (s *ProfileStore) write(items []Profile) error {
 	}
 	return os.WriteFile(s.path, raw, 0o644)
 }
+
+// ActiveProfile 是当前生效的资源配置。
+type ActiveProfile struct {
+	Name   string   `yaml:"name" json:"name"`
+	Skills []string `yaml:"skills" json:"skills"`
+	MCPs   []string `yaml:"mcps" json:"mcps"`
+}
+
+// activePath 返回当前配置文件名。
+func (s *ProfileStore) activePath() string {
+	return filepath.Join(filepath.Dir(s.path), "active_profile.yaml")
+}
+
+// Active 读取当前生效配置；不存在时返回空（表示不过滤）。
+func (s *ProfileStore) Active() ActiveProfile {
+	raw, err := os.ReadFile(s.activePath())
+	if err != nil {
+		return ActiveProfile{}
+	}
+	var out ActiveProfile
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		return ActiveProfile{}
+	}
+	return out
+}
+
+// Apply 让指定档案生效。
+func (s *ProfileStore) Apply(name string) error {
+	items, err := s.ListProfiles()
+	if err != nil {
+		return err
+	}
+	for _, p := range items {
+		if p.Name == name {
+			raw, err := yaml.Marshal(ActiveProfile{Name: p.Name, Skills: p.Skills, MCPs: p.MCPs})
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(s.activePath(), raw, 0o644)
+		}
+	}
+	return errors.New("Profile 不存在")
+}

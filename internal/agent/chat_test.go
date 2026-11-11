@@ -396,3 +396,44 @@ func TestToolLogCarriesTraceID(t *testing.T) {
 		t.Fatalf("日志缺少工具调用: %s", out)
 	}
 }
+
+func TestChatFiltersSkillsAndTools(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"alpha", "beta"} {
+		sub := filepath.Join(dir, name)
+		_ = os.MkdirAll(sub, 0o755)
+		_ = os.WriteFile(filepath.Join(sub, "SKILL.md"), []byte("# "+name+"\n正文-"+name), 0o644)
+	}
+
+	var captured struct {
+		Tools    []any `json:"tools"`
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{
+		BaseURL: srv.URL, APIKey: "k", Model: "m", SkillsDir: dir,
+		Tools:       []agent.Tool{&fakeTool{name: "read_file"}, &fakeTool{name: "mcp_demo_echo"}},
+		SkillFilter: func(name string) bool { return name == "alpha" },
+		ToolFilter:  func(name string) bool { return name == "read_file" },
+	}
+	if _, err := c.Run(context.Background(), agent.Input{Messages: []agent.Message{{Text: "hi"}}}); err != nil {
+		t.Fatal(err)
+	}
+	sys := captured.Messages[0].Content
+	if !strings.Contains(sys, "alpha") || strings.Contains(sys, "正文-beta") {
+		t.Fatalf("技能过滤不正确: %s", sys)
+	}
+	if len(captured.Tools) != 1 {
+		t.Fatalf("工具过滤后应只剩 1 个，实际 %d", len(captured.Tools))
+	}
+}

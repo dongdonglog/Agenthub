@@ -182,3 +182,30 @@ func TestSkillFileAPI(t *testing.T) {
 		t.Fatalf("delete = %d", rec.Code)
 	}
 }
+
+func TestProfileApplyEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	ps := store.NewProfileStore(dir)
+	if err := ps.PutProfile(store.Profile{Name: "ops", Skills: []string{"demo"}}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := admin.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Storage: config.StorageConfig{Dir: dir}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := admin.New(cfg, core.New(nil, nil, logger), st, admin.Options{Profiles: ps}, logger).Handler()
+
+	rec := do(t, h, http.MethodPut, "/admin/api/v1/profiles/ops/apply", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply = %d %s", rec.Code, rec.Body.String())
+	}
+	if ps.Active().Name != "ops" {
+		t.Fatalf("active = %+v", ps.Active())
+	}
+	rec = do(t, h, http.MethodGet, "/admin/api/v1/profiles", "")
+	if !strings.Contains(rec.Body.String(), `"active":"ops"`) {
+		t.Fatalf("profiles = %s", rec.Body.String())
+	}
+}

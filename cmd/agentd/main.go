@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -105,7 +106,8 @@ func run() int {
 		logger.Info("mcp loaded", "summary", summary)
 	}
 
-	runner := newAgent(cfg, skillsDir, tools, logger)
+	profiles := store.NewProfileStore(cfg.Storage.Dir)
+	runner := newAgent(cfg, skillsDir, tools, profiles, logger)
 	engine := core.New(runner, ch, logger)
 	if fc, ok := ch.(*feishu.Channel); ok {
 		engine.SetPresenter(feishu.NewCardPresenter(fc.Client(), logger).WithStopButton(cfg.Feishu.CardActionEnabled))
@@ -136,7 +138,6 @@ func run() int {
 		logger.Error("admin storage unavailable", "error", err)
 		return 1
 	}
-	profiles := store.NewProfileStore(cfg.Storage.Dir)
 	if list, err := profiles.ListProfiles(); err == nil && len(list) == 0 {
 		// 首次启动：把当前可关联技能收进默认档案，便于管理台展示引用关系。
 		var names []string
@@ -227,12 +228,40 @@ func migrationsDir() string {
 	return "migrations"
 }
 
-func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, logger *slog.Logger) agent.Agent {
+func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, profiles *store.ProfileStore, logger *slog.Logger) agent.Agent {
 	if cfg.Agent.APIKey == "" {
 		logger.Warn("model api key not configured; falling back to echo agent")
 		return agent.Echo{}
 	}
 	logger.Info("model configured", "provider", cfg.Agent.Provider, "model", cfg.Agent.Model, "base_url", cfg.Agent.BaseURL)
+	skillFilter := func(name string) bool {
+		active := profiles.Active()
+		if len(active.Skills) == 0 {
+			return true
+		}
+		for _, item := range active.Skills {
+			if item == name {
+				return true
+			}
+		}
+		return false
+	}
+	toolFilter := func(name string) bool {
+		if !strings.HasPrefix(name, "mcp_") {
+			return true
+		}
+		active := profiles.Active()
+		if len(active.MCPs) == 0 {
+			return true
+		}
+		for _, server := range active.MCPs {
+			if mcp.ToolMatchesServer(name, server) {
+				return true
+			}
+		}
+		return false
+	}
+
 	return &agent.Chat{
 		BaseURL:       cfg.Agent.BaseURL,
 		APIKey:        cfg.Agent.APIKey,
@@ -243,6 +272,8 @@ func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, logger *
 		SkillsDir:     skillsDir,
 		Tools:         tools,
 		Logger:        logger,
+		SkillFilter:   skillFilter,
+		ToolFilter:    toolFilter,
 	}
 }
 

@@ -131,6 +131,12 @@ func (t *tool) Schema() map[string]any {
 	return t.info.InputSchema
 }
 
+// ToolMatchesServer 判断工具是否来自指定 MCP 服务。
+func ToolMatchesServer(toolName, server string) bool {
+	prefix := "mcp_" + unsafeChars.ReplaceAllString(server, "_") + "_"
+	return strings.HasPrefix(toolName, prefix)
+}
+
 // toolCallTimeout 限制单次工具调用时长。
 const toolCallTimeout = 60 * time.Second
 

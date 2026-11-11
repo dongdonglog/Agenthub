@@ -140,7 +140,7 @@ async function renderOverview(data) {
       card('工具', data.counts.tools),
     ]),
     el('div', { className: 'panel' }, [
-      el('div', { className: 'head' }, [el('b', {}, ['模型'])]),
+      el('div', { className: 'head' }, [el('b', {}, ['模型']), el('span', { className: 'muted' }, [`Profile：${data.active_profile || '未指定'}`])]),
       el('div', { className: 'muted' }, data.model.echo ? '未配置 API Key，当前为回显模式' : `${data.model.model} · ${data.model.base_url}`),
     ]),
     el('div', { className: 'panel' }, [
@@ -475,11 +475,31 @@ async function renderProfiles() {
   const skillsInput = el('input', { placeholder: '技能名，逗号分隔' });
   const mcpInput = el('input', { placeholder: 'MCP 名，逗号分隔' });
 
-  const rows = data.items.map((p) => [
-    p.name, p.description || '—', (p.skills || []).join(', ') || '—', (p.mcps || []).join(', ') || '—',
-  ]);
-  const list = rows.length ? table(['名称', '描述', '技能', 'MCP'], rows, (row) => {
-    const p = data.items.find((x) => x.name === row[0]);
+  const rows = data.items.map((p) => {
+    const actions = el('div', { className: 'row-actions', style: 'display:flex;gap:10px' });
+    if (p.name === data.active) {
+      actions.append(badge('生效中', 'ok'));
+    } else {
+      const apply = el('button', { className: 'link' }, ['应用']);
+      apply.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await api(`/profiles/${encodeURIComponent(p.name)}/apply`, { method: 'PUT' });
+          toast(`已应用 ${p.name}`);
+          await renderProfiles();
+        } catch (err) { toast(err.message, true); }
+      });
+      actions.append(apply);
+    }
+    return [
+      el('div', {}, [el('div', { className: 'strong' }, [p.name]), el('div', { className: 'muted small' }, [p.description || '—'])]),
+      (p.skills || []).length,
+      (p.mcps || []).length,
+      actions,
+    ];
+  });
+  const list = rows.length ? table(['名称', '技能数', 'MCP 数', '操作'], rows, (row) => {
+    const p = data.items.find((x) => x.name === row[0].textContent);
     nameInput.value = p.name;
     descInput.value = p.description || '';
     skillsInput.value = (p.skills || []).join(', ');
@@ -517,7 +537,7 @@ async function renderProfiles() {
 
   content.replaceChildren(
     el('h2', {}, ['Profile']),
-    el('p', { className: 'lede' }, ['记录技能与 MCP 的组合；当前用于统计引用，运行期切换在后续版本接入。']),
+    el('p', { className: 'lede' }, ['应用后立即影响后续运行：只注入该 Profile 的技能、只暴露它列出的 MCP 工具。']),
     list,
     el('h3', {}, ['编辑']),
     el('div', { className: 'form' }, [

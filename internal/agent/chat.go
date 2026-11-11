@@ -49,6 +49,10 @@ type Chat struct {
 	FallbackModel string
 	// VisionModel 用于带图片的运行；为空表示不启用图片理解。
 	VisionModel string
+	// SkillFilter 决定是否注入某个技能；nil 表示全部注入。
+	SkillFilter func(name string) bool
+	// ToolFilter 决定是否向模型暴露某个工具；nil 表示全部暴露。
+	ToolFilter func(name string) bool
 	// Logger 记录工具调用，可为空。
 	Logger *slog.Logger
 	// HTTP 客户端，默认 180 秒超时。
@@ -211,6 +215,9 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any, model st
 	if len(c.Tools) > 0 {
 		specs := make([]map[string]any, 0, len(c.Tools))
 		for _, t := range c.Tools {
+			if c.ToolFilter != nil && !c.ToolFilter(t.Name()) {
+				continue
+			}
 			specs = append(specs, map[string]any{
 				"type": "function",
 				"function": map[string]any{
@@ -275,6 +282,9 @@ func (c *Chat) executeTool(ctx context.Context, call toolCall, log *slog.Logger)
 		if t.Name() != call.Function.Name {
 			continue
 		}
+		if c.ToolFilter != nil && !c.ToolFilter(t.Name()) {
+			return "", errors.New("工具未启用：" + t.Name())
+		}
 		args := json.RawMessage(call.Function.Arguments)
 		if len(args) == 0 || !json.Valid(args) {
 			args = json.RawMessage(`{}`)
@@ -314,7 +324,12 @@ func (c *Chat) systemPrompt() string {
 	b.WriteString("\n\n# 可用技能\n在回答前判断是否适用；适用时遵循其步骤与输出格式。\n")
 	const skillBudget = 64 * 1024
 	used := 0
+	skipped := 0
 	for _, s := range loaded {
+		if c.SkillFilter != nil && !c.SkillFilter(s.Name) {
+			skipped++
+			continue
+		}
 		var item strings.Builder
 		item.WriteString("\n## ")
 		item.WriteString(s.Name)
@@ -331,6 +346,9 @@ func (c *Chat) systemPrompt() string {
 		}
 		b.WriteString(item.String())
 		used += item.Len()
+	}
+	if skipped > 0 {
+		b.WriteString(fmt.Sprintf("\n（%d 个技能未在当前 Profile 中启用）\n", skipped))
 	}
 	return b.String()
 }

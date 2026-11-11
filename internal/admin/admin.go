@@ -94,6 +94,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/profiles", s.handleProfiles)
 	mux.HandleFunc("PUT /admin/api/v1/profiles/{name}", s.handleProfile)
 	mux.HandleFunc("DELETE /admin/api/v1/profiles/{name}", s.handleProfile)
+	mux.HandleFunc("PUT /admin/api/v1/profiles/{name}/apply", s.handleProfileApply)
 	mux.HandleFunc("GET /admin/api/v1/history", s.handleHistory)
 	mux.HandleFunc("GET /admin/api/v1/audits", s.handleAudits)
 	mux.HandleFunc("POST /admin/api/v1/test", s.handleTest)
@@ -233,7 +234,8 @@ func (s *Server) handleProfiles(rw http.ResponseWriter, _ *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	active := s.opts.Profiles.Active()
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items), "active": active.Name})
 }
 
 func (s *Server) handleProfile(rw http.ResponseWriter, r *http.Request) {
@@ -268,6 +270,20 @@ func (s *Server) handleProfile(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleProfileApply(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Profiles == nil {
+		writeError(rw, http.StatusServiceUnavailable, "Profile 存储未接入")
+		return
+	}
+	name := r.PathValue("name")
+	if err := s.opts.Profiles.Apply(name); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.audit("profile.apply", name, "")
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok", "active": name})
+}
+
 func (s *Server) handleHistory(rw http.ResponseWriter, r *http.Request) {
 	if s.opts.History == nil {
 		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
@@ -300,11 +316,16 @@ func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 	convs := s.engine.Conversations()
 	runs := s.engine.Runs()
 
+	activeProfile := ""
+	if s.opts.Profiles != nil {
+		activeProfile = s.opts.Profiles.Active().Name
+	}
 	writeJSON(rw, http.StatusOK, map[string]any{
-		"version":   s.opts.Version,
-		"channel":   string(s.cfg.Channel),
-		"transport": s.cfg.Feishu.Transport,
-		"feishu":    s.opts.FeishuStatus(),
+		"active_profile": activeProfile,
+		"version":        s.opts.Version,
+		"channel":        string(s.cfg.Channel),
+		"transport":      s.cfg.Feishu.Transport,
+		"feishu":         s.opts.FeishuStatus(),
 		"model": modelView{
 			Provider: s.cfg.Agent.Provider,
 			Model:    s.cfg.Agent.Model,
