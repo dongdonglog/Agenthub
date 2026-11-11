@@ -24,7 +24,10 @@ services:
 
   app:
     image: donglog/agenthub:${AGENTHUB_TAG:-latest}
-    build: .
+    build:
+      context: .
+      args:
+        VERSION: ${AGENTHUB_TAG:-dev}
     restart: unless-stopped
     env_file:
       - .env

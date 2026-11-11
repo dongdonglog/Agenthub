@@ -1,10 +1,13 @@
 # 构建
 FROM golang:1.23-alpine AS build
 WORKDIR /src
+ARG VERSION=dev
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/agentd ./cmd/agentd
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w -X github.com/moying/agenthub/internal/version.Version=${VERSION}" \
+    -o /out/agentd ./cmd/agentd
 # 预创建数据目录：命名卷首次挂载会继承镜像内目录的属主，否则非 root 无法写入
 RUN mkdir -p /out/data
 
