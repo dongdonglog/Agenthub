@@ -184,12 +184,15 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 		client = fc.Client()
 	}
 	dispatcher := feishu.NewDispatcher(engine, feishu.Options{
-		BotOpenID:      cfg.Feishu.BotOpenID,
-		RequireMention: cfg.Feishu.RequireMention,
-		AllowedUsers:   cfg.Feishu.AllowedUsers,
-		AllowedChats:   cfg.Feishu.AllowedChats,
-		Client:         client,
-		AttachmentsDir: attachmentsDir,
+		BotOpenID:        cfg.Feishu.BotOpenID,
+		RequireMention:   cfg.Feishu.RequireMention,
+		AllowedUsers:     cfg.Feishu.AllowedUsers,
+		AllowedChats:     cfg.Feishu.AllowedChats,
+		Client:           client,
+		AttachmentsDir:   attachmentsDir,
+		MentionFreeChats: cfg.Feishu.MentionFreeChats,
+		ModelName:        cfg.Agent.Model,
+		ModelBaseURL:     cfg.Agent.BaseURL,
 	}, logger)
 
 	if cfg.Feishu.Transport == "webhook" {

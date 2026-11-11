@@ -345,3 +345,34 @@ func TestReplyToBotCountsAsMentionInGroup(t *testing.T) {
 		t.Fatalf("回复机器人应被受理，实际 %d", len(msgs))
 	}
 }
+
+func TestMentionFreeChatAcceptsGroupMessage(t *testing.T) {
+	_, srv := newFakeAPI(t)
+	client := feishu.NewClient("cli_test", "secret", feishu.WithBaseURL(srv.URL))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	engine := core.New(agent.Echo{}, feishu.NewChannel(client), logger)
+	dispatcher := feishu.NewDispatcher(engine, feishu.Options{
+		BotOpenID:        "ou_bot",
+		RequireMention:   true,
+		MentionFreeChats: []string{"oc_free"},
+	}, logger)
+	hook := feishu.NewWebhook(dispatcher, "vt", logger)
+
+	post(t, hook, messageJSON("ev_free", "om_free", "oc_free", "group", "不 @ 也要回", false))
+	if msgs := engine.Messages("tenant_1:oc_free:ou_user"); len(msgs) != 1 {
+		t.Fatalf("免 @ 群应受理，实际 %d", len(msgs))
+	}
+}
+
+func TestModelCommand(t *testing.T) {
+	hook, _, api := newHook(t)
+	post(t, hook, messageJSON("ev_model", "om_model", "oc_1", "p2p", "/model", false))
+	sent := api.messages()
+	if len(sent) != 1 {
+		t.Fatalf("sent = %d", len(sent))
+	}
+	content, _ := sent[0].body["content"].(string)
+	if !strings.Contains(content, "当前模型") {
+		t.Fatalf("content = %s", content)
+	}
+}

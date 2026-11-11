@@ -84,6 +84,8 @@ type FeishuConfig struct {
 	AllowedChats      []string `yaml:"allowed_chats"`
 	// RequireMention 为 true 时群聊必须 @机器人 才触发。
 	RequireMention bool `yaml:"require_mention"`
+	// MentionFreeChats 中的群聊不要求 @机器人（用于测试群）。
+	MentionFreeChats []string `yaml:"mention_free_chats"`
 }
 
 // AgentConfig 是模型与执行配置。
@@ -177,6 +179,7 @@ func applyEnv(cfg *Config) {
 	setList(&cfg.Feishu.AllowedUsers, "FEISHU_ALLOWED_USERS")
 	setList(&cfg.Feishu.AllowedChats, "FEISHU_ALLOWED_CHATS")
 	setBool(&cfg.Feishu.RequireMention, "FEISHU_REQUIRE_MENTION")
+	setList(&cfg.Feishu.MentionFreeChats, "FEISHU_MENTION_FREE_CHATS")
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")

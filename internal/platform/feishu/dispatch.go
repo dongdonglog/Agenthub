@@ -27,6 +27,12 @@ type Options struct {
 	AllowedUsers []string
 	// AllowedChats 非空时只接受列表内的 chat_id。
 	AllowedChats []string
+	// MentionFreeChats 中的群聊不要求 @机器人。
+	MentionFreeChats []string
+	// ModelName 用于 /model 命令展示。
+	ModelName string
+	// ModelBaseURL 用于 /model 命令展示。
+	ModelBaseURL string
 	// Client 用于下载附件；为空表示不下载。
 	Client *Client
 	// AttachmentsDir 是附件落盘根目录。
@@ -43,6 +49,7 @@ type Dispatcher struct {
 	log          *slog.Logger
 	allowedUsers map[string]struct{}
 	allowedChats map[string]struct{}
+	mentionFree  map[string]struct{}
 }
 
 // NewDispatcher 构造事件分发器。
@@ -56,6 +63,7 @@ func NewDispatcher(engine *core.Engine, opts Options, log *slog.Logger) *Dispatc
 		log:          log,
 		allowedUsers: toSet(opts.AllowedUsers),
 		allowedChats: toSet(opts.AllowedChats),
+		mentionFree:  toSet(opts.MentionFreeChats),
 	}
 }
 
@@ -139,7 +147,9 @@ func (d *Dispatcher) handleCommand(ctx context.Context, msg channel.Inbound) {
 	var reply string
 	switch cmd {
 	case "/help":
-		reply = "可用命令：\n/status 当前状态\n/stop 停止当前处理\n/clear 取消排队消息\n/reset 停止并清空"
+		reply = "可用命令：\n/status 当前状态\n/model 当前模型\n/stop 停止当前处理\n/clear 取消排队消息\n/reset 停止并清空"
+	case "/model":
+		reply = fmt.Sprintf("当前模型：%s\n网关：%s", d.opts.ModelName, d.opts.ModelBaseURL)
 	case "/status":
 		queued, runID := d.engine.Status(conv)
 		state := "空闲"
@@ -221,7 +231,9 @@ func (d *Dispatcher) allowed(msg channel.Inbound) (bool, string) {
 		}
 	}
 	if d.opts.RequireMention && msg.Chat.Kind != "p2p" && !msg.MentionsBot {
-		return false, "group_message_without_mention"
+		if _, ok := d.mentionFree[msg.Chat.ID]; !ok {
+			return false, "group_message_without_mention"
+		}
 	}
 	return true, ""
 }
