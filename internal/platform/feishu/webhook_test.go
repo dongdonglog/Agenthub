@@ -48,16 +48,21 @@ func newFakeAPI(t *testing.T) (*fakeAPI, *httptest.Server) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"code": 0, "msg": "ok", "tenant_access_token": "t-test", "expire": 7200,
 			})
+		case strings.Contains(r.URL.Path, "/resources/"):
+			_, _ = w.Write([]byte("attachment-bytes"))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/im/v1/messages/"):
+			senderType := "user"
+			if strings.Contains(r.URL.Path, "om_bot") {
+				senderType = "app"
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"code": 0,
 				"data": map[string]any{"items": []any{map[string]any{
 					"msg_type": "text",
 					"body":     map[string]string{"content": `{"text":"被引用的原始消息"}`},
+					"sender":   map[string]string{"id": "cli_test", "sender_type": senderType},
 				}}},
 			})
-		case strings.Contains(r.URL.Path, "/resources/"):
-			_, _ = w.Write([]byte("attachment-bytes"))
 		case strings.Contains(r.URL.Path, "/im/v1/messages"):
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -322,5 +327,21 @@ func TestQuotedMessageIsAddedToPrompt(t *testing.T) {
 	}
 	if !strings.Contains(msgs[0].Text, "被引用的原始消息") || !strings.Contains(msgs[0].Text, "这个结论对吗") {
 		t.Fatalf("text = %q", msgs[0].Text)
+	}
+}
+
+func TestReplyToBotCountsAsMentionInGroup(t *testing.T) {
+	hook, engine, _ := newHook(t)
+	body := fmt.Sprintf(`{
+	  "schema":"2.0",
+	  "header":{"event_id":"ev_rb","event_type":"im.message.receive_v1","tenant_key":"tenant_1","app_id":"cli_test","token":"vt","create_time":"1700000000000"},
+	  "event":{
+	    "sender":{"sender_id":{"open_id":"ou_user"},"sender_type":"user"},
+	    "message":{"message_id":"om_rb","chat_id":"oc_group","chat_type":"group","message_type":"text","content":"{\"text\":\"继续说说\"}","parent_id":"om_bot_1","create_time":"1700000000000"}
+	  }
+	}`)
+	post(t, hook, body)
+	if msgs := engine.Messages("tenant_1:oc_group:ou_user"); len(msgs) != 1 {
+		t.Fatalf("回复机器人应被受理，实际 %d", len(msgs))
 	}
 }

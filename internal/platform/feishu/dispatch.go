@@ -77,19 +77,25 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 	if !ok {
 		return nil
 	}
+	if msg.ParentID != "" && d.opts.Client != nil {
+		quoteCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if quoted, err := d.opts.Client.GetMessage(quoteCtx, msg.ParentID); err == nil {
+			if quoted.Text != "" {
+				msg.Text = "（引用消息：" + quoted.Text + "）\n" + msg.Text
+			}
+			// 回复机器人的消息视为与 @机器人 等价，方便连续追问。
+			if quoted.FromBot {
+				msg.MentionsBot = true
+			}
+		}
+		cancel()
+	}
+
 	if ok, reason := d.allowed(msg); !ok {
 		d.log.Warn("feishu message ignored",
 			"reason", reason, "chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
 		return nil
 	}
-	if msg.ParentID != "" && d.opts.Client != nil {
-		quoteCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		if quoted, err := d.opts.Client.GetMessageText(quoteCtx, msg.ParentID); err == nil && quoted != "" {
-			msg.Text = "（引用消息：" + quoted + "）\n" + msg.Text
-		}
-		cancel()
-	}
-
 	if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
 		d.handleCommand(ctx, msg)
 		return nil

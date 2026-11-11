@@ -184,10 +184,18 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 	return nil
 }
 
-// GetMessageText 读取一条消息的文本表达，用于补齐引用上下文。
+// Quoted 是被引用消息的摘要。
+type Quoted struct {
+	// Text 是消息的文本表达。
+	Text string
+	// FromBot 表示这条消息由应用发出。
+	FromBot bool
+}
+
+// GetMessage 读取一条消息，用于补齐引用上下文。
 //
 // @throws 消息不存在、无权限或解析失败时返回错误
-func (c *Client) GetMessageText(ctx context.Context, messageID string) (string, error) {
+func (c *Client) GetMessage(ctx context.Context, messageID string) (Quoted, error) {
 	var out struct {
 		Code int `json:"code"`
 		Data struct {
@@ -196,17 +204,25 @@ func (c *Client) GetMessageText(ctx context.Context, messageID string) (string, 
 				Body    struct {
 					Content string `json:"content"`
 				} `json:"body"`
+				Sender struct {
+					ID         string `json:"id"`
+					SenderType string `json:"sender_type"`
+				} `json:"sender"`
 			} `json:"items"`
 		} `json:"data"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/open-apis/im/v1/messages/"+url.PathEscape(messageID), nil, &out); err != nil {
-		return "", err
+		return Quoted{}, err
 	}
 	if len(out.Data.Items) == 0 {
-		return "", fmt.Errorf("消息不存在")
+		return Quoted{}, fmt.Errorf("消息不存在")
 	}
-	text, _ := extractContent(Message{MessageType: out.Data.Items[0].MsgType, Content: out.Data.Items[0].Body.Content})
-	return strings.TrimSpace(text), nil
+	item := out.Data.Items[0]
+	text, _ := extractContent(Message{MessageType: item.MsgType, Content: item.Body.Content})
+	return Quoted{
+		Text:    strings.TrimSpace(text),
+		FromBot: item.Sender.SenderType == "app" || item.Sender.ID == c.appID,
+	}, nil
 }
 
 // DownloadResource 流式下载消息资源到 w。
