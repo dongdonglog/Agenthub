@@ -149,7 +149,10 @@ Profile 把技能与 MCP 组合成配置档案，**绑定到会话代**，不同
 | Skill | 状态/文件数/大小/可执行/引用/更新时间，文件树编辑、ZIP 导入 |
 | MCP | 增删改 MCP stdio 配置 |
 | 审计 | 管理面写操作记录，支持 `X-AA-Operator` 透传操作者 |
-| 设置 | 当前生效配置（只读） |
+| 设置 | 模型配置（Base URL / 模型 / 备用 / 视觉 / API Key）在线修改，其余配置只读 |
+
+模型配置也可以在管理台「设置」里直接改（保存到 `data/settings.yaml`，下一次运行生效，
+API Key 只显示掩码）。其余配置仍由 `.env` 控制。
 
 设置 `AGENTHUB_ADMIN_TOKEN` 后需要 Bearer 或 `/admin/login?token=...` 登录，写操作要求
 `X-Requested-With: agenthub` 头防 CSRF。

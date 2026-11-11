@@ -128,7 +128,28 @@ func run() int {
 	}
 
 	profiles := store.NewProfileStore(cfg.Storage.Dir)
-	runner := newAgent(cfg, skillsDir, tools, profiles, logger)
+	settingsStore := store.NewModelSettingsStore(cfg.Storage.Dir)
+	if saved, exists, err := settingsStore.Load(); err == nil && exists {
+		if saved.BaseURL != "" {
+			cfg.Agent.BaseURL = saved.BaseURL
+		}
+		if saved.Model != "" {
+			cfg.Agent.Model = saved.Model
+		}
+		if saved.APIKey != "" {
+			cfg.Agent.APIKey = saved.APIKey
+		}
+		cfg.Agent.FallbackModel = saved.FallbackModel
+		cfg.Agent.VisionModel = saved.VisionModel
+	}
+	modelHolder := agent.NewSettingsHolder(agent.ModelSettings{
+		BaseURL:       cfg.Agent.BaseURL,
+		APIKey:        cfg.Agent.APIKey,
+		Model:         cfg.Agent.Model,
+		FallbackModel: cfg.Agent.FallbackModel,
+		VisionModel:   cfg.Agent.VisionModel,
+	})
+	runner := newAgent(cfg, skillsDir, tools, profiles, modelHolder, logger)
 	engine := core.New(runner, ch, logger)
 	engine.SetProfileSource(func() core.ProfileSelection {
 		active := profiles.Active()
@@ -222,6 +243,17 @@ func run() int {
 			}
 			return journal.ListAudit(ctx, limit)
 		},
+		ModelSettings: func() agent.ModelSettings { return modelHolder.Get() },
+		SetModelSettings: func(v agent.ModelSettings) error {
+			modelHolder.Set(v)
+			return settingsStore.Save(store.ModelSettings{
+				BaseURL:       v.BaseURL,
+				APIKey:        v.APIKey,
+				Model:         v.Model,
+				FallbackModel: v.FallbackModel,
+				VisionModel:   v.VisionModel,
+			})
+		},
 	}, logger)
 
 	go func() {
@@ -269,7 +301,7 @@ func migrationsDir() string {
 	return "migrations"
 }
 
-func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, profiles *store.ProfileStore, logger *slog.Logger) agent.Agent {
+func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, profiles *store.ProfileStore, modelHolder *agent.SettingsHolder, logger *slog.Logger) agent.Agent {
 	if cfg.Agent.APIKey == "" {
 		logger.Warn("model api key not configured; falling back to echo agent")
 		return agent.Echo{}
@@ -315,6 +347,7 @@ func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, profiles
 		Logger:        logger,
 		SkillFilter:   skillFilter,
 		ToolFilter:    toolFilter,
+		Settings:      modelHolder.Get,
 	}
 }
 

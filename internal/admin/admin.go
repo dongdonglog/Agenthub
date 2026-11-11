@@ -41,6 +41,10 @@ type Options struct {
 	AuditRecord func(actor, action, target, detail string)
 	// AuditList 读取最近审计。
 	AuditList func(ctx context.Context, limit int) ([]store.AuditEntry, error)
+	// ModelSettings 返回当前模型配置（含明文 Key，仅内部使用）。
+	ModelSettings func() agent.ModelSettings
+	// SetModelSettings 更新模型配置；为空表示不支持在线修改。
+	SetModelSettings func(agent.ModelSettings) error
 }
 
 // Server 提供管理页面与管理 API。
@@ -96,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/v1/mcps/{name}", s.handleMCP)
 
 	mux.HandleFunc("GET /admin/api/v1/settings", s.handleSettings)
+	mux.HandleFunc("GET /admin/api/v1/model", s.handleModel)
+	mux.HandleFunc("PUT /admin/api/v1/model", s.handleModel)
 	mux.HandleFunc("GET /admin/api/v1/profiles", s.handleProfiles)
 	mux.HandleFunc("PUT /admin/api/v1/profiles/{name}", s.handleProfile)
 	mux.HandleFunc("DELETE /admin/api/v1/profiles/{name}", s.handleProfile)
@@ -687,6 +693,71 @@ func (s *Server) handleTest(rw http.ResponseWriter, r *http.Request) {
 		"output":     out.Text,
 		"latency_ms": time.Since(start).Milliseconds(),
 	})
+}
+
+func (s *Server) handleModel(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.ModelSettings == nil {
+		writeError(rw, http.StatusServiceUnavailable, "模型配置未接入")
+		return
+	}
+	current := s.opts.ModelSettings()
+	if r.Method == http.MethodGet {
+		writeJSON(rw, http.StatusOK, map[string]any{
+			"base_url":       current.BaseURL,
+			"model":          current.Model,
+			"fallback_model": current.FallbackModel,
+			"vision_model":   current.VisionModel,
+			"has_key":        current.APIKey != "",
+			"key_hint":       maskKey(current.APIKey),
+		})
+		return
+	}
+	if s.opts.SetModelSettings == nil {
+		writeError(rw, http.StatusServiceUnavailable, "不支持在线修改模型配置")
+		return
+	}
+	var body struct {
+		BaseURL       string `json:"base_url"`
+		APIKey        string `json:"api_key"`
+		Model         string `json:"model"`
+		FallbackModel string `json:"fallback_model"`
+		VisionModel   string `json:"vision_model"`
+		ClearKey      bool   `json:"clear_key"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	next := agent.ModelSettings{
+		BaseURL:       strings.TrimSpace(body.BaseURL),
+		APIKey:        current.APIKey,
+		Model:         strings.TrimSpace(body.Model),
+		FallbackModel: strings.TrimSpace(body.FallbackModel),
+		VisionModel:   strings.TrimSpace(body.VisionModel),
+	}
+	if next.BaseURL == "" || next.Model == "" {
+		writeError(rw, http.StatusBadRequest, "base_url 与 model 不能为空")
+		return
+	}
+	switch {
+	case body.ClearKey:
+		next.APIKey = ""
+	case strings.TrimSpace(body.APIKey) != "":
+		next.APIKey = strings.TrimSpace(body.APIKey)
+	}
+	if err := s.opts.SetModelSettings(next); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.audit(r, "model.update", next.Model, "")
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "has_key": next.APIKey != ""})
+}
+
+func maskKey(key string) string {
+	if len(key) <= 4 {
+		return "****"
+	}
+	return "****" + key[len(key)-4:]
 }
 
 func (s *Server) handleSettings(rw http.ResponseWriter, _ *http.Request) {

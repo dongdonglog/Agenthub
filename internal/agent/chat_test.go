@@ -437,3 +437,33 @@ func TestChatFiltersSkillsAndTools(t *testing.T) {
 		t.Fatalf("工具过滤后应只剩 1 个，实际 %d", len(captured.Tools))
 	}
 }
+
+func TestChatUsesRuntimeSettings(t *testing.T) {
+	var model, auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		model = body.Model
+		auth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{
+		BaseURL: "http://unused", APIKey: "old", Model: "old-model",
+		Settings: func() agent.ModelSettings {
+			return agent.ModelSettings{BaseURL: srv.URL, APIKey: "new-key", Model: "new-model"}
+		},
+	}
+	if _, err := c.Run(context.Background(), agent.Input{Messages: []agent.Message{{Text: "hi"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if model != "new-model" || auth != "Bearer new-key" {
+		t.Fatalf("model=%s auth=%s", model, auth)
+	}
+}

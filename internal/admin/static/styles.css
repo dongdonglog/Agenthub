@@ -135,3 +135,6 @@ table td:first-child, table td:first-child .muted { white-space: normal; min-wid
 .chip { background: #eef2f8; color: #334155; border: 1px solid #e2e8f0; border-radius: 999px; padding: 4px 10px; font-size: 12px; }
 .chip.primary { background: #e8f0ff; color: var(--brand); border-color: #c9d8ff; }
 .file-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.check-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+.check-row input { width: auto; }
+.form input[type="checkbox"] { width: auto; }

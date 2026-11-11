@@ -26,6 +26,9 @@ AGENTHUB_AGENT_VISION_MODEL=my-gpt-5.5
 AGENTHUB_ADMIN_TOKEN=一段随机串         # 管理台访问令牌
 ```
 
+模型相关配置（Base URL / 模型 / API Key / 备用与视觉模型）可以在管理台「设置」页修改，
+保存后写入 `data/settings.yaml` 并对后续运行生效，优先级高于 `.env`。
+
 `docker-compose.yml` 会覆盖数据库地址与数据目录，需额外提供 `POSTGRES_PASSWORD`：
 
 ```bash

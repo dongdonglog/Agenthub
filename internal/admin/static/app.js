@@ -140,7 +140,7 @@ async function renderOverview(data) {
       card('工具', data.counts.tools),
     ]),
     el('div', { className: 'panel' }, [
-      el('div', { className: 'head' }, [el('b', {}, ['模型']), el('span', { className: 'muted' }, [`Profile：${data.active_profile || '未指定'}`])]),
+      el('div', { className: 'head' }, [el('b', {}, ['模型']), el('span', { className: 'muted' }, [`Profile：${data.active_profile || '未指定'} · `, el('a', { href: '#/settings' }, ['去配置'])])]),
       el('div', { className: 'muted' }, data.model.echo ? '未配置 API Key，当前为回显模式' : `${data.model.model} · ${data.model.base_url}`),
     ]),
     el('div', { className: 'panel' }, [
@@ -629,12 +629,45 @@ async function renderAudits() {
 }
 
 async function renderSettings() {
-  const data = await api('/settings');
+  const [data, model] = await Promise.all([api('/settings'), api('/model')]);
+
+  const baseURL = el('input', { value: model.base_url || '', placeholder: 'https://api.openai.com/v1' });
+  const modelName = el('input', { value: model.model || '', placeholder: 'gpt-4.1-mini' });
+  const fallback = el('input', { value: model.fallback_model || '', placeholder: '可选，主模型失败时使用' });
+  const vision = el('input', { value: model.vision_model || '', placeholder: '可选，图片消息使用' });
+  const apiKey = el('input', { type: 'password', placeholder: model.has_key ? `已配置（${model.key_hint}），留空保持不变` : '未配置' });
+
+
+  const save = el('button', {}, ['保存模型配置']);
+  save.addEventListener('click', async () => {
+    try {
+      await api('/model', {
+        method: 'PUT',
+        body: JSON.stringify({
+          base_url: baseURL.value.trim(),
+          model: modelName.value.trim(),
+          fallback_model: fallback.value.trim(),
+          vision_model: vision.value.trim(),
+          api_key: apiKey.value.trim(),
+        }),
+      });
+      toast('已保存，下一次运行生效');
+      await renderSettings();
+    } catch (err) { toast(err.message, true); }
+  });
+
   content.replaceChildren(
     el('h2', {}, ['设置']),
-    el('p', { className: 'lede' }, ['当前生效配置；修改 .env 后重启生效。']),
+    el('p', { className: 'lede' }, ['模型配置可在下方直接修改，保存后下一次运行生效；其余配置仍由 .env 控制。']),
     el('h3', {}, ['模型']),
-    el('pre', {}, [JSON.stringify(data.model, null, 2)]),
+    el('div', { className: 'form' }, [
+      el('label', {}, ['Base URL', baseURL]),
+      el('label', {}, ['模型', modelName]),
+      el('label', {}, ['备用模型', fallback]),
+      el('label', {}, ['视觉模型', vision]),
+      el('label', {}, ['API Key', apiKey]),
+      el('div', { className: 'actions' }, [save]),
+    ]),
     el('h3', {}, ['飞书']),
     el('pre', {}, [JSON.stringify(data.feishu, null, 2)]),
     el('h3', {}, ['存储']),

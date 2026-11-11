@@ -53,6 +53,8 @@ type Chat struct {
 	SkillFilter func(name string) bool
 	// ToolFilter 决定是否向模型暴露某个工具；nil 表示全部暴露。
 	ToolFilter func(name string) bool
+	// Settings 返回运行期模型配置；非空时覆盖静态字段（管理台热更新）。
+	Settings func() ModelSettings
 	// Logger 记录工具调用，可为空。
 	Logger *slog.Logger
 	// HTTP 客户端，默认 180 秒超时。
@@ -61,13 +63,14 @@ type Chat struct {
 
 // Run 调用 chat/completions，并在需要时执行工具后继续对话。
 func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
-	if c.APIKey == "" {
+	r := c.resolve()
+	if r.apiKey == "" {
 		return Output{}, errors.New("未配置模型 API Key")
 	}
-	model := c.Model
-	vision := c.VisionModel != "" && hasImages(in.Messages)
-	if vision {
-		model = c.VisionModel
+	model := r.model
+	useVision := r.vision != "" && hasImages(in.Messages)
+	if useVision {
+		model = r.vision
 	}
 
 	skillAllowed := func(name string) bool {
@@ -104,7 +107,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		messages = append(messages, map[string]any{"role": role, "content": renderMessage(m)})
 	}
 	for _, m := range in.Messages {
-		messages = append(messages, map[string]any{"role": "user", "content": renderContent(m, vision)})
+		messages = append(messages, map[string]any{"role": "user", "content": renderContent(m, useVision)})
 	}
 
 	progress := in.Progress
@@ -124,7 +127,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	var last string
 	var usage Usage
 	for round := 0; round < rounds; round++ {
-		msg, err := c.completeWithRetry(ctx, messages, model, toolAllowed)
+		msg, err := c.completeWithRetry(ctx, messages, model, toolAllowed, r)
 		if err != nil {
 			return Output{}, err
 		}
@@ -186,10 +189,10 @@ type assistantMessage struct {
 }
 
 // completeWithRetry 在 429/5xx 时退避重试，仍失败则尝试备用模型。
-func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any, model string, toolAllowed func(string) bool) (assistantMessage, error) {
+func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any, model string, toolAllowed func(string) bool, r resolvedModel) (assistantMessage, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		msg, err := c.complete(ctx, messages, model, toolAllowed)
+		msg, err := c.complete(ctx, messages, model, toolAllowed, r)
 		if err == nil {
 			return msg, nil
 		}
@@ -203,8 +206,8 @@ func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any,
 		case <-time.After(time.Duration(attempt+1) * 500 * time.Millisecond):
 		}
 	}
-	if c.FallbackModel != "" && c.FallbackModel != model {
-		if msg, err := c.complete(ctx, messages, c.FallbackModel, toolAllowed); err == nil {
+	if r.fallback != "" && r.fallback != model {
+		if msg, err := c.complete(ctx, messages, r.fallback, toolAllowed, r); err == nil {
 			return msg, nil
 		}
 	}
@@ -230,7 +233,7 @@ func (e *modelError) Error() string {
 	return fmt.Sprintf("模型返回 %d: %s", e.Status, truncate(e.Body, 300))
 }
 
-func (c *Chat) complete(ctx context.Context, messages []map[string]any, model string, toolAllowed func(string) bool) (assistantMessage, error) {
+func (c *Chat) complete(ctx context.Context, messages []map[string]any, model string, toolAllowed func(string) bool, r resolvedModel) (assistantMessage, error) {
 	payload := map[string]any{
 		"model":       model,
 		"messages":    messages,
@@ -258,13 +261,13 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any, model st
 		return assistantMessage{}, err
 	}
 
-	url := strings.TrimRight(c.BaseURL, "/") + "/chat/completions"
+	url := strings.TrimRight(r.baseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
 		return assistantMessage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	req.Header.Set("Authorization", "Bearer "+r.apiKey)
 
 	client := c.HTTP
 	if client == nil {
@@ -398,6 +401,42 @@ func toolBelongsTo(toolName, server string) bool {
 	}
 	prefix += "_"
 	return strings.HasPrefix(toolName, prefix)
+}
+
+// resolvedModel 是本次运行实际使用的模型配置。
+type resolvedModel struct {
+	baseURL  string
+	apiKey   string
+	model    string
+	fallback string
+	vision   string
+}
+
+// resolve 合运行期配置与静态字段。
+func (c *Chat) resolve() resolvedModel {
+	r := resolvedModel{
+		baseURL:  c.BaseURL,
+		apiKey:   c.APIKey,
+		model:    c.Model,
+		fallback: c.FallbackModel,
+		vision:   c.VisionModel,
+	}
+	if c.Settings == nil {
+		return r
+	}
+	s := c.Settings()
+	if s.BaseURL != "" {
+		r.baseURL = s.BaseURL
+	}
+	if s.APIKey != "" {
+		r.apiKey = s.APIKey
+	}
+	if s.Model != "" {
+		r.model = s.Model
+	}
+	r.fallback = s.FallbackModel
+	r.vision = s.VisionModel
+	return r
 }
 
 // hasImages 判断本批是否包含可读图片。

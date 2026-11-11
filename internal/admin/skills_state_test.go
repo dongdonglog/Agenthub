@@ -361,3 +361,55 @@ func TestSkillImportFlatRoot(t *testing.T) {
 		t.Fatalf("imported = %v", names)
 	}
 }
+
+func TestModelSettingsAPI(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	current := agent.ModelSettings{BaseURL: "https://gw/v1", APIKey: "sk-secret1234", Model: "flash", VisionModel: "v"}
+	var updated agent.ModelSettings
+	var audited []string
+	h := admin.New(&config.Config{Storage: config.StorageConfig{Dir: dir}}, core.New(nil, nil, logger), st, admin.Options{
+		ModelSettings:    func() agent.ModelSettings { return current },
+		SetModelSettings: func(v agent.ModelSettings) error { updated = v; current = v; return nil },
+		AuditRecord:      func(actor, action, target, detail string) { audited = append(audited, action) },
+	}, logger).Handler()
+
+	rec := do(t, h, http.MethodGet, "/admin/api/v1/model", "")
+	body := rec.Body.String()
+	if strings.Contains(body, "sk-secret1234") || !strings.Contains(body, `"key_hint":"****1234"`) || !strings.Contains(body, `"has_key":true`) {
+		t.Fatalf("GET 泄露或格式错误: %s", body)
+	}
+
+	rec = do(t, h, http.MethodPut, "/admin/api/v1/model", `{"base_url":"https://gw2/v1","model":"pro","api_key":""}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d %s", rec.Code, rec.Body.String())
+	}
+	if updated.BaseURL != "https://gw2/v1" || updated.Model != "pro" || updated.APIKey != "sk-secret1234" {
+		t.Fatalf("updated = %+v", updated)
+	}
+	if len(audited) == 0 || audited[0] != "model.update" {
+		t.Fatalf("audit = %v", audited)
+	}
+
+	rec = do(t, h, http.MethodPut, "/admin/api/v1/model", `{"base_url":"https://gw2/v1","model":"pro","clear_key":true}`)
+	if rec.Code != http.StatusOK || updated.APIKey != "" {
+		t.Fatalf("clear key 失败: %d %+v", rec.Code, updated)
+	}
+}
+
+func TestModelSettingsStoreRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := store.NewModelSettingsStore(dir)
+	in := store.ModelSettings{BaseURL: "https://gw/v1", APIKey: "k", Model: "m", FallbackModel: "f", VisionModel: "v"}
+	if err := s.Save(in); err != nil {
+		t.Fatal(err)
+	}
+	out, exists, err := s.Load()
+	if err != nil || !exists {
+		t.Fatalf("exists=%v err=%v", exists, err)
+	}
+	if out != in {
+		t.Fatalf("out = %+v", out)
+	}
+}
