@@ -261,3 +261,33 @@ func TestImageAttachmentDownloadedBeforeSubmit(t *testing.T) {
 		t.Fatalf("path 不在附件目录: %s", msgs[0].Attachments[0].Path)
 	}
 }
+
+func TestCommandStatusRepliesWithoutQueueing(t *testing.T) {
+	hook, engine, api := newHook(t)
+	post(t, hook, messageJSON("ev_cmd", "om_cmd", "oc_1", "p2p", "/status", false))
+
+	sent := api.messages()
+	if len(sent) != 1 {
+		t.Fatalf("sent = %d, want 1", len(sent))
+	}
+	content, _ := sent[0].body["content"].(string)
+	if !strings.Contains(content, "当前状态") {
+		t.Fatalf("content = %s", content)
+	}
+	if msgs := engine.Messages("tenant_1:oc_1:ou_user"); len(msgs) != 0 {
+		t.Fatalf("命令不应入队，实际 %d", len(msgs))
+	}
+}
+
+func TestCommandUnknownRepliesHelp(t *testing.T) {
+	hook, _, api := newHook(t)
+	post(t, hook, messageJSON("ev_cmd2", "om_cmd2", "oc_1", "p2p", "/nope", false))
+	sent := api.messages()
+	if len(sent) != 1 {
+		t.Fatalf("sent = %d", len(sent))
+	}
+	content, _ := sent[0].body["content"].(string)
+	if !strings.Contains(content, "/help") {
+		t.Fatalf("content = %s", content)
+	}
+}

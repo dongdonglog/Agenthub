@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/moying/agenthub/internal/channel"
@@ -81,6 +82,11 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 			"reason", reason, "chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
 		return nil
 	}
+	if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
+		d.handleCommand(ctx, msg)
+		return nil
+	}
+
 	if len(msg.Attachments) > 0 && d.opts.Client != nil && d.opts.AttachmentsDir != "" {
 		// 附件下载可能超过事件确认窗口，放到后台完成后再入队。
 		go func(m channel.Inbound) {
@@ -106,6 +112,48 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 		d.log.Info("feishu duplicate message ignored", "message", msg.ExternalID)
 	}
 	return nil
+}
+
+// handleCommand 处理文本命令，不进入队列。
+func (d *Dispatcher) handleCommand(ctx context.Context, msg channel.Inbound) {
+	if d.opts.Client == nil {
+		return
+	}
+	conv := msg.Tenant + ":" + msg.Chat.ID + ":" + msg.Sender.OpenID
+	fields := strings.Fields(strings.TrimSpace(msg.Text))
+	cmd := fields[0]
+	var reply string
+	switch cmd {
+	case "/help":
+		reply = "可用命令：\n/status 当前状态\n/stop 停止当前处理\n/clear 取消排队消息\n/reset 停止并清空"
+	case "/status":
+		queued, runID := d.engine.Status(conv)
+		state := "空闲"
+		if runID != "" {
+			state = "处理中（" + runID + "）"
+		}
+		reply = fmt.Sprintf("当前状态：%s，排队 %d 条", state, queued)
+	case "/stop":
+		if d.engine.Stop(conv) {
+			reply = "已请求停止当前处理。"
+		} else {
+			reply = "当前没有正在处理的批次。"
+		}
+	case "/clear":
+		if n := d.engine.Clear(conv); n > 0 {
+			reply = fmt.Sprintf("已取消 %d 条排队消息。", n)
+		} else {
+			reply = "没有排队中的消息。"
+		}
+	case "/reset":
+		d.engine.Reset(conv)
+		reply = "已停止当前处理并清空排队。"
+	default:
+		reply = "未知命令，发送 /help 查看可用命令。"
+	}
+	if _, err := d.opts.Client.SendText(ctx, msg.Chat.ID, msg.ExternalID, reply); err != nil {
+		d.log.Warn("command reply failed", "error", err, "command", cmd)
+	}
 }
 
 var unsafePath = regexp.MustCompile(`[^A-Za-z0-9._-]+`)

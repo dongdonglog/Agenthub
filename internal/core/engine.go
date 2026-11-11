@@ -275,6 +275,40 @@ func (e *Engine) Stop(conv string) bool {
 	return true
 }
 
+// Status 返回会话的排队数与当前运行。
+func (e *Engine) Status(conv string) (queued int, runID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, id := range e.order[conv] {
+		if m := e.messages[id]; m != nil && m.Status == "queued" {
+			queued++
+		}
+	}
+	return queued, e.active[conv]
+}
+
+// Clear 取消会话全部排队消息，返回取消数量。
+func (e *Engine) Clear(conv string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	cancelled := 0
+	for _, id := range e.order[conv] {
+		if m := e.messages[id]; m != nil && m.Status == "queued" {
+			m.Status = "cancelled"
+			cancelled++
+		}
+	}
+	e.order[conv] = nil
+	return cancelled
+}
+
+// Reset 停止当前运行并清空排队。
+func (e *Engine) Reset(conv string) bool {
+	stopped := e.Stop(conv)
+	e.Clear(conv)
+	return stopped
+}
+
 // Messages 返回某个会话的消息快照（按创建时间排序）。
 func (e *Engine) Messages(conv string) []*Message {
 	e.mu.Lock()
