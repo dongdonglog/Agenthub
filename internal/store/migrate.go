@@ -16,7 +16,20 @@ func Migrate(ctx context.Context, db *DB, dir string) error {
 	if db == nil {
 		return nil
 	}
-	if _, err := db.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	conn, err := db.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	// 迁移期间加会话级锁，避免多进程/多测试并发建表。
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(727272)`); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock(727272)`)
+	}()
+
+	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version text PRIMARY KEY,
 		applied_at timestamptz NOT NULL DEFAULT now()
 	)`); err != nil {
@@ -37,7 +50,7 @@ func Migrate(ctx context.Context, db *DB, dir string) error {
 
 	for _, name := range files {
 		var exists bool
-		if err := db.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)`, name).Scan(&exists); err != nil {
+		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)`, name).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {
@@ -47,7 +60,7 @@ func Migrate(ctx context.Context, db *DB, dir string) error {
 		if err != nil {
 			return err
 		}
-		tx, err := db.pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return err
 		}

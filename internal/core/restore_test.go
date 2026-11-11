@@ -81,3 +81,49 @@ func TestJournalPersistenceAndRestore(t *testing.T) {
 		t.Fatalf("恢复运行数 = %d, want 1", len(runs))
 	}
 }
+
+func TestRunEventsSurviveRestart(t *testing.T) {
+	url := os.Getenv("AGENTHUB_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("未设置 AGENTHUB_TEST_DATABASE_URL，跳过真实数据库用例")
+	}
+	ctx := context.Background()
+	db, err := store.Open(ctx, url, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE run_trace, message_state, run_state, delivery_state`); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := store.NewJournal(db)
+	eng := core.New(toolAgent{}, &captureChannel{}, nil)
+	eng.SetJournal(journal)
+	if _, err := eng.Submit(ctx, channel.Inbound{
+		Channel: "feishu", Tenant: "t", ExternalID: "evt-1",
+		Chat:   channel.Chat{ID: "chat-e", Kind: "p2p"},
+		Sender: channel.Sender{OpenID: "u1"}, Text: "hi",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(eng.RunEvents("run_1")); got != 2 {
+		t.Fatalf("首次事件数 = %d", got)
+	}
+
+	restored := core.New(toolAgent{}, nil, nil)
+	restored.SetJournal(journal)
+	if err := restored.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events := restored.RunEvents("run_1")
+	if len(events) != 2 {
+		t.Fatalf("重启后事件数 = %d", len(events))
+	}
+}

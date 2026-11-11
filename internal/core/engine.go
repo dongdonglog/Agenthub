@@ -100,6 +100,8 @@ type Journal interface {
 	SaveDelivery(ctx context.Context, d *Delivery) error
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
 	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	SaveRunEvent(ctx context.Context, ev RunEvent) error
+	LoadRunEvents(ctx context.Context, runID string) ([]RunEvent, error)
 }
 
 // Engine 负责把入站消息收敛成批次并驱动执行与投递。
@@ -385,20 +387,41 @@ func (e *Engine) recordEvent(runID string, ev RunEvent) {
 		ev.CreatedAt = e.now()
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	list := append(e.events[runID], ev)
 	if len(list) > 100 {
 		list = list[len(list)-100:]
 	}
 	e.events[runID] = list
+	e.mu.Unlock()
+
+	if e.journal != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := e.journal.SaveRunEvent(ctx, ev); err != nil {
+			e.log.Debug("persist run event failed", "error", err)
+		}
+	}
 }
 
 // RunEvents 返回一次运行的事件列表。
+//
+// @remarks 内存缺失时从数据库补齐，因此重启后仍可回放。
 func (e *Engine) RunEvents(runID string) []RunEvent {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]RunEvent, len(e.events[runID]))
-	copy(out, e.events[runID])
+	cached := e.events[runID]
+	e.mu.Unlock()
+	if len(cached) == 0 && e.journal != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if loaded, err := e.journal.LoadRunEvents(ctx, runID); err == nil && len(loaded) > 0 {
+			e.mu.Lock()
+			e.events[runID] = loaded
+			e.mu.Unlock()
+			cached = loaded
+		}
+	}
+	out := make([]RunEvent, len(cached))
+	copy(out, cached)
 	return out
 }
 

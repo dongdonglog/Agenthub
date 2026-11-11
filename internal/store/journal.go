@@ -116,6 +116,35 @@ func defaultRole(role string) string {
 	return role
 }
 
+// SaveRunEvent 追加一条运行事件。
+func (j *Journal) SaveRunEvent(ctx context.Context, ev core.RunEvent) error {
+	_, err := j.pool.Exec(ctx, `
+		INSERT INTO run_trace (run_id, kind, name, detail, duration_ms, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`,
+		ev.RunID, ev.Kind, ev.Name, ev.Detail, ev.DurationMS, ev.CreatedAt)
+	return err
+}
+
+// LoadRunEvents 读取一次运行的事件。
+func (j *Journal) LoadRunEvents(ctx context.Context, runID string) ([]core.RunEvent, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT run_id, kind, name, detail, duration_ms, created_at
+		FROM run_trace WHERE run_id = $1 ORDER BY id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.RunEvent
+	for rows.Next() {
+		var ev core.RunEvent
+		if err := rows.Scan(&ev.RunID, &ev.Kind, &ev.Name, &ev.Detail, &ev.DurationMS, &ev.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
 // LoadPendingDeliveries 返回未完成投递，用于启动补偿。
 func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
 	rows, err := j.pool.Query(ctx, `
