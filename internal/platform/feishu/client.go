@@ -302,11 +302,53 @@ func NewChannel(c *Client) *Channel {
 // Client 返回底层客户端，供附件下载等场景复用。
 func (c *Channel) Client() *Client { return c.client }
 
+// maxTextChunk 是单条文本消息的安全长度。
+const maxTextChunk = 3500
+
 // SendText 实现 {@link channel.Channel}。
+//
+// @remarks 超长文本按段落边界切分，首块建立回复关系，其余顺序追加，
+// 保证长答案不会被平台截断。
 func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.Receipt, error) {
-	id, err := c.client.SendText(ctx, out.ChatID, out.ReplyTo, out.Text)
-	if err != nil {
-		return channel.Receipt{}, err
+	chunks := splitText(out.Text, maxTextChunk)
+	firstID := ""
+	for i, chunk := range chunks {
+		replyTo := ""
+		if i == 0 {
+			replyTo = out.ReplyTo
+		}
+		id, err := c.client.SendText(ctx, out.ChatID, replyTo, chunk)
+		if err != nil {
+			return channel.Receipt{ExternalID: firstID}, err
+		}
+		if i == 0 {
+			firstID = id
+		}
 	}
-	return channel.Receipt{ExternalID: id}, nil
+	return channel.Receipt{ExternalID: firstID}, nil
+}
+
+// splitText 按字符数与段落边界切分文本。
+func splitText(text string, limit int) []string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return []string{text}
+	}
+	var chunks []string
+	for len(runes) > limit {
+		cut := limit
+		// 尽量在换行处断开。
+		for i := limit - 1; i > limit/2; i-- {
+			if runes[i] == 10 {
+				cut = i + 1
+				break
+			}
+		}
+		chunks = append(chunks, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	if len(runes) > 0 {
+		chunks = append(chunks, string(runes))
+	}
+	return chunks
 }
