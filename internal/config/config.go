@@ -32,10 +32,12 @@ type Config struct {
 	Admin   AdminConfig   `yaml:"admin"`
 	DB      DBConfig      `yaml:"db"`
 	Storage StorageConfig `yaml:"storage"`
-	Webhook WebhookConfig `yaml:"webhook"`
-	Feishu  FeishuConfig  `yaml:"feishu"`
-	Agent   AgentConfig   `yaml:"agent"`
-	Log     LogConfig     `yaml:"log"`
+	// RetentionDays 是历史数据保留天数；0 表示不清理。
+	RetentionDays int           `yaml:"retention_days"`
+	Webhook       WebhookConfig `yaml:"webhook"`
+	Feishu        FeishuConfig  `yaml:"feishu"`
+	Agent         AgentConfig   `yaml:"agent"`
+	Log           LogConfig     `yaml:"log"`
 }
 
 // HTTPConfig 是健康检查与指标监听配置。
@@ -144,13 +146,14 @@ func Load(path string) (*Config, error) {
 
 func defaults() Config {
 	return Config{
-		Env:     "development",
-		Channel: ChannelOff,
-		HTTP:    HTTPConfig{Addr: "127.0.0.1:8787"},
-		Admin:   AdminConfig{Addr: "127.0.0.1:8788"},
-		DB:      DBConfig{MaxConns: 10},
-		Storage: StorageConfig{Dir: "./data"},
-		Webhook: WebhookConfig{Addr: "127.0.0.1:8789"},
+		Env:           "development",
+		Channel:       ChannelOff,
+		HTTP:          HTTPConfig{Addr: "127.0.0.1:8787"},
+		Admin:         AdminConfig{Addr: "127.0.0.1:8788"},
+		DB:            DBConfig{MaxConns: 10},
+		Storage:       StorageConfig{Dir: "./data"},
+		RetentionDays: 90,
+		Webhook:       WebhookConfig{Addr: "127.0.0.1:8789"},
 		Feishu: FeishuConfig{
 			Transport:      "websocket",
 			Domain:         "https://open.feishu.cn",
@@ -174,6 +177,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.DB.URL, "AGENTHUB_DB_URL")
 	setInt32(&cfg.DB.MaxConns, "AGENTHUB_DB_MAX_CONNS")
 	setStr(&cfg.Storage.Dir, "AGENTHUB_DATA_DIR")
+	setInt(&cfg.RetentionDays, "AGENTHUB_RETENTION_DAYS")
 	setStr(&cfg.Webhook.Addr, "AGENTHUB_WEBHOOK_ADDR")
 	setStr(&cfg.Feishu.Transport, "FEISHU_TRANSPORT")
 	setStr(&cfg.Feishu.Domain, "FEISHU_DOMAIN")
@@ -245,6 +249,9 @@ func (c *Config) Validate() error {
 		}
 	default:
 		return fmt.Errorf("channel 非法：%s", c.Channel)
+	}
+	if c.RetentionDays < 0 {
+		return errors.New("retention_days 不能为负数")
 	}
 	if c.Agent.MaxRunSeconds <= 0 {
 		return errors.New("agent.max_run_seconds 必须为正整数")

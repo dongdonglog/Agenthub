@@ -148,6 +148,9 @@ func run() int {
 		}
 	}()
 	go flushLoop(ctx, engine, logger)
+	if db != nil {
+		go purgeLoop(ctx, db, cfg.RetentionDays, logger)
+	}
 
 	<-ctx.Done()
 	logger.Info("shutting down")
@@ -278,6 +281,36 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 			return "reconnecting"
 		default:
 			return "connecting"
+		}
+	}
+}
+
+// purgeLoop 定期清理过期历史数据。
+func purgeLoop(ctx context.Context, db *store.DB, days int, logger *slog.Logger) {
+	if days <= 0 {
+		return
+	}
+	journal := store.NewJournal(db)
+	run := func() {
+		cutoff := time.Now().AddDate(0, 0, -days)
+		deleted, err := journal.PurgeBefore(ctx, cutoff)
+		if err != nil {
+			logger.Error("retention purge failed", "error", err)
+			return
+		}
+		if deleted > 0 {
+			logger.Info("retention purge", "rows", deleted, "cutoff", cutoff.Format(time.RFC3339))
+		}
+	}
+	run()
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
 		}
 	}
 }

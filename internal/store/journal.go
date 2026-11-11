@@ -147,6 +147,27 @@ func (j *Journal) LoadRunEvents(ctx context.Context, runID string) ([]core.RunEv
 	return out, rows.Err()
 }
 
+// PurgeBefore 删除早于 cutoff 的历史数据，返回删除行数。
+//
+// @remarks 排队中的消息与未完成的投递不会被删除，避免误删待处理工作。
+func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	var total int64
+	statements := []string{
+		`DELETE FROM delivery_state WHERE created_at < $1 AND state NOT IN ('pending','retrying')`,
+		`DELETE FROM run_trace WHERE created_at < $1`,
+		`DELETE FROM run_state WHERE ended_at IS NOT NULL AND ended_at < $1`,
+		`DELETE FROM message_state WHERE created_at < $1 AND status NOT IN ('queued','processing')`,
+	}
+	for _, sql := range statements {
+		tag, err := j.pool.Exec(ctx, sql, cutoff)
+		if err != nil {
+			return total, err
+		}
+		total += tag.RowsAffected()
+	}
+	return total, nil
+}
+
 // LoadPendingDeliveries 返回未完成投递，用于启动补偿。
 func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
 	rows, err := j.pool.Query(ctx, `

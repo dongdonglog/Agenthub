@@ -3,6 +3,7 @@ package core_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -471,5 +472,41 @@ func TestRunUsageRecorded(t *testing.T) {
 	runs := eng.Runs()
 	if len(runs) != 1 || runs[0].InputTokens != 11 || runs[0].OutputTokens != 4 {
 		t.Fatalf("runs = %+v", runs)
+	}
+}
+
+func TestPruneBoundsMemory(t *testing.T) {
+	ch := &captureChannel{}
+	eng := newEngine(t, ch, agent.Echo{})
+	eng.SetLimits(4, 1, 2, 2)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		if _, err := eng.Submit(ctx, inbound(fmt.Sprintf("om_p%d", i), "消息")); err != nil {
+			t.Fatal(err)
+		}
+		if err := eng.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eng.Prune()
+	if got := len(eng.Messages("tenant_1:oc_chat:ou_user")); got > 4 {
+		t.Fatalf("消息数未裁剪: %d", got)
+	}
+
+	// 新会话写入后，旧会话应被淘汰（会话上限 1）。
+	if _, err := eng.Submit(ctx, channel.Inbound{
+		Channel: "feishu", Tenant: "t2", ExternalID: "new-1",
+		Chat:   channel.Chat{ID: "chat-b", Kind: "p2p"},
+		Sender: channel.Sender{OpenID: "u2"}, Text: "新会话",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eng.Prune()
+	if got := len(eng.Conversations()); got != 1 {
+		t.Fatalf("会话数未裁剪: %d", got)
 	}
 }

@@ -84,6 +84,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `FEISHU_DOMAIN` | `https://open.feishu.cn` | 开放平台地址，Lark 海外改为 `https://open.larksuite.com` |
 | `AGENTHUB_DB_URL` | 空 | PostgreSQL 连接串；空则无持久化（会话/消息重启即丢） |
 | `AGENTHUB_MIGRATIONS_DIR` | `migrations` | 迁移目录；启动时按文件名顺序应用 |
+| `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数；0 关闭清理 |
 | `AGENTHUB_DB_MAX_CONNS` | `10` | 连接池上限 |
 | `AGENTHUB_DATA_DIR` | `./data` | 附件与产物目录 |
 | `FEISHU_APP_ID` | 必填（feishu 模式） | 应用 ID |
