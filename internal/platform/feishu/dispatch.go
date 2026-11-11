@@ -3,7 +3,12 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
+	"time"
 
 	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/core"
@@ -21,6 +26,10 @@ type Options struct {
 	AllowedUsers []string
 	// AllowedChats 非空时只接受列表内的 chat_id。
 	AllowedChats []string
+	// Client 用于下载附件；为空表示不下载。
+	Client *Client
+	// AttachmentsDir 是附件落盘根目录。
+	AttachmentsDir string
 }
 
 // Dispatcher 把飞书事件转换成标准消息并交给核心。
@@ -72,6 +81,19 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 			"chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
 		return nil
 	}
+	if len(msg.Attachments) > 0 && d.opts.Client != nil && d.opts.AttachmentsDir != "" {
+		// 附件下载可能超过事件确认窗口，放到后台完成后再入队。
+		go func(m channel.Inbound) {
+			dlCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			d.fetchAttachments(dlCtx, &m)
+			if _, err := d.engine.Submit(context.Background(), m); err != nil {
+				d.log.Error("submit with attachments failed", "error", err, "message", m.ExternalID)
+			}
+		}(msg)
+		return nil
+	}
+
 	inserted, err := d.engine.Submit(ctx, msg)
 	if err != nil {
 		return err
@@ -84,6 +106,45 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 		d.log.Info("feishu duplicate message ignored", "message", msg.ExternalID)
 	}
 	return nil
+}
+
+var unsafePath = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// fetchAttachments 把附件流式下载到本地并回填路径。
+//
+// @remarks 单个附件失败只记录日志，消息仍会入队；模型会看到"未下载成功"。
+func (d *Dispatcher) fetchAttachments(ctx context.Context, msg *channel.Inbound) {
+	dir := filepath.Join(d.opts.AttachmentsDir, unsafePath.ReplaceAllString(msg.ExternalID, "_"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		d.log.Error("create attachment dir failed", "error", err)
+		return
+	}
+	for i := range msg.Attachments {
+		a := &msg.Attachments[i]
+		if a.FileKey == "" {
+			continue
+		}
+		name := unsafePath.ReplaceAllString(a.Name, "_")
+		if name == "" {
+			name = unsafePath.ReplaceAllString(a.FileKey, "_")
+		}
+		path := filepath.Join(dir, fmt.Sprintf("%d_%s", i, name))
+		file, err := os.Create(path)
+		if err != nil {
+			d.log.Error("create attachment failed", "error", err, "path", path)
+			continue
+		}
+		n, err := d.opts.Client.DownloadResource(ctx, msg.ExternalID, a.FileKey, a.Kind, file)
+		closeErr := file.Close()
+		if err != nil || closeErr != nil {
+			_ = os.Remove(path)
+			d.log.Warn("download attachment failed", "message", msg.ExternalID, "file", a.Name, "error", err)
+			continue
+		}
+		a.Path = path
+		a.Size = n
+		d.log.Info("attachment saved", "message", msg.ExternalID, "name", a.Name, "bytes", n)
+	}
 }
 
 func (d *Dispatcher) allowed(msg channel.Inbound) bool {

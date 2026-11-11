@@ -53,6 +53,13 @@ AGENTHUB_AGENT_MODEL=deepseek-v3-250324
 
 不填 `AGENTHUB_AGENT_API_KEY` 时使用回显执行器（收到什么回什么），方便先验证链路。
 
+## 附件
+
+图片/文件消息会异步流式下载到 `data/attachments/<message_id>/`，下载完成后才入队：
+
+- 小于 64KB 的文本类附件（`.log/.txt/.md/.json/.yaml/.csv` 等）直接内联进提示词；
+- 其他附件给出本地路径，模型用内置 `read_file` 工具读取（限制在附件目录内，默认 256KB）。
+
 ## 持久化
 
 配置 `AGENTHUB_DB_URL` 后，消息、运行与投递写库；启动时自动执行 `migrations/` 下未应用的 SQL，并恢复最近状态（`processing` 的消息会重新排队）。不配置数据库时仍是内存模式。

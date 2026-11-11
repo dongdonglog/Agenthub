@@ -68,6 +68,7 @@ func run() int {
 	if skillsDir == "" {
 		skillsDir = filepath.Join(cfg.Storage.Dir, "skills")
 	}
+	attachmentsDir := filepath.Join(cfg.Storage.Dir, "attachments")
 
 	var ch channel.Channel
 	feishuStatus := func() string { return "off" }
@@ -78,11 +79,15 @@ func run() int {
 
 	mcpManager := mcp.StartAll(ctx, filepath.Join(cfg.Storage.Dir, "mcp.yaml"), logger)
 	defer mcpManager.Close()
+
+	tools := make([]agent.Tool, 0, len(mcpManager.Tools())+1)
+	tools = append(tools, mcpManager.Tools()...)
+	tools = append(tools, &agent.ReadFileTool{Root: attachmentsDir})
 	if summary := mcpManager.Summary(); summary != "" {
 		logger.Info("mcp loaded", "summary", summary)
 	}
 
-	runner := newAgent(cfg, skillsDir, mcpManager.Tools(), logger)
+	runner := newAgent(cfg, skillsDir, tools, logger)
 	engine := core.New(runner, ch, logger)
 
 	if db != nil {
@@ -101,7 +106,7 @@ func run() int {
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 
 	if cfg.Channel == config.ChannelFeishu {
-		feishuStatus = startFeishu(ctx, cfg, logger, stop, srv, engine)
+		feishuStatus = startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir)
 	}
 
 	adminStore, err := admin.NewStore(cfg.Storage.Dir)
@@ -113,7 +118,7 @@ func run() int {
 		Version:      version.Version,
 		FeishuStatus: feishuStatus,
 		Agent:        runner,
-		Tools:        mcpManager.Tools(),
+		Tools:        tools,
 	}, logger)
 
 	go func() {
@@ -170,12 +175,18 @@ func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, logger *
 // startFeishu 装配事件来源并返回通道状态查询函数。
 //
 // @remarks 长连接与 webhook 共用同一个 Dispatcher，保证受理策略一致。
-func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server, engine *core.Engine) func() string {
+func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server, engine *core.Engine, ch channel.Channel, attachmentsDir string) func() string {
+	var client *feishu.Client
+	if fc, ok := ch.(*feishu.Channel); ok {
+		client = fc.Client()
+	}
 	dispatcher := feishu.NewDispatcher(engine, feishu.Options{
 		BotOpenID:      cfg.Feishu.BotOpenID,
 		RequireMention: cfg.Feishu.RequireMention,
 		AllowedUsers:   cfg.Feishu.AllowedUsers,
 		AllowedChats:   cfg.Feishu.AllowedChats,
+		Client:         client,
+		AttachmentsDir: attachmentsDir,
 	}, logger)
 
 	if cfg.Feishu.Transport == "webhook" {

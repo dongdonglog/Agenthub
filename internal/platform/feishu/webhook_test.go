@@ -9,9 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/core"
@@ -46,6 +48,8 @@ func newFakeAPI(t *testing.T) (*fakeAPI, *httptest.Server) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"code": 0, "msg": "ok", "tenant_access_token": "t-test", "expire": 7200,
 			})
+		case strings.Contains(r.URL.Path, "/resources/"):
+			_, _ = w.Write([]byte("attachment-bytes"))
 		case strings.Contains(r.URL.Path, "/im/v1/messages"):
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -85,6 +89,12 @@ func messageJSON(eventID, messageID, chatID, chatType, text string, mentionBot b
 
 func newHook(t *testing.T) (*feishu.Webhook, *core.Engine, *fakeAPI) {
 	t.Helper()
+	hook, engine, api, _ := newHookWithDir(t)
+	return hook, engine, api
+}
+
+func newHookWithDir(t *testing.T) (*feishu.Webhook, *core.Engine, *fakeAPI, string) {
+	t.Helper()
 	api, srv := newFakeAPI(t)
 	client := feishu.NewClient("cli_test", "secret", feishu.WithBaseURL(srv.URL))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -94,8 +104,16 @@ func newHook(t *testing.T) (*feishu.Webhook, *core.Engine, *fakeAPI) {
 		RequireMention: true,
 		AllowedChats:   []string{"oc_1", "oc_group"},
 	}, logger)
+	attachments := t.TempDir()
+	dispatcher = feishu.NewDispatcher(engine, feishu.Options{
+		BotOpenID:      "ou_bot",
+		RequireMention: true,
+		AllowedChats:   []string{"oc_1", "oc_group"},
+		Client:         client,
+		AttachmentsDir: attachments,
+	}, logger)
 	hook := feishu.NewWebhook(dispatcher, "vt", logger)
-	return hook, engine, api
+	return hook, engine, api, attachments
 }
 
 func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
@@ -200,5 +218,46 @@ func TestChatAllowlist(t *testing.T) {
 	_ = engine.Flush(context.Background())
 	if len(api.messages()) != 0 {
 		t.Fatal("不在白名单的会话不应处理")
+	}
+}
+
+func imageEventJSON(eventID, messageID, chatID, sender string) string {
+	return fmt.Sprintf(`{
+	  "schema":"2.0",
+	  "header":{"event_id":"%s","event_type":"im.message.receive_v1","tenant_key":"tenant_1","app_id":"cli_test","token":"vt","create_time":"1700000000000"},
+	  "event":{
+	    "sender":{"sender_id":{"open_id":"%s"},"sender_type":"user"},
+	    "message":{"message_id":"%s","chat_id":"%s","chat_type":"p2p","message_type":"image","content":"{\"image_key\":\"img_v3_test\"}","create_time":"1700000000000"}
+	  }
+	}`, eventID, sender, messageID, chatID)
+}
+
+func TestImageAttachmentDownloadedBeforeSubmit(t *testing.T) {
+	hook, engine, _, dir := newHookWithDir(t)
+	post(t, hook, imageEventJSON("ev_img", "om_img", "oc_1", "ou_user"))
+
+	var msgs []*core.Message
+	for i := 0; i < 60; i++ {
+		msgs = engine.Messages("tenant_1:oc_1:ou_user")
+		if len(msgs) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want 1", len(msgs))
+	}
+	if len(msgs[0].Attachments) != 1 || msgs[0].Attachments[0].Path == "" {
+		t.Fatalf("attachment 未落盘: %+v", msgs[0].Attachments)
+	}
+	raw, err := os.ReadFile(msgs[0].Attachments[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "attachment-bytes" {
+		t.Fatalf("content = %q", raw)
+	}
+	if !strings.HasPrefix(msgs[0].Attachments[0].Path, dir) {
+		t.Fatalf("path 不在附件目录: %s", msgs[0].Attachments[0].Path)
 	}
 }

@@ -28,6 +28,8 @@ type Attachment struct {
 	Name    string
 	Mime    string
 	Size    int64
+	// Path 是通道落盘后的本地路径；为空表示未下载成功。
+	Path string
 }
 
 // Inbound 是通道转换后的标准入站消息。

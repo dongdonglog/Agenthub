@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -224,9 +226,34 @@ func renderMessage(m Message) string {
 	var b strings.Builder
 	b.WriteString(m.Text)
 	for _, a := range m.Attachments {
-		fmt.Fprintf(&b, "\n[附件：%s（%s）]", a.Name, a.Kind)
+		switch {
+		case a.Path == "":
+			fmt.Fprintf(&b, "\n[附件：%s（%s），下载失败]", a.Name, a.Kind)
+		case inlineText(a.Path):
+			content, err := os.ReadFile(a.Path)
+			if err != nil {
+				fmt.Fprintf(&b, "\n[附件：%s（%s），本地路径 %s]", a.Name, a.Kind, a.Path)
+				continue
+			}
+			fmt.Fprintf(&b, "\n[附件：%s（%s）内容]\n%s", a.Name, a.Kind, strings.TrimSpace(string(content)))
+		default:
+			fmt.Fprintf(&b, "\n[附件：%s（%s），已保存到 %s，需要时用 read_file 读取]", a.Name, a.Kind, a.Path)
+		}
 	}
 	return b.String()
+}
+
+// inlineText 判断是否把文件内容直接放进提示词。
+func inlineText(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() > 64*1024 {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".log", ".txt", ".md", ".json", ".yaml", ".yml", ".csv", ".ini", ".conf", ".err", ".out":
+		return true
+	}
+	return false
 }
 
 func truncate(s string, n int) string {

@@ -114,7 +114,13 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 - 管理面没有内置登录，远端访问必须经网关或 SSH 隧道（`ssh -L 8788:127.0.0.1:8788`）；
 - 修改模型与飞书配置仍走 `.env`，重启生效。
 
-### 4.2 持久化
+### 4.2 附件
+
+- 保存目录：`<AA_DATA_DIR>/attachments/<message_id>/`，文件名做了字符清洗；
+- 下载在事件确认之后异步进行，完成才入队；单个附件失败只影响该附件；
+- 模型侧：小文本内联，其余通过 `read_file` 读取，路径被限制在附件目录内。
+
+### 4.3 持久化
 
 - 消息、运行、投递写入 `message_state` / `run_state` / `delivery_state`；
 - 启动时 `Restore` 恢复最近 1000 条消息与运行，`processing` 状态的消息重新排队；

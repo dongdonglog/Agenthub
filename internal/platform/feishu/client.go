@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,6 +184,39 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 	return nil
 }
 
+// DownloadResource 流式下载消息资源到 w。
+//
+// @param kind image 走图片资源接口，其余走文件接口
+// @returns 写入的字节数
+// @throws 非 200 或传输失败时返回错误
+func (c *Client) DownloadResource(ctx context.Context, messageID, fileKey, kind string, w io.Writer) (int64, error) {
+	token, err := c.tenantToken(ctx)
+	if err != nil {
+		return 0, err
+	}
+	resourceType := "file"
+	if kind == "image" {
+		resourceType = "image"
+	}
+	endpoint := fmt.Sprintf("%s/open-apis/im/v1/messages/%s/resources/%s?type=%s",
+		strings.TrimRight(c.baseURL, "/"), url.PathEscape(messageID), url.PathEscape(fileKey), resourceType)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return 0, fmt.Errorf("下载资源失败 %d: %s", resp.StatusCode, string(body))
+	}
+	return io.Copy(w, resp.Body)
+}
+
 // Channel 把客户端适配为 {@link channel.Channel}。
 type Channel struct {
 	client *Client
@@ -192,6 +226,9 @@ type Channel struct {
 func NewChannel(c *Client) *Channel {
 	return &Channel{client: c}
 }
+
+// Client 返回底层客户端，供附件下载等场景复用。
+func (c *Channel) Client() *Client { return c.client }
 
 // SendText 实现 {@link channel.Channel}。
 func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.Receipt, error) {
