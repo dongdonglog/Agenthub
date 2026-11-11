@@ -68,12 +68,22 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 		return nil
 	}
 	if !d.allowed(msg) {
-		d.log.Info("feishu message rejected by policy",
+		d.log.Warn("feishu message rejected by policy: 把 sender 加入 FEISHU_ALLOWED_USERS 后重启",
 			"chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
 		return nil
 	}
-	_, err := d.engine.Submit(ctx, msg)
-	return err
+	inserted, err := d.engine.Submit(ctx, msg)
+	if err != nil {
+		return err
+	}
+	if inserted {
+		d.log.Info("feishu message accepted",
+			"message", msg.ExternalID, "chat", msg.Chat.ID, "kind", msg.Chat.Kind,
+			"sender", msg.Sender.OpenID, "type", msg.MsgType, "chars", len(msg.Text))
+	} else {
+		d.log.Info("feishu duplicate message ignored", "message", msg.ExternalID)
+	}
+	return nil
 }
 
 func (d *Dispatcher) allowed(msg channel.Inbound) bool {
