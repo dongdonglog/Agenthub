@@ -1,146 +1,134 @@
 # AgentHub
 
-飞书优先的团队 AI 助手：把"描述问题 → 补材料 → 要结论 → 交付文件"做成可追踪、可复用、可治理的对话服务。
+飞书优先的团队 AI 助手：把「描述问题 → 补材料 → 要结论 → 交付文件」做成可追踪、可复用、可治理的对话服务。
 
-Go 实现，单二进制，PostgreSQL 为唯一事实源。
+Go 单二进制，PostgreSQL 为事实源，飞书长连接接入，无需公网入口。
+
+## 特性
+
+| 域 | 能力 |
+|---|---|
+| 接入 | 飞书 WebSocket 长连接（默认）/ Webhook；私聊与群聊；免 @ 群白名单 |
+| 输入 | 文本、富文本、图片（视觉模型）、文件（落盘 + `read_file`）、引用上下文 |
+| 交互 | 进度卡片、结果卡片、停止按钮（可选）、长文本分块、`/` 命令 |
+| 智能 | Markdown 技能注入、MCP 工具调用、多轮上下文、会话代重置 |
+| 可靠 | 去重、批次快照、持久化、投递重试与重启补偿、模型重试与备用模型 |
+| 治理 | 管理台（概览/会话/运行详情/技能/MCP）、运行事件与 token 用量 |
+| 工程 | 单元 + 集成测试、GitHub Actions、Docker Compose |
+
+## 架构
+
+```mermaid
+flowchart LR
+    FS[飞书] -->|长连接事件| CH[platform/feishu]
+    CH --> D[Dispatcher<br/>解析 · 策略 · 附件]
+    D --> E[Engine<br/>去重 · 批次 · 会话代]
+    E --> A[Agent<br/>模型 · 技能 · MCP 工具]
+    A --> E
+    E --> P[Presenter<br/>进度卡片]
+    E --> O[Outbox<br/>重试 · 补偿]
+    O --> FS
+    E <--> DB[(PostgreSQL)]
+    A <--> SK[skills/]
+    A <--> MCP[MCP stdio]
+```
+
+一次运行：`消息 → 解析/策略 → 落库 → 批次 → 历史上下文 → 模型（技能+工具） → 卡片/文本 → 投递`。
 
 ## 快速开始
 
-```bash
-# 只起骨架（不接通道、不需要数据库）
-make run
-
-curl -s localhost:8787/healthz
-# {"status":"ok","version":"0.1.0-dev","checks":{"config":"ok","db":"skipped"}}
-```
-
-接飞书（默认长连接，不需要公网入口）：
+### 本地
 
 ```bash
-cp .env.example .env      # 填 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BOT_OPEN_ID
-set -a && . ./.env && set +a
+cp .env.example .env   # 填飞书凭据；不填 DB 则为内存模式
 go run ./cmd/agentd
 ```
 
-事件接入方式：
+健康检查：`curl localhost:8787/healthz`，管理台：<http://127.0.0.1:8788/admin/>。
 
-| 方式 | 配置 | 说明 |
-|---|---|---|
-| WebSocket 长连接（默认） | `FEISHU_TRANSPORT=websocket` | 无需公网入口与回调地址；SDK 负责握手、心跳与自动重连；断线按指数退避重试 |
-| 事件回调 | `FEISHU_TRANSPORT=webhook` + `AGENTHUB_WEBHOOK_ADDR` | 需要飞书能访问到该地址，适合已有网关的部署 |
-
-## Docker 部署
+### Docker Compose
 
 ```bash
-cp .env.example .env        # 填 FEISHU_APP_ID / SECRET / BOT_OPEN_ID / POSTGRES_PASSWORD
+cp .env.example .env
+# 必填：FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BOT_OPEN_ID / POSTGRES_PASSWORD
 docker compose up -d --build
 ```
 
-- 应用与 PostgreSQL 两个服务，数据在 `aadata` / `pgdata` 卷；
-- 健康检查与指标、管理台默认只发布到宿主机回环；
-- 启动时自动执行 `migrations/` 下的迁移。
+两个服务（app + postgres），数据在 `aadata` / `pgdata` 卷，迁移随启动自动执行，端口只发布到宿主机回环。
 
-## 管理台
+## 飞书应用配置
 
-启动后打开 **http://127.0.0.1:8788/admin/**（默认只绑回环；远端访问用 SSH 隧道或网关）。
+1. 开放平台创建**企业自建应用**，添加「机器人」能力；
+2. 事件订阅选 **使用长连接接收事件**，订阅 `im.message.receive_v1`；
+3. 申请权限：
 
-![管理台概览](docs/images/admin-overview.png)
-
-| 页面 | 内容 |
+| 权限 | 用途 |
 |---|---|
-| 概览 | 通道连接状态、模型配置、会话/运行/技能/MCP 数量 |
-| 会话 | 会话列表；点进去看消息与运行，运行可点开看阶段与工具调用事件（事件落 `run_trace`） |
-| 技能 | Markdown 技能增删改，保存到 `data/skills/*.md`，下次运行自动生效 |
-| MCP | MCP 配置增删改，保存到 `data/mcp.yaml`（运行时接入在下一阶段） |
-| 设置 | 当前模型与飞书配置，只读；改 `.env` 后重启 |
+| `im:message` | 接收消息 |
+| `im:message:send_as_bot` | 以机器人身份发送 |
+| `im:resource` | 上传/下载素材 |
+| `im:chat:readonly` | 群信息 |
+| `contact:user.base:readonly` | 成员姓名等（可选） |
+| `im:message.group_msg`（需审批） | 接收群内全部消息（免 @ 群需要） |
 
-接模型（OpenAI 兼容，Ark / DeepSeek / OpenAI 都行）：
+4. 发布应用，把机器人加入目标群；
+5. 取 `App ID` / `App Secret`，写入 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`；
+6. 取机器人 `open_id` 写入 `FEISHU_BOT_OPEN_ID`：
 
 ```bash
-AGENTHUB_AGENT_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-AGENTHUB_AGENT_API_KEY=...
-AGENTHUB_AGENT_MODEL=deepseek-v3-250324
+TOKEN=$(curl -s -X POST https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal \
+  -H 'Content-Type: application/json' \
+  -d '{"app_id":"<APP_ID>","app_secret":"<APP_SECRET>"}' | jq -r .tenant_access_token)
+curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $TOKEN" | jq .bot
 ```
 
-不填 `AGENTHUB_AGENT_API_KEY` 时使用回显执行器（收到什么回什么），方便先验证链路。
+7. 白名单：`FEISHU_ALLOWED_USERS`（**留空 = 拒绝所有人**）、`FEISHU_ALLOWED_GROUPS`；
+8. 测试群免 @：把 `openConversationId` 写进 `FEISHU_MENTION_FREE_CHATS`。
 
-## 进度卡片
+## 配置
 
-每次运行会发一张可更新的交互卡片：创建时显示「处理中 · 已收到 N 条消息」，执行中按阶段刷新（正在分析 / 正在调用工具），结束时更新为「处理完成」或「处理失败」并承载最终结果。
+优先级：环境变量 > `config.yaml` > 默认值。启动校验失败退出码 2，日志只记字段名。
 
-- 结果超过 3000 字时卡片显示「结果较长」，正文退回普通文本，避免截断；
-- 文本超过 3500 字会按段落分块发送，首块建立回复关系，其余顺序追加；
-- 卡片创建或更新失败时自动退回纯文本；
-- 停止按钮：设置 `FEISHU_CARD_ACTION=true` 且飞书能访问 `/feishu/card` 时显示；
-  只有会话发起人能停止，非法 token 或他人点击会被拒绝；未开启时用 `/stop`。
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `AGENTHUB_CHANNEL` | `off` | `off` 骨架 / `feishu` 接飞书 |
+| `AGENTHUB_HTTP_ADDR` | `127.0.0.1:8787` | 健康检查与指标 |
+| `AGENTHUB_ADMIN_ADDR` | `127.0.0.1:8788` | 管理台（无内置登录） |
+| `AGENTHUB_DB_URL` | 空 | 空则内存模式，重启丢数据 |
+| `AGENTHUB_DATA_DIR` | `./data` | 附件、技能、MCP 配置 |
+| `FEISHU_TRANSPORT` | `websocket` | `websocket` / `webhook` |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | 必填 | 应用凭据 |
+| `FEISHU_BOT_OPEN_ID` | 空 | 机器人 open_id，用于识别 @ |
+| `FEISHU_ALLOWED_USERS` | 空 | 用户白名单，空=全拒 |
+| `FEISHU_ALLOWED_GROUPS` | 空 | 群白名单，空=不限 |
+| `FEISHU_MENTION_FREE_CHATS` | 空 | 免 @ 群列表 |
+| `FEISHU_REQUIRE_MENTION` | `true` | 群聊是否必须 @ |
+| `FEISHU_CARD_ACTION` | `false` | 卡片停止按钮（需 `/feishu/card` 可达） |
+| `AGENTHUB_AGENT_BASE_URL` | OpenAI | OpenAI 兼容地址 |
+| `AGENTHUB_AGENT_API_KEY` | 空 | 空则回显模式 |
+| `AGENTHUB_AGENT_MODEL` | `gpt-4.1-mini` | 主模型 |
+| `AGENTHUB_AGENT_FALLBACK_MODEL` | 空 | 主模型失败兜底 |
+| `AGENTHUB_AGENT_VISION_MODEL` | 空 | 图片消息使用的视觉模型 |
+| `AGENTHUB_AGENT_SKILLS_DIR` | `<数据目录>/skills` | 技能目录 |
 
-## 图片理解
+完整列表见 [docs/runbook.md](docs/runbook.md)。
 
-配置 `AGENTHUB_AGENT_VISION_MODEL`（需支持视觉，如 `my-gpt-5.5`）后，带图片的消息会把图片以 base64 传给该模型；未配置时图片只落盘并提示模型用 `read_file` 读取（文本可读，图片不可）。
+## 技能
 
-单次最多 3 张、单张 ≤5MB，超出跳过。
-
-## 多轮上下文
-
-每次运行会把同会话**当前代**最近 20 条已完成消息（用户+助手）作为历史一起发给模型，助手回复也会落库；因此连续追问能继承前文，不依赖"把话一次说完"。
-
-`/reset` 会开启新代：旧上下文不再进入提示词，但历史消息仍保留在库里可追溯。
-
-## 引用
-
-回复某条消息再提问时，服务会读取被引用消息的正文并附在提示词前（`（引用消息：…）`），模型能据此理解"这个结论对吗"之类的问题。
-
-**回复机器人的消息等同于 @机器人**：群里直接引用它上一条回复继续追问即可，不必重新 @。
-
-## 命令
-
-在飞书里 @机器人 后发送：
-
-| 命令 | 作用 |
-|---|---|
-| `/status` | 当前是否在处理、排队多少条 |
-| `/model` | 当前模型与网关地址 |
-| `/stop` | 停止当前批次（保留排队消息） |
-| `/clear` | 取消全部排队消息 |
-| `/reset` | 停止、清空并开启新会话代（不再携带旧上下文） |
-| `/help` | 命令列表 |
-
-命令不进队列、不调用模型，直接回复。
-
-## 附件
-
-图片/文件消息会异步流式下载到 `data/attachments/<message_id>/`，下载完成后才入队：
-
-- 小于 64KB 的文本类附件（`.log/.txt/.md/.json/.yaml/.csv` 等）直接内联进提示词；
-- 其他附件给出本地路径，模型用内置 `read_file` 工具读取（限制在附件目录内，默认 256KB）。
-
-## 模型可靠性
-
-- 429/5xx 自动退避重试（最多 3 次），400 等客户端错误不重试；
-- 配置 `AGENTHUB_AGENT_FALLBACK_MODEL` 后，主模型仍失败会切到备用模型完成本次回答。
-
-## 投递可靠性
-
-- 发送失败按指数退避重试（1s → 2s → 4s，封顶 30s），最多 3 次；
-- 每次尝试与状态写入 `delivery_state`，进程重启后对 `pending/retrying` 的记录继续投递；
-- 3 次仍失败标记 `failed` 并写日志，不会无限重试。
-
-## 持久化
-
-配置 `AGENTHUB_DB_URL` 后，消息、运行与投递写库；启动时自动执行 `migrations/` 下未应用的 SQL，并恢复最近状态（`processing` 的消息会重新排队）。不配置数据库时仍是内存模式。
-
-## 技能与 MCP
-
-技能目录支持两种布局，`SKILL.md` 的 YAML frontmatter 优先：
+支持两种布局，`SKILL.md` 的 YAML frontmatter 优先：
 
 ```text
 data/skills/
   tiangong-troubleshoot/
-    SKILL.md          # --- name / description --- 正文
+    SKILL.md          # --- name / description --- + 正文
   incident-report.md  # 兼容扁平格式
 ```
 
-MCP 走 stdio，启动时拉起进程并 `initialize` + `tools/list`，工具以 `mcp_<server>_<tool>` 暴露给模型：
+- 仓库 `skills/` 是**随发布分发的种子**：首次启动且数据目录为空时自动复制到 `data/skills/`；
+- 管理台「技能」页可增删改，保存后下一次运行生效，无需重启；
+- 每次运行把全部技能拼进系统提示词（名称 + 描述 + 正文），由模型自行判断是否适用。
+
+## MCP
 
 ```yaml
 # data/mcp.yaml
@@ -151,81 +139,87 @@ MCP 走 stdio，启动时拉起进程并 `initialize` + `tools/list`，工具以
   enabled: true
 ```
 
-工具调用过程会写日志 `tool call`，失败返回「工具执行失败」给模型自行处理。
+启动时拉起进程、`initialize`、`tools/list`，工具以 `mcp_<server>_<tool>` 暴露给模型，自动参与 tool calling；单个服务失败只记日志。仅支持 stdio，HTTP 传输待做。
 
-## 本地模拟（不需要真实飞书应用）
+## 命令
 
-`go test ./...` 覆盖了完整链路，不访问外网：
+群里 @机器人（免 @ 群直接发）后：
 
-| 用例 | 验证点 |
+| 命令 | 作用 |
 |---|---|
-| `TestMessageEndToEnd` | 事件 → 解析 → 批次 → 执行 → 回复（fake 飞书 API） |
-| `TestDuplicateEventDeliversOnce` | 重复推送只投递一次 |
-| `TestGroupWithoutMentionIsIgnored` | 群聊未 @机器人 不处理 |
-| `TestRapidMessagesMergeIntoOneBatch` | 3 条连发合并为 1 次运行 |
-| `TestStopInterruptsRun` | 停止后运行中断且仍投递说明 |
-| `TestRejectsWrongToken` / `TestChatAllowlist` | 来源校验与白名单 |
-| `TestRawPayloadPrefersRawBody` | 长连接事件走与 webhook 相同的解析路径 |
-| `TestDispatcherHandlesWebsocketPayload` | 长连接报文 → 解析 → 批次 → 投递 |
-| `TestConnectorContract` | Connector 契约：多事件、多会话分发 |
+| `/status` | 当前状态与排队数 |
+| `/model` | 当前模型与网关 |
+| `/stop` | 停止当前批次 |
+| `/clear` | 取消排队 |
+| `/reset` | 停止、清空并开启新会话代 |
+| `/help` | 命令列表 |
 
-手动起服务验证事件入口：
+命令不入队、不调用模型。
+
+## 管理台
+
+`http://127.0.0.1:8788/admin/`（远端用 `ssh -L 8788:127.0.0.1:8788`）。
+
+| 页面 | 内容 |
+|---|---|
+| 概览 | 通道状态、模型、会话/运行/技能/MCP/工具计数、在线试跑 |
+| 会话 | 会话列表 → 消息与运行 |
+| 运行详情 | 阶段与工具事件、token、投递状态 |
+| 技能 | 增删改 Markdown 技能 |
+| MCP | 增删改 MCP 配置 |
+| 设置 | 当前生效配置（只读） |
+
+管理面没有登录鉴权，只能通过网关或内网访问。
+
+## 数据与可靠性
+
+- `message_state` / `run_state` / `delivery_state` / `run_trace`：消息、运行、投递、事件；
+- 助手回复也落库，下一轮作为历史（当前代最近 20 条）；
+- `/reset` 递增会话代，旧上下文不再进入提示词；
+- 投递失败按 1s→2s→4s 重试，最多 3 次；重启后继续投递未完成记录；
+- 429/5xx 自动重试并切换备用模型。
+
+## 测试
 
 ```bash
-AGENTHUB_CHANNEL=feishu \
-FEISHU_APP_ID=cli_sim FEISHU_APP_SECRET=sim \
-FEISHU_VERIFICATION_TOKEN=vt \
-AGENTHUB_WEBHOOK_ADDR=127.0.0.1:8789 \
-go run ./cmd/agentd
-
-curl -s -X POST localhost:8789/feishu/events \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"url_verification","challenge":"c-123","token":"vt"}'
-# {"challenge":"c-123"}
+go test ./...                                   # 单元 + 集成（部分跳过）
+AGENTHUB_TEST_DATABASE_URL=postgres://... \
+  go test ./internal/core ./internal/store      # 真实 PostgreSQL 用例
 ```
+
+## 常见问题
+
+| 现象 | 排查 |
+|---|---|
+| 发消息没反应 | 看日志 `feishu message ignored reason=...`；群聊未 @ 或不在白名单 |
+| 长连接反复重连 | 应用凭据错误（`app_id is invalid`）或出网 443 不通 |
+| 卡片不更新 | 卡片权限/模板；失败会自动回退文本 |
+| 图片看不到 | 未配置 `AGENTHUB_AGENT_VISION_MODEL`，或模型不支持视觉 |
+| 重启后会话为空 | 未配置 `AGENTHUB_DB_URL`（内存模式） |
 
 ## 目录
 
-| 路径 | 说明 |
-|---|---|
-| `cmd/agentd` | 服务入口：装配、信号、退出码 |
-| `internal/channel` | 与平台无关的入站消息与发送接口 |
-| `internal/core` | 受理、去重、批次快照、会话串行、投递（当前内存实现） |
-| `internal/agent` | 执行器契约（当前为回显实现，M2 接模型） |
-| `internal/platform/feishu` | 飞书事件解析、OpenAPI 客户端、回调入口 |
-| `internal/config` | 配置加载与校验（环境变量 > YAML > 默认值） |
-| `internal/obs` | 结构化日志与 Prometheus 指标 |
-| `internal/store` | PostgreSQL 连接、迁移与状态持久化 |
-| `internal/httpapi` | `/healthz`、`/metrics` 与管理面 |
-| `migrations` | SQL 迁移（只前进；goose 在 M1 接入） |
-| `docs` | PRD、架构、飞书能力、运维、路线图 |
+```
+cmd/agentd/                入口与装配
+internal/platform/feishu/  飞书通道：长连接、事件、卡片、附件
+internal/core/             受理、批次、会话代、投递、事件
+internal/agent/            模型、技能、工具、引用
+internal/mcp/              MCP stdio 客户端
+internal/admin/            管理台与 API
+internal/store/            PostgreSQL、迁移、持久化
+migrations/                SQL 迁移（只前进）
+skills/                    随仓库分发的技能种子
+examples/mcp/              示例 MCP 服务
+docs/                      PRD、架构、运维、路线图
+```
+
+## 安全
+
+- 密钥只从环境变量读取，日志与归档不落明文；
+- `read_file` 限制在附件目录内；
+- 管理面无内置认证，必须限制来源；
+- 生产建议：只读根文件系统、非 root、出网白名单、前缀网关做认证。
 
 ## 文档
 
-- [PRD](docs/PRD.md)
-- [架构设计](docs/architecture.md)
-- [飞书能力矩阵](docs/feishu-capabilities.md)
-- [运维手册](docs/runbook.md)
-- [路线图](docs/roadmap.md)
-
-## 常用命令
-
-```bash
-make run          # 本地运行
-make test         # 单元测试
-make build        # 产出 bin/agentd
-make fmt          # gofmt
-make vet          # go vet
-```
-
-## 状态
-
-- **M0 骨架**：配置校验、日志、指标、健康检查、迁移脚本、优雅退出。
-- **M1 飞书闭环（进行中）**：事件解析（文本/富文本/图片/文件/音视频）、去重、白名单、
-  群聊 @ 判定、批次合并、会话串行、停止、投递（回复原消息）已打通，并有 fake API 全链路测试。
-- **长连接（已完成）**：`FEISHU_TRANSPORT=websocket` 为默认；SDK 负责握手与重连，
-  服务侧带指数退避重试；`/healthz` 暴露 `feishu: connecting|connected|reconnecting`。
-- **M1 待补**：附件流式下载、真实模型接入。
-- **M2+**：PostgreSQL 持久化、outbox 重试、卡片与表情。
-
-详细排期见 [路线图](docs/roadmap.md)。
+- [PRD](docs/PRD.md) · [架构](docs/architecture.md) · [飞书能力](docs/feishu-capabilities.md) · [运维](docs/runbook.md) · [路线图](docs/roadmap.md)

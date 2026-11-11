@@ -70,6 +70,15 @@ func run() int {
 		skillsDir = filepath.Join(cfg.Storage.Dir, "skills")
 	}
 	attachmentsDir := filepath.Join(cfg.Storage.Dir, "attachments")
+	seedDir := os.Getenv("AGENTHUB_SEED_SKILLS_DIR")
+	if seedDir == "" {
+		seedDir = "skills"
+	}
+	if copied, err := agent.SeedSkills(seedDir, skillsDir); err != nil {
+		logger.Warn("seed skills failed", "error", err)
+	} else if copied > 0 {
+		logger.Info("seeded skills", "count", copied, "dir", skillsDir)
+	}
 
 	var ch channel.Channel
 	feishuStatus := func() string { return "off" }

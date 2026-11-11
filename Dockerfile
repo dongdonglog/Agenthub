@@ -11,6 +11,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/agentd /app/agentd
 COPY migrations /app/migrations
+COPY skills /app/skills
 ENV AGENTHUB_HTTP_ADDR=0.0.0.0:8787
 EXPOSE 8787 8788
 USER nonroot:nonroot
