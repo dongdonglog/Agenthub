@@ -84,6 +84,19 @@ func run() int {
 
 	runner := newAgent(cfg, skillsDir, mcpManager.Tools(), logger)
 	engine := core.New(runner, ch, logger)
+
+	if db != nil {
+		if err := store.Migrate(ctx, db, migrationsDir()); err != nil {
+			logger.Error("migration failed", "error", err)
+			return 1
+		}
+		engine.SetJournal(store.NewJournal(db))
+		if err := engine.Restore(ctx); err != nil {
+			logger.Error("restore failed", "error", err)
+			return 1
+		}
+		logger.Info("state restored")
+	}
 	metrics := obs.NewMetrics()
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 
@@ -128,6 +141,13 @@ func run() int {
 	}
 	logger.Info("stopped")
 	return 0
+}
+
+func migrationsDir() string {
+	if dir := os.Getenv("AGENTHUB_MIGRATIONS_DIR"); dir != "" {
+		return dir
+	}
+	return "migrations"
 }
 
 func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, logger *slog.Logger) agent.Agent {

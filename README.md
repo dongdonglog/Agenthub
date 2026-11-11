@@ -53,6 +53,10 @@ AGENTHUB_AGENT_MODEL=deepseek-v3-250324
 
 不填 `AGENTHUB_AGENT_API_KEY` 时使用回显执行器（收到什么回什么），方便先验证链路。
 
+## 持久化
+
+配置 `AGENTHUB_DB_URL` 后，消息、运行与投递写库；启动时自动执行 `migrations/` 下未应用的 SQL，并恢复最近状态（`processing` 的消息会重新排队）。不配置数据库时仍是内存模式。
+
 ## 技能与 MCP
 
 技能目录支持两种布局，`SKILL.md` 的 YAML frontmatter 优先：
@@ -119,7 +123,7 @@ curl -s -X POST localhost:8789/feishu/events \
 | `internal/platform/feishu` | 飞书事件解析、OpenAPI 客户端、回调入口 |
 | `internal/config` | 配置加载与校验（环境变量 > YAML > 默认值） |
 | `internal/obs` | 结构化日志与 Prometheus 指标 |
-| `internal/store` | PostgreSQL 连接与数据访问 |
+| `internal/store` | PostgreSQL 连接、迁移与状态持久化 |
 | `internal/httpapi` | `/healthz`、`/metrics` 与管理面 |
 | `migrations` | SQL 迁移（只前进；goose 在 M1 接入） |
 | `docs` | PRD、架构、飞书能力、运维、路线图 |

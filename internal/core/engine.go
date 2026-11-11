@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +55,17 @@ type Delivery struct {
 	Error          string
 }
 
+// Journal 是核心状态的持久化接口。
+//
+// @remarks 实现方负责幂等：同一会话同一外部消息 ID 只应写入一次。
+type Journal interface {
+	SaveMessage(ctx context.Context, m *Message) (bool, error)
+	SetMessageStatus(ctx context.Context, ids []string, status string) error
+	SaveRun(ctx context.Context, r *Run) error
+	SaveDelivery(ctx context.Context, d *Delivery) error
+	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
+}
+
 // Engine 负责把入站消息收敛成批次并驱动执行与投递。
 type Engine struct {
 	mu    sync.Mutex
@@ -73,6 +85,7 @@ type Engine struct {
 	sent       map[string]bool
 	seq        map[string]int64
 	runSeq     int64
+	journal    Journal
 }
 
 // New 构造执行引擎。
@@ -103,11 +116,67 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 	}
 }
 
+// SetJournal 注入持久化实现；为空表示纯内存运行。
+func (e *Engine) SetJournal(j Journal) {
+	e.journal = j
+}
+
+// Restore 从持久化恢复最近消息与运行。
+//
+// @remarks 重启时处于 processing 的消息重新排队，避免中断后卡住。
+func (e *Engine) Restore(ctx context.Context) error {
+	if e.journal == nil {
+		return nil
+	}
+	msgs, runs, err := e.journal.LoadRecent(ctx, 1000)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, m := range msgs {
+		if m.Status == "processing" {
+			m.Status = "queued"
+		}
+		e.messages[m.ID] = m
+		e.dedupe[m.ConversationID+"|"+m.ExternalID] = m.ID
+		if n := seqSuffix(m.ID); n > e.seq[m.ConversationID] {
+			e.seq[m.ConversationID] = n
+		}
+		if m.Status == "queued" {
+			e.order[m.ConversationID] = append(e.order[m.ConversationID], m.ID)
+		}
+	}
+	for _, r := range runs {
+		e.runs[r.ID] = r
+		e.runOrder = append(e.runOrder, r.ID)
+		if n := seqSuffix(r.ID); n > e.runSeq {
+			e.runSeq = n
+		}
+	}
+	return nil
+}
+
+func seqSuffix(id string) int64 {
+	i := strings.LastIndex(id, "_")
+	if i < 0 || i == len(id)-1 {
+		return 0
+	}
+	var n int64
+	for _, c := range id[i+1:] {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return n
+}
+
 // Submit 受理一条消息。
 //
 // @returns inserted 为 false 表示重复投递，已忽略
 // @throws 缺少外部消息 ID 或 chat_id 时返回错误
-func (e *Engine) Submit(_ context.Context, in channel.Inbound) (bool, error) {
+func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 	if in.ExternalID == "" {
 		return false, errors.New("缺少外部消息 ID")
 	}
@@ -115,11 +184,11 @@ func (e *Engine) Submit(_ context.Context, in channel.Inbound) (bool, error) {
 		return false, errors.New("缺少 chat_id")
 	}
 	conv := conversationKey(in)
-	dedupeKey := in.Tenant + "|" + in.ExternalID
+	dedupeKey := conv + "|" + in.ExternalID
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if _, ok := e.dedupe[dedupeKey]; ok {
+		e.mu.Unlock()
 		return false, nil
 	}
 
@@ -139,7 +208,33 @@ func (e *Engine) Submit(_ context.Context, in channel.Inbound) (bool, error) {
 	e.messages[msg.ID] = msg
 	e.dedupe[dedupeKey] = msg.ID
 	e.order[conv] = append(e.order[conv], msg.ID)
+	e.mu.Unlock()
+
+	if e.journal != nil {
+		inserted, err := e.journal.SaveMessage(ctx, msg)
+		switch {
+		case err != nil:
+			e.log.Error("persist message failed", "error", err, "message", msg.ExternalID)
+		case !inserted:
+			e.dropMessage(conv, dedupeKey, msg.ID)
+			return false, nil
+		}
+	}
 	return true, nil
+}
+
+func (e *Engine) dropMessage(conv, dedupeKey, id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.messages, id)
+	delete(e.dedupe, dedupeKey)
+	ids := e.order[conv][:0]
+	for _, existing := range e.order[conv] {
+		if existing != id {
+			ids = append(ids, existing)
+		}
+	}
+	e.order[conv] = ids
 }
 
 // Flush 处理所有"有排队消息且无活动运行"的会话。
@@ -305,6 +400,15 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	e.cancels[conv] = cancel
 	e.mu.Unlock()
 
+	if e.journal != nil {
+		if err := e.journal.SaveRun(ctx, run); err != nil {
+			e.log.Error("persist run failed", "error", err, "run", run.ID)
+		}
+		if err := e.journal.SetMessageStatus(ctx, run.InputIDs, "processing"); err != nil {
+			e.log.Error("persist message status failed", "error", err)
+		}
+	}
+
 	input := agent.Input{ConversationID: conv}
 	for _, m := range batch {
 		input.Messages = append(input.Messages, agent.Message{ID: m.ID, Text: m.Text, Attachments: m.Attachments})
@@ -356,6 +460,18 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	alreadySent := e.sent[delivery.IdempotencyKey]
 	e.mu.Unlock()
 
+	if e.journal != nil {
+		if err := e.journal.SaveRun(ctx, run); err != nil {
+			e.log.Error("persist run failed", "error", err, "run", run.ID)
+		}
+		if err := e.journal.SetMessageStatus(ctx, run.InputIDs, batch[0].Status); err != nil {
+			e.log.Error("persist message status failed", "error", err)
+		}
+		if err := e.journal.SaveDelivery(ctx, delivery); err != nil {
+			e.log.Error("persist delivery failed", "error", err, "delivery", delivery.IdempotencyKey)
+		}
+	}
+
 	if alreadySent {
 		return nil
 	}
@@ -369,19 +485,30 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		d.State = "sent"
 		e.sent[d.IdempotencyKey] = true
 		e.mu.Unlock()
+		e.persistDelivery(ctx, d)
 		return
 	}
 	_, err := e.ch.SendText(ctx, channel.Outbound{ChatID: d.ChatID, ReplyTo: d.ReplyTo, Text: d.Text})
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if err != nil {
 		d.State = "failed"
 		d.Error = err.Error()
 		e.log.Warn("delivery failed", "run", d.RunID, "error", err)
+	} else {
+		d.State = "sent"
+		e.sent[d.IdempotencyKey] = true
+	}
+	e.mu.Unlock()
+	e.persistDelivery(ctx, d)
+}
+
+func (e *Engine) persistDelivery(ctx context.Context, d *Delivery) {
+	if e.journal == nil {
 		return
 	}
-	d.State = "sent"
-	e.sent[d.IdempotencyKey] = true
+	if err := e.journal.SaveDelivery(ctx, d); err != nil {
+		e.log.Error("persist delivery failed", "error", err, "delivery", d.IdempotencyKey)
+	}
 }
 
 func conversationKey(in channel.Inbound) string {

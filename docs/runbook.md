@@ -19,8 +19,7 @@ createdb agenthub
 # 2. 配置
 cp .env.example .env    # 填 FEISHU_APP_ID/SECRET、AGENTHUB_DB_URL
 
-# 3. 迁移（M1 起接入 goose；当前可手工执行）
-psql "$AGENTHUB_DB_URL" -f migrations/0001_init.sql
+# 3. 迁移：启动时自动执行 migrations/ 下未应用的 SQL（schema_migrations 记录版本）
 
 # 4. 运行
 set -a && . ./.env && set +a
@@ -83,7 +82,8 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_WEBHOOK_ADDR` | `127.0.0.1:8789` | 飞书事件回调监听（仅 webhook 模式） |
 | `FEISHU_TRANSPORT` | `websocket` | `websocket` 长连接（无需公网入口）/ `webhook` 回调地址 |
 | `FEISHU_DOMAIN` | `https://open.feishu.cn` | 开放平台地址，Lark 海外改为 `https://open.larksuite.com` |
-| `AGENTHUB_DB_URL` | 空 | PostgreSQL 连接串；空则无持久化 |
+| `AGENTHUB_DB_URL` | 空 | PostgreSQL 连接串；空则无持久化（会话/消息重启即丢） |
+| `AGENTHUB_MIGRATIONS_DIR` | `migrations` | 迁移目录；启动时按文件名顺序应用 |
 | `AGENTHUB_DB_MAX_CONNS` | `10` | 连接池上限 |
 | `AGENTHUB_DATA_DIR` | `./data` | 附件与产物目录 |
 | `FEISHU_APP_ID` | 必填（feishu 模式） | 应用 ID |
@@ -113,6 +113,12 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 - 技能与 MCP 配置分别保存到 `<数据目录>/skills/*.md` 与 `<数据目录>/mcp.yaml`；
 - 管理面没有内置登录，远端访问必须经网关或 SSH 隧道（`ssh -L 8788:127.0.0.1:8788`）；
 - 修改模型与飞书配置仍走 `.env`，重启生效。
+
+### 4.2 持久化
+
+- 消息、运行、投递写入 `message_state` / `run_state` / `delivery_state`；
+- 启动时 `Restore` 恢复最近 1000 条消息与运行，`processing` 状态的消息重新排队；
+- 集成测试：`AGENTHUB_TEST_DATABASE_URL=... go test ./internal/core -run TestJournalPersistenceAndRestore`。
 
 ## 5. 健康检查与指标
 
