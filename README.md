@@ -56,6 +56,15 @@ docker compose up -d --build
 
 两个服务（app + postgres），数据在 `aadata` / `pgdata` 卷，迁移随启动自动执行，端口只发布到宿主机回环。
 
+已发布镜像：`donglog/agenthub`（打 tag 自动构建，amd64 + arm64）：
+
+```bash
+AGENTHUB_TAG=0.1.1 docker compose pull
+AGENTHUB_TAG=0.1.1 docker compose up -d
+```
+
+完整步骤（端口、备份恢复、升级、告警）见 [部署指南](docs/deploy.md)。
+
 ## 飞书应用配置
 
 1. 开放平台创建**企业自建应用**，添加「机器人」能力；
