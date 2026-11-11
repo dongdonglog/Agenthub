@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -351,5 +352,47 @@ func TestChatAggregatesUsage(t *testing.T) {
 	}
 	if out.Usage.InputTokens != 12 || out.Usage.OutputTokens != 7 {
 		t.Fatalf("usage = %+v", out.Usage)
+	}
+}
+
+func TestToolLogCarriesTraceID(t *testing.T) {
+	round := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		round++
+		if round == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{
+					"content": "",
+					"tool_calls": []any{map[string]any{
+						"id": "c1", "type": "function",
+						"function": map[string]any{"name": "mcp_demo_echo", "arguments": "{}"},
+					}},
+				}}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	var buf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	tool := &fakeTool{name: "mcp_demo_echo"}
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "m", Tools: []agent.Tool{tool}, Logger: logger}
+	if _, err := c.Run(context.Background(), agent.Input{
+		TraceID:  "tr_test",
+		RunID:    "run_9",
+		Messages: []agent.Message{{Text: "hi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "trace_id=tr_test") || !strings.Contains(out, "run_id=run_9") {
+		t.Fatalf("日志缺少 trace: %s", out)
+	}
+	if !strings.Contains(out, "tool call") {
+		t.Fatalf("日志缺少工具调用: %s", out)
 	}
 }

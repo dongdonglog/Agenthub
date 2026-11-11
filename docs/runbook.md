@@ -152,6 +152,8 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `agenthub_messages_accepted_total` | counter | 受理消息数 |
 | `agenthub_runs_total` | counter | 按 state（completed/failed/interrupted） |
 | `agenthub_deliveries_total` | counter | 按 result（sent/retrying/failed） |
+
+日志字段：`trace_id`（请求级）、`run_id`（运行级）、`server`（MCP 服务名）、`tool`（工具名）。
 | `agenthub_runs_total` | counter | 按 state |
 | `agenthub_delivery_total` | counter | 按 result |
 | `agenthub_message_accepted_total` | counter | 受理消息数 |

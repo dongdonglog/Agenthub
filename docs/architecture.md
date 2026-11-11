@@ -106,6 +106,8 @@ queued ──▶ running ──▶ completed
 | `run_trace` | 阶段与工具事件 | 追加写，按 `run_id` 查询 |
 | `schema_migrations` | 迁移版本 | 只前进，启动时加 advisory lock |
 
+日志用 `trace_id` 贯通消息 → 运行 → 工具 → 投递；`run_id` 定位单次运行。
+
 内存只保留近期数据（每会话 100 条、200 会话、200 运行、500 投递），数据库可配保留期（默认 90 天）。
 
 完整 DDL 见 `migrations/0001_init.sql`。

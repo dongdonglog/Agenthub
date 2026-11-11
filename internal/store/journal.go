@@ -26,10 +26,10 @@ func NewJournal(db *DB) *Journal {
 // SaveMessage 写入消息；重复（同会话同外部 ID）返回 false。
 func (j *Journal) SaveMessage(ctx context.Context, m *core.Message) (bool, error) {
 	tag, err := j.pool.Exec(ctx, `
-		INSERT INTO message_state (id, role, generation, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		INSERT INTO message_state (id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		ON CONFLICT (conversation_id, external_id) DO NOTHING`,
-		m.ID, defaultRole(m.Role), defaultGeneration(m.Generation), m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.Text, m.MsgType, m.Status, m.CreatedAt)
+		m.ID, defaultRole(m.Role), defaultGeneration(m.Generation), m.TraceID, m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.Text, m.MsgType, m.Status, m.CreatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -49,30 +49,32 @@ func (j *Journal) SetMessageStatus(ctx context.Context, ids []string, status str
 func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 	inputs, _ := json.Marshal(r.InputIDs)
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO run_state (id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		INSERT INTO run_state (id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (id) DO UPDATE SET
 			state = EXCLUDED.state,
 			output = EXCLUDED.output,
 			error = EXCLUDED.error,
 			ended_at = EXCLUDED.ended_at,
 			input_tokens = EXCLUDED.input_tokens,
-			output_tokens = EXCLUDED.output_tokens`,
-		r.ID, r.ConversationID, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt, r.InputTokens, r.OutputTokens)
+			output_tokens = EXCLUDED.output_tokens,
+			trace_id = EXCLUDED.trace_id`,
+		r.ID, r.ConversationID, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt, r.InputTokens, r.OutputTokens, r.TraceID)
 	return err
 }
 
 // SaveDelivery 新建或更新投递记录。
 func (j *Journal) SaveDelivery(ctx context.Context, d *core.Delivery) error {
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, state, error, attempts, next_attempt_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, state, error, attempts, next_attempt_at, trace_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (idempotency_key) DO UPDATE SET
 			state = EXCLUDED.state,
 			error = EXCLUDED.error,
 			attempts = EXCLUDED.attempts,
-			next_attempt_at = EXCLUDED.next_attempt_at`,
-		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt))
+			next_attempt_at = EXCLUDED.next_attempt_at,
+			trace_id = EXCLUDED.trace_id`,
+		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt), d.TraceID)
 	return err
 }
 
@@ -179,7 +181,7 @@ func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, err
 // LoadPendingDeliveries 返回未完成投递，用于启动补偿。
 func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT idempotency_key, run_id, chat_id, reply_to, text, state, attempts, next_attempt_at
+		SELECT idempotency_key, run_id, chat_id, reply_to, text, state, attempts, next_attempt_at, trace_id
 		FROM delivery_state WHERE state IN ('pending','retrying') LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -189,7 +191,7 @@ func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core
 	for rows.Next() {
 		d := &core.Delivery{}
 		var next *time.Time
-		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.State, &d.Attempts, &next); err != nil {
+		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.State, &d.Attempts, &next, &d.TraceID); err != nil {
 			return nil, err
 		}
 		if next != nil {
@@ -203,7 +205,7 @@ func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。
 func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, []*core.Run, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT id, role, generation, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
+		SELECT id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
 		FROM message_state ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
@@ -211,7 +213,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	var messages []*core.Message
 	for rows.Next() {
 		m := &core.Message{}
-		if err := rows.Scan(&m.ID, &m.Role, &m.Generation, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
+		if err := rows.Scan(&m.ID, &m.Role, &m.Generation, &m.TraceID, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
 			&m.Text, &m.MsgType, &m.Status, &m.CreatedAt); err != nil {
 			rows.Close()
 			return nil, nil, err
@@ -228,7 +230,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	}
 
 	runRows, err := j.pool.Query(ctx, `
-		SELECT id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens
+		SELECT id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id
 		FROM run_state ORDER BY started_at DESC NULLS LAST LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
@@ -239,7 +241,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 		r := &core.Run{}
 		var inputs []byte
 		var started, ended *time.Time
-		if err := runRows.Scan(&r.ID, &r.ConversationID, &r.State, &inputs, &r.Output, &r.Error, &started, &ended, &r.InputTokens, &r.OutputTokens); err != nil {
+		if err := runRows.Scan(&r.ID, &r.ConversationID, &r.State, &inputs, &r.Output, &r.Error, &started, &ended, &r.InputTokens, &r.OutputTokens, &r.TraceID); err != nil {
 			return nil, nil, err
 		}
 		_ = json.Unmarshal(inputs, &r.InputIDs)

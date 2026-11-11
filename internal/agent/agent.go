@@ -21,6 +21,10 @@ type Message struct {
 // Input 是一次运行的输入。
 type Input struct {
 	ConversationID string
+	// TraceID 用于日志关联。
+	TraceID string
+	// RunID 是本次运行的标识。
+	RunID string
 	// History 是本批之前的对话上下文。
 	History  []Message
 	Messages []Message

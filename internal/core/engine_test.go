@@ -540,3 +540,28 @@ func TestWaitIdle(t *testing.T) {
 		t.Fatal("运行结束后应空闲")
 	}
 }
+
+func TestTraceIDPropagates(t *testing.T) {
+	ch := &captureChannel{}
+	eng := newEngine(t, ch, agent.Echo{})
+	ctx := context.Background()
+	if _, err := eng.Submit(ctx, inbound("om_trace", "hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := eng.Messages("tenant_1:oc_chat:ou_user")
+	if len(msgs) == 0 || msgs[0].TraceID == "" {
+		t.Fatalf("消息缺少 trace: %+v", msgs)
+	}
+	runs := eng.Runs()
+	if len(runs) != 1 || runs[0].TraceID != msgs[0].TraceID {
+		t.Fatalf("运行 trace 不一致: %+v", runs)
+	}
+	d := eng.Deliveries()
+	if len(d) != 1 || d[0].TraceID != runs[0].TraceID {
+		t.Fatalf("投递 trace 不一致: %+v", d)
+	}
+}

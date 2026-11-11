@@ -83,6 +83,10 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	if progress == nil {
 		progress = func(string) {}
 	}
+	log := c.Logger
+	if log != nil {
+		log = log.With("trace_id", in.TraceID, "run_id", in.RunID)
+	}
 	progress("正在分析")
 
 	rounds := c.MaxToolRounds
@@ -114,7 +118,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		for _, call := range msg.ToolCalls {
 			progress("正在调用工具：" + call.Function.Name)
 			started := time.Now()
-			result, callErr := c.executeTool(ctx, call)
+			result, callErr := c.executeTool(ctx, call, log)
 			if in.OnTool != nil {
 				in.OnTool(call.Function.Name, time.Since(started), callErr)
 			}
@@ -266,7 +270,7 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any, model st
 	return msg, nil
 }
 
-func (c *Chat) executeTool(ctx context.Context, call toolCall) (string, error) {
+func (c *Chat) executeTool(ctx context.Context, call toolCall, log *slog.Logger) (string, error) {
 	for _, t := range c.Tools {
 		if t.Name() != call.Function.Name {
 			continue
@@ -277,8 +281,8 @@ func (c *Chat) executeTool(ctx context.Context, call toolCall) (string, error) {
 		}
 		start := time.Now()
 		out, err := t.Call(ctx, args)
-		if c.Logger != nil {
-			c.Logger.Info("tool call", "tool", t.Name(), "duration_ms", time.Since(start).Milliseconds(), "error", err != nil)
+		if log != nil {
+			log.Info("tool call", "tool", t.Name(), "duration_ms", time.Since(start).Milliseconds(), "error", err != nil)
 		}
 		return out, err
 	}
