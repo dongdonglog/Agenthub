@@ -12,6 +12,7 @@ import (
 // Message 是交给执行器的一条输入消息。
 type Message struct {
 	ID          string
+	Role        string
 	Text        string
 	Attachments []channel.Attachment
 }
@@ -19,7 +20,9 @@ type Message struct {
 // Input 是一次运行的输入。
 type Input struct {
 	ConversationID string
-	Messages       []Message
+	// History 是本批之前的对话上下文。
+	History  []Message
+	Messages []Message
 	// Progress 是阶段回调，可为空；实现方不得阻塞。
 	Progress func(phase string)
 }

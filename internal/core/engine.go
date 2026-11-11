@@ -20,7 +20,9 @@ import (
 
 // Message 是一条已受理的消息。
 type Message struct {
-	ID             string
+	ID string
+	// Role 是 user 或 assistant。
+	Role           string
 	ConversationID string
 	ChatID         string
 	ExternalID     string
@@ -222,6 +224,7 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 		ID:             fmt.Sprintf("msg_%s_%d", conv, e.seq[conv]),
 		ConversationID: conv,
 		ChatID:         in.Chat.ID,
+		Role:           "user",
 		ExternalID:     in.ExternalID,
 		SenderOpenID:   in.Sender.OpenID,
 		Text:           in.Text,
@@ -498,7 +501,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		}
 	}
 
-	input := agent.Input{ConversationID: conv, Progress: progress}
+	input := agent.Input{ConversationID: conv, Progress: progress, History: e.history(conv, batch)}
 	for _, m := range batch {
 		input.Messages = append(input.Messages, agent.Message{ID: m.ID, Text: m.Text, Attachments: m.Attachments})
 	}
@@ -562,6 +565,8 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	alreadySent := e.sent[delivery.IdempotencyKey]
 	e.mu.Unlock()
 
+	e.appendAssistant(conv, run.ID, text)
+
 	if e.journal != nil {
 		if err := e.journal.SaveRun(ctx, run); err != nil {
 			e.log.Error("persist run failed", "error", err, "run", run.ID)
@@ -579,6 +584,62 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	}
 	e.send(ctx, delivery)
 	return nil
+}
+
+// history 返回本批之前的最近对话，用于多轮上下文。
+func (e *Engine) history(conv string, batch []*Message) []agent.Message {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	skip := make(map[string]struct{}, len(batch))
+	for _, m := range batch {
+		skip[m.ID] = struct{}{}
+	}
+	msgs := make([]*Message, 0, len(e.messages))
+	for _, m := range e.messages {
+		if m.ConversationID != conv {
+			continue
+		}
+		if _, ok := skip[m.ID]; ok {
+			continue
+		}
+		if m.Status != "done" && m.Status != "failed" && m.Status != "stopped" {
+			continue
+		}
+		msgs = append(msgs, m)
+	}
+	sort.Slice(msgs, func(i, j int) bool { return msgs[i].CreatedAt.Before(msgs[j].CreatedAt) })
+	if len(msgs) > 20 {
+		msgs = msgs[len(msgs)-20:]
+	}
+	out := make([]agent.Message, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, agent.Message{ID: m.ID, Text: m.Text, Attachments: m.Attachments, Role: m.Role})
+	}
+	return out
+}
+
+// appendAssistant 记录助手回复，供下一轮作为上下文。
+func (e *Engine) appendAssistant(conv, runID, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	msg := &Message{
+		ID:             "asst_" + runID,
+		Role:           "assistant",
+		ConversationID: conv,
+		ChatID:         "",
+		Status:         "done",
+		Text:           text,
+		CreatedAt:      e.now(),
+	}
+	e.mu.Lock()
+	e.messages[msg.ID] = msg
+	e.mu.Unlock()
+	if e.journal != nil {
+		if _, err := e.journal.SaveMessage(context.Background(), msg); err != nil {
+			e.log.Error("persist assistant message failed", "error", err)
+		}
+	}
 }
 
 func (e *Engine) send(ctx context.Context, d *Delivery) {

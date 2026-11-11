@@ -57,6 +57,13 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	}
 	messages := make([]map[string]any, 0, len(in.Messages)+1)
 	messages = append(messages, map[string]any{"role": "system", "content": c.systemPrompt()})
+	for _, m := range in.History {
+		role := m.Role
+		if role != "assistant" {
+			role = "user"
+		}
+		messages = append(messages, map[string]any{"role": role, "content": renderMessage(m)})
+	}
 	for _, m := range in.Messages {
 		messages = append(messages, map[string]any{"role": "user", "content": renderMessage(m)})
 	}

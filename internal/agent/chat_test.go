@@ -148,3 +148,38 @@ func TestChatExecutesToolCallsAndContinues(t *testing.T) {
 		t.Fatalf("第二轮请求未带工具结果: %s", secondBody)
 	}
 }
+
+func TestChatIncludesHistoryRoles(t *testing.T) {
+	var captured struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "m"}
+	_, err := c.Run(context.Background(), agent.Input{
+		History: []agent.Message{
+			{Role: "user", Text: "第一问"},
+			{Role: "assistant", Text: "第一答"},
+		},
+		Messages: []agent.Message{{Role: "user", Text: "第二问"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured.Messages) != 4 {
+		t.Fatalf("messages = %d", len(captured.Messages))
+	}
+	if captured.Messages[1].Role != "user" || captured.Messages[2].Role != "assistant" || captured.Messages[3].Role != "user" {
+		t.Fatalf("roles = %+v", captured.Messages)
+	}
+}

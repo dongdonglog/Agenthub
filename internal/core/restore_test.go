@@ -64,13 +64,18 @@ func TestJournalPersistenceAndRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs := restored.Messages("t:chat-1:ou-1")
-	if len(msgs) != 2 {
-		t.Fatalf("恢复消息数 = %d, want 2", len(msgs))
-	}
+	users := 0
 	for _, m := range msgs {
+		if m.Role == "assistant" {
+			continue
+		}
+		users++
 		if m.Status != "done" {
 			t.Fatalf("恢复状态 = %s, want done", m.Status)
 		}
+	}
+	if users != 2 {
+		t.Fatalf("恢复用户消息数 = %d, want 2", users)
 	}
 	if runs := restored.Runs(); len(runs) != 1 {
 		t.Fatalf("恢复运行数 = %d, want 1", len(runs))

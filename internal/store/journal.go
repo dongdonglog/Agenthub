@@ -26,10 +26,10 @@ func NewJournal(db *DB) *Journal {
 // SaveMessage 写入消息；重复（同会话同外部 ID）返回 false。
 func (j *Journal) SaveMessage(ctx context.Context, m *core.Message) (bool, error) {
 	tag, err := j.pool.Exec(ctx, `
-		INSERT INTO message_state (id, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		INSERT INTO message_state (id, role, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (conversation_id, external_id) DO NOTHING`,
-		m.ID, m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.Text, m.MsgType, m.Status, m.CreatedAt)
+		m.ID, defaultRole(m.Role), m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.Text, m.MsgType, m.Status, m.CreatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -72,10 +72,17 @@ func (j *Journal) SaveDelivery(ctx context.Context, d *core.Delivery) error {
 	return err
 }
 
+func defaultRole(role string) string {
+	if role == "" {
+		return "user"
+	}
+	return role
+}
+
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。
 func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, []*core.Run, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT id, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
+		SELECT id, role, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
 		FROM message_state ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
@@ -83,7 +90,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	var messages []*core.Message
 	for rows.Next() {
 		m := &core.Message{}
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
+		if err := rows.Scan(&m.ID, &m.Role, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
 			&m.Text, &m.MsgType, &m.Status, &m.CreatedAt); err != nil {
 			rows.Close()
 			return nil, nil, err

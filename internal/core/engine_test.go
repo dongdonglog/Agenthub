@@ -295,3 +295,42 @@ func TestPresenterFailureFallsBackToText(t *testing.T) {
 		t.Fatalf("卡片失败应回退文本，实际 %d", ch.count())
 	}
 }
+
+type recordingAgent struct {
+	history []agent.Message
+}
+
+func (r *recordingAgent) Run(_ context.Context, in agent.Input) (agent.Output, error) {
+	r.history = append([]agent.Message(nil), in.History...)
+	return agent.Output{Text: "回答：" + in.Messages[0].Text}, nil
+}
+
+func TestSecondTurnCarriesHistory(t *testing.T) {
+	ch := &captureChannel{}
+	recorder := &recordingAgent{}
+	eng := newEngine(t, ch, recorder)
+	ctx := context.Background()
+
+	if _, err := eng.Submit(ctx, inbound("om_t1", "第一问")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Submit(ctx, inbound("om_t2", "第二问")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(recorder.history) < 2 {
+		t.Fatalf("第二轮应带上历史，实际 %d 条", len(recorder.history))
+	}
+	if recorder.history[0].Role != "user" || recorder.history[0].Text != "第一问" {
+		t.Fatalf("历史第一条 = %+v", recorder.history[0])
+	}
+	if recorder.history[1].Role != "assistant" {
+		t.Fatalf("历史应包含助手回复，实际 %+v", recorder.history[1])
+	}
+}
