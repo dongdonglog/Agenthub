@@ -43,7 +43,7 @@ internal/mcp               MCP stdio 客户端
 internal/platform/feishu   通道实现
 internal/admin             管理台与 API
 migrations/                迁移（只前进）
-skills/                    随仓库分发的技能种子
+examples/skills/           技能模板（业务技能由部署方提供，不入仓库）
 ```
 
 依赖方向：`platform → core → store`，`core` 不依赖 `platform/feishu`；`agent` 不依赖 `core`。新增跨层依赖先改本节。
@@ -54,7 +54,7 @@ skills/                    随仓库分发的技能种子
 - **迁移只前进**：已应用的 `migrations/NNNN_*.sql` 不允许修改，只能新增编号；启动时 `store.Migrate` 按文件名顺序执行，并用 advisory lock 防并发。
 - 配置优先级 `环境变量 > config.yaml > 默认值`；新增配置必须同步 `.env.example` 与 `docs/runbook.md`。
 - 日志不得包含密钥、临时下载地址、完整敏感载荷；错误信息只给字段名与原因。
-- 技能格式：目录 `<name>/SKILL.md`（frontmatter `name`/`description`）或扁平 `<name>.md`；`skills/` 是种子，首次启动复制到数据目录。
+- 技能格式：目录 `<name>/SKILL.md`（frontmatter `name`/`description`）或扁平 `<name>.md`；业务技能不入仓库，部署时放数据目录或走管理台导入。
 - MCP 只支持 stdio；新增传输方式需同时补充测试与文档。
 - 管理面没有内置认证，任何新增路由都假定前置网关。
 
