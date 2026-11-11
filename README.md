@@ -169,7 +169,9 @@ data/skills/
 | MCP | 增删改 MCP 配置 |
 | 设置 | 当前生效配置（只读） |
 
-管理面没有登录鉴权，只能通过网关或内网访问。
+设置 `AGENTHUB_ADMIN_TOKEN` 后，管理面要求 Bearer Token 或先访问
+`/admin/login?token=<TOKEN>` 获取 Cookie（HttpOnly + SameSite=Strict），写操作还需
+`X-Requested-With: agenthub` 头防 CSRF。未设置时无鉴权，只应绑定回环或置于网关之后。
 
 ## 数据与保留
 

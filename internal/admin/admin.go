@@ -78,7 +78,63 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /admin/api/v1/settings", s.handleSettings)
 	mux.HandleFunc("POST /admin/api/v1/test", s.handleTest)
-	return mux
+	return s.withAuth(mux)
+}
+
+// withAuth 在配置了 Token 时校验管理面访问。
+//
+// @remarks 支持 Bearer 头与登录 Cookie；写操作额外要求 X-Requested-With 头，降低 CSRF 风险。
+func (s *Server) withAuth(next http.Handler) http.Handler {
+	token := s.cfg.Admin.Token
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if token == "" {
+			next.ServeHTTP(rw, r)
+			return
+		}
+		if r.URL.Path == "/admin/login" {
+			s.handleLogin(rw, r)
+			return
+		}
+		if !s.authorized(r, token) {
+			rw.Header().Set("WWW-Authenticate", `Bearer realm="agenthub"`)
+			writeError(rw, http.StatusUnauthorized, "未授权")
+			return
+		}
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			if r.Header.Get("X-Requested-With") != "agenthub" {
+				writeError(rw, http.StatusForbidden, "缺少 CSRF 头")
+				return
+			}
+		}
+		next.ServeHTTP(rw, r)
+	})
+}
+
+func (s *Server) authorized(r *http.Request, token string) bool {
+	if r.Header.Get("Authorization") == "Bearer "+token {
+		return true
+	}
+	if cookie, err := r.Cookie("agenthub_admin"); err == nil && cookie.Value == token {
+		return true
+	}
+	return false
+}
+
+func (s *Server) handleLogin(rw http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("token") != s.cfg.Admin.Token {
+		writeError(rw, http.StatusUnauthorized, "token 不正确")
+		return
+	}
+	http.SetCookie(rw, &http.Cookie{
+		Name:     "agenthub_admin",
+		Value:    s.cfg.Admin.Token,
+		Path:     "/admin",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	http.Redirect(rw, r, "/admin/", http.StatusSeeOther)
 }
 
 // Run 启动管理监听。

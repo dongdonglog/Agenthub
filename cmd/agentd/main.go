@@ -50,6 +50,9 @@ func run() int {
 	}
 
 	logger := obs.NewLogger(cfg.Log.Level, cfg.Log.Format, os.Stdout)
+	if cfg.Admin.Token == "" && cfg.Env == "production" {
+		logger.Warn("AGENTHUB_ADMIN_TOKEN 未设置：管理台无鉴权，请确保只在内网或网关后暴露")
+	}
 	logger.Info("starting", "version", version.Version, "channel", cfg.Channel, "env", cfg.Env)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -50,6 +50,8 @@ type HTTPConfig struct {
 // @remarks 管理面没有内置登录，部署时必须限制来源（内网或网关）。
 type AdminConfig struct {
 	Addr string `yaml:"addr"`
+	// Token 非空时管理面要求 Bearer Token 或登录 Cookie；为空表示不鉴权。
+	Token string `yaml:"token"`
 }
 
 // DBConfig 是 PostgreSQL 连接配置。
@@ -174,6 +176,7 @@ func applyEnv(cfg *Config) {
 	setStr((*string)(&cfg.Channel), "AGENTHUB_CHANNEL")
 	setStr(&cfg.HTTP.Addr, "AGENTHUB_HTTP_ADDR")
 	setStr(&cfg.Admin.Addr, "AGENTHUB_ADMIN_ADDR")
+	setStr(&cfg.Admin.Token, "AGENTHUB_ADMIN_TOKEN")
 	setStr(&cfg.DB.URL, "AGENTHUB_DB_URL")
 	setInt32(&cfg.DB.MaxConns, "AGENTHUB_DB_MAX_CONNS")
 	setStr(&cfg.Storage.Dir, "AGENTHUB_DATA_DIR")

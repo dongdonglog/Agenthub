@@ -172,3 +172,70 @@ func TestRunDetail(t *testing.T) {
 		t.Fatalf("missing run status = %d", rec.Code)
 	}
 }
+
+func newAuthedServer(t *testing.T, token string) http.Handler {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := &config.Config{Storage: config.StorageConfig{Dir: dir}, Admin: config.AdminConfig{Token: token}}
+	store, err := admin.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return admin.New(cfg, core.New(nil, nil, logger), store, admin.Options{Version: "test"}, logger).Handler()
+}
+
+func TestAdminRequiresToken(t *testing.T) {
+	h := newAuthedServer(t, "secret")
+	rec := do(t, h, http.MethodGet, "/admin/api/v1/overview", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/overview", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bearer status = %d", rec.Code)
+	}
+}
+
+func TestAdminLoginCookieAndCSRF(t *testing.T) {
+	h := newAuthedServer(t, "secret")
+
+	rec := do(t, h, http.MethodGet, "/admin/login?token=secret", "")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("login status = %d", rec.Code)
+	}
+	cookie := rec.Result().Cookies()
+	if len(cookie) == 0 {
+		t.Fatal("应设置登录 Cookie")
+	}
+
+	// 带 Cookie 的写操作缺少 CSRF 头 → 403
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/skills/demo", strings.NewReader(`{"content":"x"}`))
+	req.AddCookie(cookie[0])
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("csrf status = %d, want 403", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/admin/api/v1/skills/demo", strings.NewReader(`{"content":"x"}`))
+	req.AddCookie(cookie[0])
+	req.Header.Set("X-Requested-With", "agenthub")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("with csrf status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminLoginRejectsBadToken(t *testing.T) {
+	h := newAuthedServer(t, "secret")
+	rec := do(t, h, http.MethodGet, "/admin/login?token=bad", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}

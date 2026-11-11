@@ -5,7 +5,7 @@ const nav = document.getElementById('nav');
 
 async function api(path, options = {}) {
   const res = await fetch('/admin/api/v1' + path, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'agenthub' },
     ...options,
   });
   const text = await res.text();
