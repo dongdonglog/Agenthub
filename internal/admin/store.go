@@ -13,10 +13,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Skill 是一个 Markdown 技能。
+// Skill 是一个技能及其元数据。
 type Skill struct {
-	Name    string `json:"name"`
-	Content string `json:"content"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content"`
+	Status      string `json:"status"` // active | disabled | archived
+	Files       int    `json:"files"`
+	Bytes       int64  `json:"bytes"`
+	Executable  bool   `json:"executable"`
+	UpdatedAt   string `json:"updated_at"`
+	References  int    `json:"references"`
 }
 
 // MCP 是一个 MCP 服务配置。
@@ -31,8 +38,8 @@ type MCP struct {
 
 // Store 用文件保存技能与 MCP 配置。
 //
-// @remarks 选择文件而非数据库，是为了让技能可以直接用编辑器维护；
-// 后续接入 PostgreSQL 时替换实现即可。
+// @remarks 技能状态通过目录隔离：active 在根目录，停用/归档分别在 .disabled / .archived，
+// 加载器只读取 active，避免运行期误用。
 type Store struct {
 	skillsDir string
 	mcpFile   string
@@ -52,38 +59,134 @@ func NewStore(dataDir string) (*Store, error) {
 	return &Store{skillsDir: dir, mcpFile: filepath.Join(dataDir, "mcp.yaml")}, nil
 }
 
-// ListSkills 返回全部技能，支持 `<name>/SKILL.md` 与 `<name>.md` 两种布局。
+func (s *Store) scopeDir(status string) string {
+	switch status {
+	case "disabled":
+		return filepath.Join(s.skillsDir, ".disabled")
+	case "archived":
+		return filepath.Join(s.skillsDir, ".archived")
+	default:
+		return s.skillsDir
+	}
+}
+
+// ListSkills 返回全部技能（active / disabled / archived）。
 func (s *Store) ListSkills() ([]Skill, error) {
 	var out []Skill
-	err := filepath.WalkDir(s.skillsDir, func(path string, entry os.DirEntry, err error) error {
+	for _, status := range []string{"active", "disabled", "archived"} {
+		dir := s.scopeDir(status)
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return nil
+				continue
 			}
-			return err
+			return nil, err
 		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") || !usableSkillFile(entry.Name()) {
-			return nil
+		for _, entry := range entries {
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") {
+				continue
+			}
+			path := filepath.Join(dir, name)
+			if entry.IsDir() {
+				if _, err := os.Stat(filepath.Join(path, "SKILL.md")); err != nil {
+					continue
+				}
+				skill := buildSkill(name, path, status)
+				out = append(out, skill)
+				continue
+			}
+			if status != "active" || !strings.HasSuffix(name, ".md") || !usableSkillFile(name) {
+				continue
+			}
+			skill := buildSkill(strings.TrimSuffix(name, ".md"), path, status)
+			out = append(out, skill)
 		}
-		if entry.Name() != "SKILL.md" && filepath.Dir(path) != filepath.Clean(s.skillsDir) {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		name := strings.TrimSuffix(entry.Name(), ".md")
-		if entry.Name() == "SKILL.md" {
-			name = filepath.Base(filepath.Dir(path))
-		}
-		out = append(out, Skill{Name: name, Content: string(raw)})
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Status != out[j].Status {
+			return out[i].Status < out[j].Status
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out, nil
+}
+
+func buildSkill(name, path, status string) Skill {
+	skill := Skill{Name: name, Status: status, UpdatedAt: ""}
+	info, err := os.Stat(path)
+	if err == nil {
+		if info.IsDir() {
+			skill.UpdatedAt = info.ModTime().Format("2006-01-02 15:04:05")
+			_ = filepath.WalkDir(path, func(p string, e os.DirEntry, err error) error {
+				if err != nil || e.IsDir() {
+					return err
+				}
+				if fi, err := e.Info(); err == nil {
+					skill.Files++
+					skill.Bytes += fi.Size()
+					if fi.Mode()&0o111 != 0 {
+						skill.Executable = true
+					}
+				}
+				return nil
+			})
+			if raw, err := os.ReadFile(filepath.Join(path, "SKILL.md")); err == nil {
+				skill.Content = string(raw)
+			}
+		} else {
+			skill.UpdatedAt = info.ModTime().Format("2006-01-02 15:04:05")
+			skill.Files = 1
+			skill.Bytes = info.Size()
+			if raw, err := os.ReadFile(path); err == nil {
+				skill.Content = string(raw)
+			}
+		}
+	}
+	skill.Description = parseDescription(skill.Content)
+	return skill
+}
+
+// parseDescription 从 frontmatter 或首行引用中提取描述。
+func parseDescription(content string) string {
+	lines := strings.Split(content, "\n")
+	inFront := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 && trimmed == "---" {
+			inFront = true
+			continue
+		}
+		if inFront {
+			if trimmed == "---" {
+				break
+			}
+			if strings.HasPrefix(trimmed, "description:") {
+				return strings.TrimSpace(strings.TrimPrefix(trimmed, "description:"))
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "> ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "> "))
+		}
+	}
+	return ""
+}
+
+// findSkill 定位技能文件/目录及其状态。
+func (s *Store) findSkill(name string) (path, status string, err error) {
+	for _, st := range []string{"active", "disabled", "archived"} {
+		dir := s.scopeDir(st)
+		dirPath := filepath.Join(dir, name)
+		if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
+			return dirPath, st, nil
+		}
+		mdPath := filepath.Join(dir, name+".md")
+		if info, statErr := os.Stat(mdPath); statErr == nil && !info.IsDir() {
+			return mdPath, st, nil
+		}
+	}
+	return "", "", os.ErrNotExist
 }
 
 // GetSkill 读取单个技能。
@@ -91,25 +194,20 @@ func (s *Store) GetSkill(name string) (Skill, error) {
 	if !validName.MatchString(name) {
 		return Skill{}, errors.New("技能名只允许字母数字与 ._-")
 	}
-	for _, path := range []string{
-		filepath.Join(s.skillsDir, name, "SKILL.md"),
-		filepath.Join(s.skillsDir, name+".md"),
-	} {
-		raw, err := os.ReadFile(path)
-		if err == nil {
-			return Skill{Name: name, Content: string(raw)}, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return Skill{}, err
-		}
+	path, status, err := s.findSkill(name)
+	if err != nil {
+		return Skill{}, err
 	}
-	return Skill{}, os.ErrNotExist
+	return buildSkill(name, path, status), nil
 }
 
-// PutSkill 新建或覆盖技能，统一写入 `<name>/SKILL.md`。
+// PutSkill 新建或覆盖技能，统一写入 active 目录。
 func (s *Store) PutSkill(name, content string) error {
 	if !validName.MatchString(name) {
 		return errors.New("技能名只允许字母数字与 ._-")
+	}
+	if path, status, err := s.findSkill(name); err == nil && status != "active" {
+		_ = os.RemoveAll(path)
 	}
 	dir := filepath.Join(s.skillsDir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -118,20 +216,41 @@ func (s *Store) PutSkill(name, content string) error {
 	return os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644)
 }
 
-// DeleteSkill 删除技能（目录或扁平文件）；不存在时视为成功。
+// SetSkillStatus 在 active / disabled / archived 之间移动技能。
+func (s *Store) SetSkillStatus(name, status string) error {
+	if !validName.MatchString(name) {
+		return errors.New("技能名只允许字母数字与 ._-")
+	}
+	if status != "active" && status != "disabled" && status != "archived" {
+		return errors.New("状态只能是 active / disabled / archived")
+	}
+	path, current, err := s.findSkill(name)
+	if err != nil {
+		return err
+	}
+	if current == status {
+		return nil
+	}
+	targetDir := s.scopeDir(status)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(path, filepath.Join(targetDir, filepath.Base(path)))
+}
+
+// DeleteSkill 删除技能（任意状态）；不存在时视为成功。
 func (s *Store) DeleteSkill(name string) error {
 	if !validName.MatchString(name) {
 		return errors.New("技能名只允许字母数字与 ._-")
 	}
-	dir := filepath.Join(s.skillsDir, name)
-	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		return os.RemoveAll(dir)
+	path, _, err := s.findSkill(name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
-	err := os.Remove(filepath.Join(s.skillsDir, name+".md"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
+	return os.RemoveAll(path)
 }
 
 // ListMCPs 返回全部 MCP 配置。

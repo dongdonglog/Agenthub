@@ -47,6 +47,13 @@ func LoadSkills(dir string) ([]Skill, error) {
 			}
 			return err
 		}
+		slashed := filepath.ToSlash(path)
+		if strings.Contains(slashed, "/.disabled/") || strings.Contains(slashed, "/.archived/") || strings.HasSuffix(slashed, "/.disabled") || strings.HasSuffix(slashed, "/.archived") {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") || !usableSkillFile(entry.Name()) {
 			return nil
 		}

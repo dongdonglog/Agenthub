@@ -14,6 +14,7 @@ import (
 	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
+	"github.com/moying/agenthub/internal/store"
 )
 
 //go:embed static/*
@@ -29,6 +30,14 @@ type Options struct {
 	Agent agent.Agent
 	// Tools 是当前可用工具，用于概览展示。
 	Tools []agent.Tool
+	// Profiles 是资源配置档案存储。
+	Profiles *store.ProfileStore
+	// History 返回历史会话代。
+	History func(ctx context.Context) ([]store.Generation, error)
+	// AuditRecord 追加一条审计；为空表示不记录。
+	AuditRecord func(action, target, detail string)
+	// AuditList 读取最近审计。
+	AuditList func(ctx context.Context, limit int) ([]store.AuditEntry, error)
 }
 
 // Server 提供管理页面与管理 API。
@@ -70,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/skills", s.handleSkills)
 	mux.HandleFunc("GET /admin/api/v1/skills/{name}", s.handleSkill)
 	mux.HandleFunc("PUT /admin/api/v1/skills/{name}", s.handleSkill)
+	mux.HandleFunc("PUT /admin/api/v1/skills/{name}/status", s.handleSkillStatus)
 	mux.HandleFunc("DELETE /admin/api/v1/skills/{name}", s.handleSkill)
 
 	mux.HandleFunc("GET /admin/api/v1/mcps", s.handleMCPs)
@@ -77,6 +87,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/v1/mcps/{name}", s.handleMCP)
 
 	mux.HandleFunc("GET /admin/api/v1/settings", s.handleSettings)
+	mux.HandleFunc("GET /admin/api/v1/profiles", s.handleProfiles)
+	mux.HandleFunc("PUT /admin/api/v1/profiles/{name}", s.handleProfile)
+	mux.HandleFunc("DELETE /admin/api/v1/profiles/{name}", s.handleProfile)
+	mux.HandleFunc("GET /admin/api/v1/history", s.handleHistory)
+	mux.HandleFunc("GET /admin/api/v1/audits", s.handleAudits)
 	mux.HandleFunc("POST /admin/api/v1/test", s.handleTest)
 	return s.withAuth(mux)
 }
@@ -197,6 +212,84 @@ type modelView struct {
 	Echo     bool   `json:"echo"`
 }
 
+func (s *Server) audit(action, target, detail string) {
+	if s.opts.AuditRecord == nil {
+		return
+	}
+	s.opts.AuditRecord(action, target, detail)
+}
+
+func (s *Server) handleProfiles(rw http.ResponseWriter, _ *http.Request) {
+	if s.opts.Profiles == nil {
+		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := s.opts.Profiles.ListProfiles()
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleProfile(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Profiles == nil {
+		writeError(rw, http.StatusServiceUnavailable, "Profile 存储未接入")
+		return
+	}
+	name := r.PathValue("name")
+	switch r.Method {
+	case http.MethodPut:
+		var p store.Profile
+		if err := decode(r, &p); err != nil {
+			writeError(rw, http.StatusBadRequest, err.Error())
+			return
+		}
+		p.Name = name
+		if err := s.opts.Profiles.PutProfile(p); err != nil {
+			writeError(rw, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.audit("profile.save", name, "")
+		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok", "name": name})
+	case http.MethodDelete:
+		if err := s.opts.Profiles.DeleteProfile(name); err != nil {
+			writeError(rw, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.audit("profile.delete", name, "")
+		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+	default:
+		writeError(rw, http.StatusMethodNotAllowed, "方法不支持")
+	}
+}
+
+func (s *Server) handleHistory(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.History == nil {
+		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := s.opts.History(r.Context())
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleAudits(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.AuditList == nil {
+		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := s.opts.AuditList(r.Context(), 200)
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
 func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 	skills, _ := s.store.ListSkills()
 	mcps, _ := s.store.ListMCPs()
@@ -282,6 +375,19 @@ func (s *Server) handleSkills(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if s.opts.Profiles != nil {
+		if profiles, err := s.opts.Profiles.ListProfiles(); err == nil {
+			counts := make(map[string]int)
+			for _, p := range profiles {
+				for _, name := range p.Skills {
+					counts[name]++
+				}
+			}
+			for i := range items {
+				items[i].References = counts[items[i].Name]
+			}
+		}
+	}
 	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
@@ -312,6 +418,7 @@ func (s *Server) handleSkill(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("skill saved", "name", name)
+		s.audit("skill.save", name, "")
 		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok", "name": name})
 	case http.MethodDelete:
 		if err := s.store.DeleteSkill(name); err != nil {
@@ -319,10 +426,29 @@ func (s *Server) handleSkill(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("skill deleted", "name", name)
+		s.audit("skill.delete", name, "")
 		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 	default:
 		writeError(rw, http.StatusMethodNotAllowed, "方法不支持")
 	}
+}
+
+func (s *Server) handleSkillStatus(rw http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.SetSkillStatus(name, body.Status); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.log.Info("skill status changed", "name", name, "status", body.Status)
+	s.audit("skill.status", name, body.Status)
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok", "name": name})
 }
 
 func (s *Server) handleMCPs(rw http.ResponseWriter, r *http.Request) {
@@ -356,6 +482,7 @@ func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("mcp saved", "name", name)
+		s.audit("mcp.save", name, "")
 		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok", "name": name})
 	case http.MethodDelete:
 		if err := s.store.DeleteMCP(name); err != nil {
@@ -363,6 +490,7 @@ func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("mcp deleted", "name", name)
+		s.audit("mcp.delete", name, "")
 		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 	default:
 		writeError(rw, http.StatusMethodNotAllowed, "方法不支持")

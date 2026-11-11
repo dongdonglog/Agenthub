@@ -116,3 +116,18 @@ pre { background: #f7f9fc; border: 1px solid var(--line); border-radius: 10px; p
   .layout { grid-template-columns: 1fr; }
   .sidebar { position: static; flex-direction: row; flex-wrap: wrap; }
 }
+.row-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button.link { background: none; color: var(--brand); padding: 0; font-weight: 600; }
+button.link.danger { color: #b91c1c; }
+.strong { font-weight: 700; }
+.small { font-size: 12px; }
+table th, table td { white-space: nowrap; }
+table td:first-child, table td:first-child .muted { white-space: normal; min-width: 320px; }
+.row-actions { white-space: nowrap; }
+
+.table-wrap { width: 100%; overflow-x: auto; }
+.table-wrap table { min-width: 980px; }
+.table-wrap th, .table-wrap td { white-space: nowrap !important; }
+.table-wrap td:first-child { white-space: normal !important; min-width: 340px; max-width: 520px; }
+.table-wrap .row-actions { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; }
+.table-wrap .badge { white-space: nowrap; }

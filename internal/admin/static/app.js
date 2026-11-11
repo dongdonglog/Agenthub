@@ -34,19 +34,25 @@ function table(headers, rows, onClick) {
   const t = el('table');
   const thead = el('thead');
   const hr = el('tr');
-  for (const h of headers) hr.append(el('th', {}, [h]));
+  for (const h of headers) {
+    const th = el('th', {}, [h]);
+    th.style.whiteSpace = 'nowrap';
+    hr.append(th);
+  }
   thead.append(hr);
   const tbody = el('tbody');
   for (const row of rows) {
     const tr = el('tr', onClick ? { className: 'click' } : {});
-    for (const cell of row) {
-      tr.append(el('td', {}, [cell instanceof Node ? cell : String(cell ?? '')]));
-    }
+    row.forEach((cell, idx) => {
+      const td = el('td', {}, [cell instanceof Node ? cell : String(cell ?? '')]);
+      if (idx > 0) td.style.whiteSpace = 'nowrap';
+      tr.append(td);
+    });
     if (onClick) tr.addEventListener('click', () => onClick(row));
     tbody.append(tr);
   }
   t.append(thead, tbody);
-  return t;
+  return el('div', { className: 'table-wrap' }, [t]);
 }
 
 function badge(text, kind = '') {
@@ -88,6 +94,9 @@ async function render() {
     if (page === 'sessions') return rest[0] ? await renderSession(rest[0]) : await renderSessions();
     if (page === 'runs') return await renderRun(rest[0]);
     if (page === 'skills') return await renderSkills();
+    if (page === 'history') return await renderHistory();
+    if (page === 'profiles') return await renderProfiles();
+    if (page === 'audits') return await renderAudits();
     if (page === 'mcps') return await renderMCPs();
     if (page === 'settings') return await renderSettings();
     content.replaceChildren(empty('🧭', '页面不存在'));
@@ -203,6 +212,19 @@ async function renderRun(id) {
   );
 }
 
+function formatBytes(n) {
+  if (!n) return '0';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function skillStatusBadge(status) {
+  if (status === 'active') return badge('可关联', 'ok');
+  if (status === 'disabled') return badge('已停用');
+  return badge('已归档', 'warn');
+}
+
 async function renderSkills() {
   const data = await api('/skills');
   const nameInput = el('input', { placeholder: '技能名，例如 incident-report' });
@@ -215,6 +237,64 @@ async function renderSkills() {
     textarea.value = item.content;
   }
 
+  async function changeStatus(name, status) {
+    try {
+      await api(`/skills/${encodeURIComponent(name)}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      });
+      toast(status === 'disabled' ? '已停用' : status === 'archived' ? '已归档' : '已启用');
+      await renderSkills();
+    } catch (err) { toast(err.message, true); }
+  }
+
+  async function remove(name) {
+    if (!confirm(`删除技能 ${name}？`)) return;
+    try {
+      await api(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      toast('已删除');
+      await renderSkills();
+    } catch (err) { toast(err.message, true); }
+  }
+
+  const rows = data.items.map((s) => {
+    const actions = el('div', { className: 'row-actions', style: 'display:flex;gap:10px;white-space:nowrap' });
+    const edit = el('button', { className: 'link' }, ['编辑']);
+    edit.addEventListener('click', (e) => { e.stopPropagation(); select(s.name); });
+    actions.append(edit);
+    if (s.status === 'active') {
+      const dis = el('button', { className: 'link' }, ['停用']);
+      dis.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(s.name, 'disabled'); });
+      actions.append(dis);
+      const arc = el('button', { className: 'link' }, ['归档']);
+      arc.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(s.name, 'archived'); });
+      actions.append(arc);
+    } else {
+      const en = el('button', { className: 'link' }, ['启用']);
+      en.addEventListener('click', (e) => { e.stopPropagation(); changeStatus(s.name, 'active'); });
+      actions.append(en);
+    }
+    const del = el('button', { className: 'link danger' }, ['删除']);
+    del.addEventListener('click', (e) => { e.stopPropagation(); remove(s.name); });
+    actions.append(del);
+
+    return [
+      el('div', {}, [el('div', { className: 'strong' }, [s.name]), el('div', { className: 'muted small' }, [s.description || '—'])]),
+      skillStatusBadge(s.status),
+      `${s.files} / ${formatBytes(s.bytes)}`,
+      s.executable ? '是' : '否',
+      s.references || 0,
+      s.updated_at || '—',
+      actions,
+    ];
+  });
+
+  if (rows.length) {
+    list.append(table(['名称', '状态', '文件/大小', '可执行', '引用 Profile', '更新时间', '操作'], rows));
+  } else {
+    list.append(empty('🧩', '还没有技能。下面填名称和内容保存即可。'));
+  }
+
   const save = el('button', {}, ['保存']);
   save.addEventListener('click', async () => {
     const name = nameInput.value.trim();
@@ -224,41 +304,20 @@ async function renderSkills() {
         method: 'PUT',
         body: JSON.stringify({ content: textarea.value }),
       });
-      toast('已保存，下次运行自动生效');
+      toast('已保存，下次运行生效');
       await renderSkills();
     } catch (err) { toast(err.message, true); }
   });
-
-  const del = el('button', { className: 'danger' }, ['删除']);
-  del.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name || !confirm(`删除技能 ${name}？`)) return;
-    try {
-      await api(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      toast('已删除');
-      await renderSkills();
-    } catch (err) { toast(err.message, true); }
-  });
-
-  if (data.items.length) {
-    const rows = data.items.map((s) => [
-      el('a', { href: '#' }, [s.name]),
-      (s.content || '').split('\n').find((l) => l.trim().startsWith('>'))?.replace(/^>\s*/, '') || '—',
-    ]);
-    list.append(table(['名称', '描述'], rows, async (row) => { await select(row[0].textContent); }));
-  } else {
-    list.append(empty('🧩', '还没有技能。下面填名称和内容保存即可。'));
-  }
 
   content.replaceChildren(
-    el('h2', {}, ['技能']),
-    el('p', { className: 'lede' }, ['Markdown 文件保存在 data/skills/，每次运行自动注入系统提示词，无需重启。']),
+    el('h2', {}, ['Skill']),
+    el('p', { className: 'lede' }, ['技能存于 data/skills/：可关联的会注入提示词，停用/归档的保留文件但不参与运行。']),
     list,
     el('h3', {}, ['编辑']),
     el('div', { className: 'form' }, [
       el('label', {}, ['名称', nameInput]),
       el('label', {}, ['内容', textarea]),
-      el('div', { className: 'actions' }, [save, del]),
+      el('div', { className: 'actions' }, [save]),
     ]),
   );
 }
@@ -332,6 +391,101 @@ async function renderMCPs() {
       el('label', {}, ['启用', enabled]),
       el('div', { className: 'actions' }, [save, del]),
     ]),
+  );
+}
+
+async function renderHistory() {
+  const data = await api('/history');
+  if (!data.items.length) {
+    content.replaceChildren(el('h2', {}, ['历史会话']), empty('🗂️', '还没有历史记录。'));
+    return;
+  }
+  const rows = data.items.map((h) => [
+    h.conversation_id, h.generation, h.messages,
+    new Date(h.last_active).toLocaleString(),
+  ]);
+  content.replaceChildren(
+    el('h2', {}, ['历史会话']),
+    el('p', { className: 'lede' }, ['按会话与代聚合；/reset 后旧代仍保留在这里。']),
+    table(['会话', '代', '消息数', '最近活跃'], rows),
+  );
+}
+
+async function renderProfiles() {
+  const data = await api('/profiles');
+  const nameInput = el('input', { placeholder: 'Profile 名称，例如 default' });
+  const descInput = el('input', { placeholder: '描述' });
+  const skillsInput = el('input', { placeholder: '技能名，逗号分隔' });
+  const mcpInput = el('input', { placeholder: 'MCP 名，逗号分隔' });
+
+  const rows = data.items.map((p) => [
+    p.name, p.description || '—', (p.skills || []).join(', ') || '—', (p.mcps || []).join(', ') || '—',
+  ]);
+  const list = rows.length ? table(['名称', '描述', '技能', 'MCP'], rows, (row) => {
+    const p = data.items.find((x) => x.name === row[0]);
+    nameInput.value = p.name;
+    descInput.value = p.description || '';
+    skillsInput.value = (p.skills || []).join(', ');
+    mcpInput.value = (p.mcps || []).join(', ');
+  }) : empty('👤', '还没有 Profile。');
+
+  const save = el('button', {}, ['保存']);
+  save.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) return toast('先填名称', true);
+    try {
+      await api(`/profiles/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          description: descInput.value.trim(),
+          skills: skillsInput.value.split(',').map((x) => x.trim()).filter(Boolean),
+          mcps: mcpInput.value.split(',').map((x) => x.trim()).filter(Boolean),
+        }),
+      });
+      toast('已保存');
+      await renderProfiles();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const del = el('button', { className: 'danger' }, ['删除']);
+  del.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name || !confirm(`删除 Profile ${name}？`)) return;
+    try {
+      await api(`/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      toast('已删除');
+      await renderProfiles();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  content.replaceChildren(
+    el('h2', {}, ['Profile']),
+    el('p', { className: 'lede' }, ['记录技能与 MCP 的组合；当前用于统计引用，运行期切换在后续版本接入。']),
+    list,
+    el('h3', {}, ['编辑']),
+    el('div', { className: 'form' }, [
+      el('label', {}, ['名称', nameInput]),
+      el('label', {}, ['描述', descInput]),
+      el('label', {}, ['技能（逗号分隔）', skillsInput]),
+      el('label', {}, ['MCP（逗号分隔）', mcpInput]),
+      el('div', { className: 'actions' }, [save, del]),
+    ]),
+  );
+}
+
+async function renderAudits() {
+  const data = await api('/audits');
+  if (!data.items.length) {
+    content.replaceChildren(el('h2', {}, ['审计']), empty('📜', '还没有审计记录。修改技能、MCP 或 Profile 后会记录在这里。'));
+    return;
+  }
+  const rows = data.items.map((a) => [
+    new Date(a.created_at).toLocaleString(), a.action, a.target, a.detail || '',
+  ]);
+  content.replaceChildren(
+    el('h2', {}, ['审计']),
+    el('p', { className: 'lede' }, ['管理面写操作只追加记录，用于追溯。']),
+    table(['时间', '动作', '对象', '详情'], rows),
   );
 }
 

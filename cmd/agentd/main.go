@@ -136,11 +136,50 @@ func run() int {
 		logger.Error("admin storage unavailable", "error", err)
 		return 1
 	}
+	profiles := store.NewProfileStore(cfg.Storage.Dir)
+	if list, err := profiles.ListProfiles(); err == nil && len(list) == 0 {
+		// 首次启动：把当前可关联技能收进默认档案，便于管理台展示引用关系。
+		var names []string
+		if skills, err := adminStore.ListSkills(); err == nil {
+			for _, sk := range skills {
+				if sk.Status == "active" {
+					names = append(names, sk.Name)
+				}
+			}
+		}
+		if err := profiles.PutProfile(store.Profile{Name: "default", Description: "默认档案", Skills: names}); err != nil {
+			logger.Warn("seed default profile failed", "error", err)
+		}
+	}
+	journal := store.NewJournal(db)
 	adminSrv := admin.New(cfg, engine, adminStore, admin.Options{
 		Version:      version.Version,
 		FeishuStatus: feishuStatus,
 		Agent:        runner,
 		Tools:        tools,
+		Profiles:     profiles,
+		History: func(ctx context.Context) ([]store.Generation, error) {
+			if journal == nil {
+				return nil, nil
+			}
+			return journal.ListGenerations(ctx, 100)
+		},
+		AuditRecord: func(action, target, detail string) {
+			if journal == nil {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := journal.SaveAudit(ctx, action, target, detail); err != nil {
+				logger.Debug("audit write failed", "error", err)
+			}
+		},
+		AuditList: func(ctx context.Context, limit int) ([]store.AuditEntry, error) {
+			if journal == nil {
+				return nil, nil
+			}
+			return journal.ListAudit(ctx, limit)
+		},
 	}, logger)
 
 	go func() {
