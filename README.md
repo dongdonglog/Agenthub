@@ -29,6 +29,28 @@ go run ./cmd/agentd
 | WebSocket 长连接（默认） | `FEISHU_TRANSPORT=websocket` | 无需公网入口与回调地址；SDK 负责握手、心跳与自动重连；断线按指数退避重试 |
 | 事件回调 | `FEISHU_TRANSPORT=webhook` + `AGENTHUB_WEBHOOK_ADDR` | 需要飞书能访问到该地址，适合已有网关的部署 |
 
+## 管理台
+
+启动后打开 **http://127.0.0.1:8788/admin/**（默认只绑回环；远端访问用 SSH 隧道或网关）。
+
+| 页面 | 内容 |
+|---|---|
+| 概览 | 通道连接状态、模型配置、会话/运行/技能/MCP 数量 |
+| 会话 | 会话列表；点进去看消息与运行（当前内存存储，重启清空） |
+| 技能 | Markdown 技能增删改，保存到 `data/skills/*.md`，下次运行自动生效 |
+| MCP | MCP 配置增删改，保存到 `data/mcp.yaml`（运行时接入在下一阶段） |
+| 设置 | 当前模型与飞书配置，只读；改 `.env` 后重启 |
+
+接模型（OpenAI 兼容，Ark / DeepSeek / OpenAI 都行）：
+
+```bash
+AGENTHUB_AGENT_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+AGENTHUB_AGENT_API_KEY=...
+AGENTHUB_AGENT_MODEL=deepseek-v3-250324
+```
+
+不填 `AGENTHUB_AGENT_API_KEY` 时使用回显执行器（收到什么回什么），方便先验证链路。
+
 ## 本地模拟（不需要真实飞书应用）
 
 `go test ./...` 覆盖了完整链路，不访问外网：

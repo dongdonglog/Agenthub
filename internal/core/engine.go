@@ -199,6 +199,49 @@ func (e *Engine) Messages(conv string) []*Message {
 	return out
 }
 
+// Conversation 是管理面使用的会话摘要。
+type Conversation struct {
+	ID          string    `json:"id"`
+	ChatID      string    `json:"chat_id"`
+	Sender      string    `json:"sender"`
+	Messages    int       `json:"messages"`
+	Queued      int       `json:"queued"`
+	ActiveRunID string    `json:"active_run_id,omitempty"`
+	LastActive  time.Time `json:"last_active"`
+}
+
+// Conversations 返回全部会话摘要，按最近活跃排序。
+func (e *Engine) Conversations() []Conversation {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	index := make(map[string]*Conversation)
+	for _, m := range e.messages {
+		c, ok := index[m.ConversationID]
+		if !ok {
+			c = &Conversation{ID: m.ConversationID, ChatID: m.ChatID, Sender: m.SenderOpenID}
+			index[m.ConversationID] = c
+		}
+		c.Messages++
+		if m.Status == "queued" {
+			c.Queued++
+		}
+		if m.CreatedAt.After(c.LastActive) {
+			c.LastActive = m.CreatedAt
+		}
+	}
+	for conv, runID := range e.active {
+		if c, ok := index[conv]; ok {
+			c.ActiveRunID = runID
+		}
+	}
+	out := make([]Conversation, 0, len(index))
+	for _, c := range index {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
+	return out
+}
+
 // Runs 返回全部运行的快照。
 func (e *Engine) Runs() []*Run {
 	e.mu.Lock()

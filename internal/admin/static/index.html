@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentHub 管理台</title>
+<link rel="stylesheet" href="/admin/styles.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">AH</span>
+      <div>
+        <div class="title">AgentHub</div>
+        <div class="subtitle">飞书 AI 助手 · 管理台</div>
+      </div>
+    </div>
+    <div class="status" id="status">连接中…</div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" id="nav">
+      <a href="#/overview" data-page="overview">概览</a>
+      <a href="#/sessions" data-page="sessions">会话</a>
+      <a href="#/skills" data-page="skills">技能</a>
+      <a href="#/mcps" data-page="mcps">MCP</a>
+      <a href="#/settings" data-page="settings">设置</a>
+    </nav>
+    <main class="content" id="content"><p class="muted">加载中…</p></main>
+  </div>
+</div>
+<script type="module" src="/admin/app.js"></script>
+</body>
+</html>

@@ -90,6 +90,14 @@ type FeishuConfig struct {
 type AgentConfig struct {
 	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
+	// BaseURL 是 OpenAI 兼容接口地址，例如 https://ark.cn-beijing.volces.com/api/v3。
+	BaseURL string `yaml:"base_url"`
+	// APIKey 为空时退回回显执行器，不调用模型。
+	APIKey string `yaml:"api_key"`
+	// SystemPrompt 是基础系统提示词；技能内容会追加在其后。
+	SystemPrompt string `yaml:"system_prompt"`
+	// SkillsDir 是 Markdown 技能目录。
+	SkillsDir string `yaml:"skills_dir"`
 	// MaxRunSeconds 是单次运行上限。
 	MaxRunSeconds int `yaml:"max_run_seconds"`
 }
@@ -140,8 +148,13 @@ func defaults() Config {
 			Domain:         "https://open.feishu.cn",
 			RequireMention: true,
 		},
-		Agent: AgentConfig{Provider: "openai", Model: "gpt-4.1-mini", MaxRunSeconds: 1800},
-		Log:   LogConfig{Level: "info", Format: "json"},
+		Agent: AgentConfig{
+			Provider:      "openai",
+			Model:         "gpt-4.1-mini",
+			BaseURL:       "https://api.openai.com/v1",
+			MaxRunSeconds: 1800,
+		},
+		Log: LogConfig{Level: "info", Format: "json"},
 	}
 }
 
@@ -166,6 +179,10 @@ func applyEnv(cfg *Config) {
 	setBool(&cfg.Feishu.RequireMention, "FEISHU_REQUIRE_MENTION")
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
+	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
+	setStr(&cfg.Agent.APIKey, "AGENTHUB_AGENT_API_KEY")
+	setStr(&cfg.Agent.SystemPrompt, "AGENTHUB_AGENT_SYSTEM_PROMPT")
+	setStr(&cfg.Agent.SkillsDir, "AGENTHUB_AGENT_SKILLS_DIR")
 	setInt(&cfg.Agent.MaxRunSeconds, "AGENTHUB_AGENT_MAX_RUN_SECONDS")
 	setStr(&cfg.Log.Level, "AGENTHUB_LOG_LEVEL")
 	setStr(&cfg.Log.Format, "AGENTHUB_LOG_FORMAT")

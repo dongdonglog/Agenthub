@@ -95,12 +95,24 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `FEISHU_ALLOWED_CHATS` | 空 | 允许的 chat_id；空 = 不限制群 |
 | `FEISHU_REQUIRE_MENTION` | `true` | 群聊是否必须 @机器人 |
 | `AGENTHUB_AGENT_PROVIDER` | `openai` | 模型提供方 |
+| `AGENTHUB_AGENT_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容接口地址 |
+| `AGENTHUB_AGENT_API_KEY` | 空 | 为空时退回回显执行器 |
 | `AGENTHUB_AGENT_MODEL` | `gpt-4.1-mini` | 默认模型 |
+| `AGENTHUB_AGENT_SYSTEM_PROMPT` | 内置 | 追加技能之前的系统提示词 |
+| `AGENTHUB_AGENT_SKILLS_DIR` | `<数据目录>/skills` | Markdown 技能目录 |
 | `AGENTHUB_AGENT_MAX_RUN_SECONDS` | `1800` | 单次运行上限 |
 | `AGENTHUB_LOG_LEVEL` | `info` | debug/info/warn/error |
 | `AGENTHUB_LOG_FORMAT` | `json` | json/text |
 
 配置校验失败以退出码 **2** 退出，日志只记录字段名与原因，不记录字段值。
+
+## 4.1 管理台
+
+默认监听 `127.0.0.1:8788`，页面入口 `/admin/`，API 前缀 `/admin/api/v1`。
+
+- 技能与 MCP 配置分别保存到 `<数据目录>/skills/*.md` 与 `<数据目录>/mcp.yaml`；
+- 管理面没有内置登录，远端访问必须经网关或 SSH 隧道（`ssh -L 8788:127.0.0.1:8788`）；
+- 修改模型与飞书配置仍走 `.env`，重启生效。
 
 ## 5. 健康检查与指标
 
