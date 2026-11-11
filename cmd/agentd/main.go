@@ -170,6 +170,7 @@ func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, logger *
 		APIKey:        cfg.Agent.APIKey,
 		Model:         cfg.Agent.Model,
 		FallbackModel: cfg.Agent.FallbackModel,
+		VisionModel:   cfg.Agent.VisionModel,
 		SystemPrompt:  cfg.Agent.SystemPrompt,
 		SkillsDir:     skillsDir,
 		Tools:         tools,

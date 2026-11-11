@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/moying/agenthub/internal/agent"
+	"github.com/moying/agenthub/internal/channel"
 )
 
 func TestChatSendsSystemPromptSkillsAndMessages(t *testing.T) {
@@ -254,5 +255,82 @@ func TestChatFallsBackToSecondaryModel(t *testing.T) {
 	}
 	if models[len(models)-1] != "secondary" {
 		t.Fatalf("最后一次模型 = %s", models[len(models)-1])
+	}
+}
+
+func TestChatSendsImagesToVisionModel(t *testing.T) {
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(imgPath, []byte("fake-png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "看到了"}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "text-model", VisionModel: "vision-model"}
+	_, err := c.Run(context.Background(), agent.Input{
+		Messages: []agent.Message{{
+			Text:        "图里是什么",
+			Attachments: []channel.Attachment{{Kind: "image", Path: imgPath, Name: "shot.png"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.Model != "vision-model" {
+		t.Fatalf("model = %s", captured.Model)
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(captured.Messages[1].Content, &parts); err != nil {
+		t.Fatalf("content 不是数组: %s", captured.Messages[1].Content)
+	}
+	if len(parts) != 2 || parts[1]["type"] != "image_url" {
+		t.Fatalf("parts = %+v", parts)
+	}
+}
+
+func TestChatWithoutVisionModelSendsText(t *testing.T) {
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "shot.png")
+	_ = os.WriteFile(imgPath, []byte("fake"), 0o644)
+
+	var raw json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &body)
+		raw = body.Messages[1].Content
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "m"}
+	if _, err := c.Run(context.Background(), agent.Input{
+		Messages: []agent.Message{{Text: "图里是什么", Attachments: []channel.Attachment{{Kind: "image", Path: imgPath}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) == 0 || raw[0] == '[' {
+		t.Fatalf("未启用视觉时应为纯文本: %s", raw)
 	}
 }

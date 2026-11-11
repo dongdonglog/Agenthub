@@ -98,6 +98,8 @@ type AgentConfig struct {
 	BaseURL string `yaml:"base_url"`
 	// FallbackModel 在主模型失败时兜底，可为空。
 	FallbackModel string `yaml:"fallback_model"`
+	// VisionModel 用于带图片的运行；为空表示不启用图片理解。
+	VisionModel string `yaml:"vision_model"`
 	// APIKey 为空时退回回显执行器，不调用模型。
 	APIKey string `yaml:"api_key"`
 	// SystemPrompt 是基础系统提示词；技能内容会追加在其后。
@@ -189,6 +191,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
 	setStr(&cfg.Agent.FallbackModel, "AGENTHUB_AGENT_FALLBACK_MODEL")
+	setStr(&cfg.Agent.VisionModel, "AGENTHUB_AGENT_VISION_MODEL")
 	setStr(&cfg.Agent.APIKey, "AGENTHUB_AGENT_API_KEY")
 	setStr(&cfg.Agent.SystemPrompt, "AGENTHUB_AGENT_SYSTEM_PROMPT")
 	setStr(&cfg.Agent.SkillsDir, "AGENTHUB_AGENT_SKILLS_DIR")

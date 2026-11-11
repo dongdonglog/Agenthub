@@ -4,6 +4,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,8 @@ type Chat struct {
 	MaxToolRounds int
 	// FallbackModel 在主模型连续失败后使用，可为空。
 	FallbackModel string
+	// VisionModel 用于带图片的运行；为空表示不启用图片理解。
+	VisionModel string
 	// Logger 记录工具调用，可为空。
 	Logger *slog.Logger
 	// HTTP 客户端，默认 180 秒超时。
@@ -57,6 +60,12 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	if c.APIKey == "" {
 		return Output{}, errors.New("未配置模型 API Key")
 	}
+	model := c.Model
+	vision := c.VisionModel != "" && hasImages(in.Messages)
+	if vision {
+		model = c.VisionModel
+	}
+
 	messages := make([]map[string]any, 0, len(in.Messages)+1)
 	messages = append(messages, map[string]any{"role": "system", "content": c.systemPrompt()})
 	for _, m := range in.History {
@@ -67,7 +76,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		messages = append(messages, map[string]any{"role": role, "content": renderMessage(m)})
 	}
 	for _, m := range in.Messages {
-		messages = append(messages, map[string]any{"role": "user", "content": renderMessage(m)})
+		messages = append(messages, map[string]any{"role": "user", "content": renderContent(m, vision)})
 	}
 
 	progress := in.Progress
@@ -82,7 +91,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	}
 	var last string
 	for round := 0; round < rounds; round++ {
-		msg, err := c.completeWithRetry(ctx, messages)
+		msg, err := c.completeWithRetry(ctx, messages, model)
 		if err != nil {
 			return Output{}, err
 		}
@@ -138,10 +147,10 @@ type assistantMessage struct {
 }
 
 // completeWithRetry 在 429/5xx 时退避重试，仍失败则尝试备用模型。
-func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any) (assistantMessage, error) {
+func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any, model string) (assistantMessage, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		msg, err := c.complete(ctx, messages, c.Model)
+		msg, err := c.complete(ctx, messages, model)
 		if err == nil {
 			return msg, nil
 		}
@@ -155,7 +164,7 @@ func (c *Chat) completeWithRetry(ctx context.Context, messages []map[string]any)
 		case <-time.After(time.Duration(attempt+1) * 500 * time.Millisecond):
 		}
 	}
-	if c.FallbackModel != "" && c.FallbackModel != c.Model {
+	if c.FallbackModel != "" && c.FallbackModel != model {
 		if msg, err := c.complete(ctx, messages, c.FallbackModel); err == nil {
 			return msg, nil
 		}
@@ -292,6 +301,66 @@ func (c *Chat) systemPrompt() string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// hasImages 判断本批是否包含可读图片。
+func hasImages(messages []Message) bool {
+	for _, m := range messages {
+		for _, a := range m.Attachments {
+			if a.Kind == "image" && a.Path != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// renderContent 在启用视觉时把图片作为 base64 data URL 传入。
+func renderContent(m Message, vision bool) any {
+	text := renderMessage(m)
+	if !vision {
+		return text
+	}
+	parts := []any{map[string]any{"type": "text", "text": text}}
+	images := 0
+	for _, a := range m.Attachments {
+		if a.Kind != "image" || a.Path == "" || images >= 3 {
+			continue
+		}
+		raw, err := os.ReadFile(a.Path)
+		if err != nil || len(raw) > 5<<20 {
+			continue
+		}
+		mime := imageMime(a.Path)
+		if mime == "" {
+			continue
+		}
+		parts = append(parts, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]string{
+				"url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw),
+			},
+		})
+		images++
+	}
+	if images == 0 {
+		return text
+	}
+	return parts
+}
+
+func imageMime(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	}
+	return ""
 }
 
 func renderMessage(m Message) string {
