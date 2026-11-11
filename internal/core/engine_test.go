@@ -510,3 +510,33 @@ func TestPruneBoundsMemory(t *testing.T) {
 		t.Fatalf("会话数未裁剪: %d", got)
 	}
 }
+
+func TestWaitIdle(t *testing.T) {
+	eng := newEngine(t, &captureChannel{}, &blockingAgent{started: make(chan struct{}), release: make(chan struct{})})
+	// blockingAgent in this package uses started/release channels.
+	conv := "tenant_1:oc_chat:ou_user"
+	if _, err := eng.Submit(context.Background(), inbound("om_wait", "长任务")); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); _ = eng.Flush(context.Background()) }()
+	time.Sleep(50 * time.Millisecond)
+
+	short, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if eng.WaitIdle(short) {
+		t.Fatal("运行未结束时不应空闲")
+	}
+
+	eng.Stop(conv)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("停止后运行未结束")
+	}
+	idle, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	if !eng.WaitIdle(idle) {
+		t.Fatal("运行结束后应空闲")
+	}
+}

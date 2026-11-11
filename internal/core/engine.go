@@ -61,6 +61,8 @@ type Delivery struct {
 	ExternalID     string
 	Attempts       int
 	CreatedAt      time.Time
+	// NextAttempt 是下一次重试时间，零值表示立即。
+	NextAttempt time.Time
 }
 
 // Metrics 是核心向指标系统上报的最小接口。
@@ -278,8 +280,21 @@ func (e *Engine) Restore(ctx context.Context) error {
 			e.mu.Lock()
 			e.deliveries[d.IdempotencyKey] = d
 			e.mu.Unlock()
-			e.log.Info("resuming pending delivery", "delivery", d.IdempotencyKey)
-			go e.send(ctx, d)
+			delay := time.Until(d.NextAttempt)
+			if delay < 0 {
+				delay = 0
+			}
+			e.log.Info("resuming pending delivery", "delivery", d.IdempotencyKey, "delay", delay)
+			go func(item *Delivery) {
+				if delay > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(delay):
+					}
+				}
+				e.send(ctx, item)
+			}(d)
 		}
 	}
 	return nil
@@ -368,6 +383,28 @@ func (e *Engine) dropMessage(conv, dedupeKey, id string) {
 		}
 	}
 	e.order[conv] = ids
+}
+
+// WaitIdle 等待所有活动运行结束。
+//
+// @remarks 用于优雅停机：先停止接收新事件，再等在途运行收敛。
+// 返回 true 表示已空闲，false 表示超时仍有运行。
+func (e *Engine) WaitIdle(ctx context.Context) bool {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		e.mu.Lock()
+		active := len(e.active)
+		e.mu.Unlock()
+		if active == 0 {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
 }
 
 // Prune 立即按内存上限裁剪历史数据。
@@ -1050,7 +1087,6 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 	}
 	attempt := d.Attempts
 	e.mu.Unlock()
-	e.persistDelivery(ctx, d)
 	if e.metrics != nil {
 		e.metrics.Inc("agenthub_deliveries_total", map[string]string{"result": d.State})
 	}
@@ -1060,6 +1096,10 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		return
 	}
 	delay := e.retryDelay(attempt)
+	e.mu.Lock()
+	d.NextAttempt = time.Now().Add(delay)
+	e.mu.Unlock()
+	e.persistDelivery(ctx, d)
 	e.log.Warn("delivery failed; scheduling retry", "run", d.RunID, "attempt", attempt, "delay", delay, "error", err)
 	time.AfterFunc(delay, func() {
 		e.send(context.Background(), d)

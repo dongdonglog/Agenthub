@@ -57,6 +57,11 @@ func run() int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// 工作上下文与信号解耦：收到信号后先等在途运行收敛，再取消。
+	workCtx, workCancel := context.WithCancel(context.Background())
+	defer workCancel()
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
 
 	db, err := store.Open(ctx, cfg.DB.URL, cfg.DB.MaxConns)
 	if err != nil {
@@ -139,24 +144,32 @@ func run() int {
 	}, logger)
 
 	go func() {
-		if err := srv.Run(ctx); err != nil {
+		if err := srv.Run(serverCtx); err != nil {
 			logger.Error("http server stopped", "error", err)
 			stop()
 		}
 	}()
 	go func() {
-		if err := adminSrv.Run(ctx); err != nil {
+		if err := adminSrv.Run(serverCtx); err != nil {
 			logger.Error("admin server stopped", "error", err)
 			stop()
 		}
 	}()
-	go flushLoop(ctx, engine, logger)
+	go flushLoop(workCtx, engine, logger)
 	if db != nil {
 		go purgeLoop(ctx, db, cfg.RetentionDays, logger)
 	}
 
 	<-ctx.Done()
-	logger.Info("shutting down")
+	logger.Info("shutting down; draining in-flight runs")
+
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	if !engine.WaitIdle(drainCtx) {
+		logger.Warn("drain timeout; interrupting in-flight runs")
+	}
+	drainCancel()
+	workCancel()
+	serverCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

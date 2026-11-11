@@ -303,16 +303,25 @@ func (c *Chat) systemPrompt() string {
 		return b.String()
 	}
 	b.WriteString("\n\n# 可用技能\n在回答前判断是否适用；适用时遵循其步骤与输出格式。\n")
+	const skillBudget = 64 * 1024
+	used := 0
 	for _, s := range loaded {
-		b.WriteString("\n## ")
-		b.WriteString(s.Name)
+		var item strings.Builder
+		item.WriteString("\n## ")
+		item.WriteString(s.Name)
 		if s.Description != "" {
-			b.WriteString("：")
-			b.WriteString(s.Description)
+			item.WriteString("：")
+			item.WriteString(s.Description)
 		}
-		b.WriteString("\n")
-		b.WriteString(s.Content)
-		b.WriteString("\n")
+		item.WriteString("\n")
+		item.WriteString(s.Content)
+		item.WriteString("\n")
+		if used+item.Len() > skillBudget {
+			b.WriteString("\n（其余技能因提示词预算未加载，可用 read_file 查看 skills/ 目录）\n")
+			break
+		}
+		b.WriteString(item.String())
+		used += item.Len()
 	}
 	return b.String()
 }

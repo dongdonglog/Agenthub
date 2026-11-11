@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -130,8 +131,23 @@ func (t *tool) Schema() map[string]any {
 	return t.info.InputSchema
 }
 
+// toolCallTimeout 限制单次工具调用时长。
+const toolCallTimeout = 60 * time.Second
+
+// toolOutputLimit 限制回灌给模型的工具输出大小。
+const toolOutputLimit = 100 * 1024
+
 func (t *tool) Call(ctx context.Context, args json.RawMessage) (string, error) {
-	return t.client.CallTool(ctx, t.info.Name, args)
+	callCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+	defer cancel()
+	out, err := t.client.CallTool(callCtx, t.info.Name, args)
+	if err != nil {
+		return "", err
+	}
+	if len(out) > toolOutputLimit {
+		out = out[:toolOutputLimit] + "\n…（输出过长，已截断）"
+	}
+	return out, nil
 }
 
 // ToolNames 返回工具名列表，便于日志与诊断。

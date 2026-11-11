@@ -99,18 +99,14 @@ queued ──▶ running ──▶ completed
 
 | 表 | 职责 | 关键约束 |
 |---|---|---|
-| `tenant` / `member` / `chat` | 租户、成员、会话容器 | `(tenant, open_id)`、`(tenant, chat_id)` 唯一 |
-| `conversation` | 会话键 + 代 | `(tenant, chat, member, thread)` 唯一 |
-| `message` | 入站/出站消息 | `(tenant, external_id)` 去重 |
-| `message_attachment` | 附件元数据 | 流式写入、校验和 |
-| `run` | 执行状态 | **部分唯一索引**保证同会话单活动 Run |
-| `run_input` | 批次绑定 | `(run, position)` 唯一，只插不改 |
-| `run_event` | 追加写事件 | 不可变 |
-| `tool_call` | 工具调用审计 | 记录参数摘要与耗时（内存阶段先写日志） |
-| `delivery` | 投递箱 | `idempotency_key` 唯一 |
-| `reaction_projection` | 表情投影 | 期望态/已应用态 |
-| `usage_record` | token 与成本 | 按 run 聚合 |
-| `audit_event` | 管理审计 | 只追加 |
+| `conversation_state` | 会话键与当前代 | `id` 主键；`generation` 随 `/reset` 递增 |
+| `message_state` | 消息与助手回复 | `(conversation_id, external_id)` 唯一；`role` 区分 user/assistant |
+| `run_state` | 运行状态与 token | `id` 主键；终态写 `ended_at` |
+| `delivery_state` | 投递箱 | `idempotency_key` 唯一；`state` 状态机；`attempts` / `next_attempt_at` |
+| `run_trace` | 阶段与工具事件 | 追加写，按 `run_id` 查询 |
+| `schema_migrations` | 迁移版本 | 只前进，启动时加 advisory lock |
+
+内存只保留近期数据（每会话 100 条、200 会话、200 运行、500 投递），数据库可配保留期（默认 90 天）。
 
 完整 DDL 见 `migrations/0001_init.sql`。
 
