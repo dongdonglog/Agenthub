@@ -425,6 +425,25 @@ func (e *Engine) RunEvents(runID string) []RunEvent {
 	return out
 }
 
+// RunOwner 返回运行所属会话的用户标识（会话键最后一段）。
+func (e *Engine) RunOwner(runID string) string {
+	run := e.RunByID(runID)
+	if run == nil {
+		return ""
+	}
+	parts := strings.Split(run.ConversationID, ":")
+	return parts[len(parts)-1]
+}
+
+// StopRun 停止指定运行所属会话的当前批次。
+func (e *Engine) StopRun(runID string) bool {
+	run := e.RunByID(runID)
+	if run == nil {
+		return false
+	}
+	return e.Stop(run.ConversationID)
+}
+
 // RunByID 返回指定运行。
 func (e *Engine) RunByID(runID string) *Run {
 	e.mu.Lock()

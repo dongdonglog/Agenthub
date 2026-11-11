@@ -86,6 +86,8 @@ type FeishuConfig struct {
 	RequireMention bool `yaml:"require_mention"`
 	// MentionFreeChats 中的群聊不要求 @机器人（用于测试群）。
 	MentionFreeChats []string `yaml:"mention_free_chats"`
+	// CardActionEnabled 为 true 时卡片带停止按钮，并启用回调入口。
+	CardActionEnabled bool `yaml:"card_action_enabled"`
 }
 
 // AgentConfig 是模型与执行配置。
@@ -182,6 +184,7 @@ func applyEnv(cfg *Config) {
 	setList(&cfg.Feishu.AllowedChats, "FEISHU_ALLOWED_CHATS")
 	setBool(&cfg.Feishu.RequireMention, "FEISHU_REQUIRE_MENTION")
 	setList(&cfg.Feishu.MentionFreeChats, "FEISHU_MENTION_FREE_CHATS")
+	setBool(&cfg.Feishu.CardActionEnabled, "FEISHU_CARD_ACTION")
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")

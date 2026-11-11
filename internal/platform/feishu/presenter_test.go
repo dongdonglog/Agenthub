@@ -52,3 +52,26 @@ func TestCardPresenterLongResultFallsBack(t *testing.T) {
 		t.Fatal("超长结果应返回错误以便回退文本")
 	}
 }
+
+func TestCardPresenterStopButtonToggle(t *testing.T) {
+	api, srv := newFakeAPI(t)
+	client := feishu.NewClient("cli_test", "secret", feishu.WithBaseURL(srv.URL))
+	presenter := feishu.NewCardPresenter(client, nil).WithStopButton(true)
+	ctx := context.Background()
+
+	handle, err := presenter.Open(ctx, core.Presentation{ChatID: "oc_1", RunID: "run_9", Inputs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := api.messages()[0].body["content"].(string)
+	if !strings.Contains(first, "停止") || !strings.Contains(first, "run_9") {
+		t.Fatalf("处理中卡片应带停止按钮: %s", first)
+	}
+	if err := presenter.Close(ctx, handle, "完成", false); err != nil {
+		t.Fatal(err)
+	}
+	last := api.messages()[len(api.messages())-1].body["content"].(string)
+	if strings.Contains(last, "run_9") {
+		t.Fatalf("终态卡片应移除按钮: %s", last)
+	}
+}

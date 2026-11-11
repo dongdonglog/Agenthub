@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -90,7 +91,7 @@ func run() int {
 	runner := newAgent(cfg, skillsDir, tools, logger)
 	engine := core.New(runner, ch, logger)
 	if fc, ok := ch.(*feishu.Channel); ok {
-		engine.SetPresenter(feishu.NewCardPresenter(fc.Client(), logger))
+		engine.SetPresenter(feishu.NewCardPresenter(fc.Client(), logger).WithStopButton(cfg.Feishu.CardActionEnabled))
 	}
 
 	if db != nil {
@@ -196,16 +197,35 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 		ModelBaseURL:     cfg.Agent.BaseURL,
 	}, logger)
 
-	if cfg.Feishu.Transport == "webhook" {
-		hook := feishu.NewWebhook(dispatcher, cfg.Feishu.VerificationToken, logger)
-		logger.Info("feishu transport", "mode", "webhook", "addr", cfg.Webhook.Addr)
+	mux := http.NewServeMux()
+	serving := false
+	serve := func() {
+		if serving {
+			return
+		}
+		serving = true
 		go func() {
-			if err := httpapi.Serve(ctx, cfg.Webhook.Addr, hook, logger); err != nil {
+			if err := httpapi.Serve(ctx, cfg.Webhook.Addr, mux, logger); err != nil {
 				logger.Error("webhook server stopped", "error", err)
 				stop()
 			}
 		}()
+	}
+
+	if cfg.Feishu.Transport == "webhook" {
+		hook := feishu.NewWebhook(dispatcher, cfg.Feishu.VerificationToken, logger)
+		mux.Handle("/feishu/events", hook)
+		logger.Info("feishu transport", "mode", "webhook", "addr", cfg.Webhook.Addr)
 		health.RegisterCheck("feishu", func() (bool, string) { return true, "webhook" })
+	}
+	if cfg.Feishu.CardActionEnabled {
+		mux.Handle("/feishu/card", feishu.NewCardAction(engine, cfg.Feishu.VerificationToken, logger))
+		logger.Info("card action endpoint enabled", "path", "/feishu/card")
+	}
+	if cfg.Feishu.Transport == "webhook" || cfg.Feishu.CardActionEnabled {
+		serve()
+	}
+	if cfg.Feishu.Transport == "webhook" {
 		return func() string { return "webhook" }
 	}
 
