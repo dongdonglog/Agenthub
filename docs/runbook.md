@@ -46,6 +46,32 @@ docker run --rm -p 127.0.0.1:8787:8787 --env-file .env agenthub:dev
 6. 发布应用，把机器人加入目标群；
 7. 记录 App ID / App Secret，写入 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`。
 
+### 3.1 只给 App ID / App Secret 够吗
+
+够用来**建立长连接**（启动日志出现 `feishu websocket ready`），但要真正收发消息还差四件事：
+
+| 项 | 在哪配 | 不配的后果 |
+|---|---|---|
+| 机器人能力 | 应用功能 → 机器人 | 没有 bot 身份，收不到也发不出 |
+| 事件订阅 | 事件与回调 → **使用长连接** 接收事件，订阅 `im.message.receive_v1` | 连接成功但收不到消息 |
+| 权限 | 权限管理 → `im:message`、`im:message:send_as_bot` 等 | 收发被拒（如 99991672 无权限） |
+| 发布应用 + 可见范围 | 版本管理与发布 | 仅创建者可用，或完全不可用 |
+
+群聊还需要把机器人拉进群，并确认 `FEISHU_ALLOWED_USERS` / `FEISHU_ALLOWED_CHATS` 白名单。
+
+### 3.2 取机器人 open_id
+
+```bash
+TOKEN=$(curl -s -X POST https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal \
+  -H 'Content-Type: application/json' \
+  -d '{"app_id":"<APP_ID>","app_secret":"<APP_SECRET>"}' | jq -r .tenant_access_token)
+
+curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $TOKEN" | jq .bot
+```
+
+把返回的 `bot.open_id` 写入 `FEISHU_BOT_OPEN_ID`。不填时服务把任意 @ 都当成 @机器人，
+多机器人同群会误触发。
+
 ## 4. 配置参考
 
 | 变量 | 默认 | 说明 |

@@ -29,6 +29,15 @@ func main() {
 // @remarks 配置错误返回 2（便于编排系统区分「配置问题」与「运行故障」），
 // 其他启动失败返回 1，正常退出返回 0。
 func run() int {
+	envFile := os.Getenv("AGENTHUB_ENV_FILE")
+	if envFile == "" {
+		envFile = ".env"
+	}
+	if err := config.LoadDotEnv(envFile); err != nil {
+		fmt.Fprintf(os.Stderr, "环境文件错误：%v\n", err)
+		return 2
+	}
+
 	cfg, err := config.Load(os.Getenv("AGENTHUB_CONFIG"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "配置错误：%v\n", err)
