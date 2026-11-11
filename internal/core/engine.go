@@ -60,6 +60,16 @@ type Delivery struct {
 	Attempts       int
 }
 
+// RunEvent 是一条运行事件，用于管理台回放。
+type RunEvent struct {
+	RunID      string    `json:"run_id"`
+	Kind       string    `json:"kind"` // phase | tool
+	Name       string    `json:"name,omitempty"`
+	Detail     string    `json:"detail,omitempty"`
+	DurationMS int64     `json:"duration_ms,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 // Presentation 描述一次运行对应的可更新输出。
 type Presentation struct {
 	ConversationID string
@@ -114,6 +124,7 @@ type Engine struct {
 	journal     Journal
 	presenter   Presenter
 	generations map[string]int
+	events      map[string][]RunEvent
 	// retryDelay 计算投递重试间隔，默认指数退避。
 	retryDelay func(attempt int) time.Duration
 }
@@ -142,6 +153,7 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		cancels:     make(map[string]context.CancelFunc),
 		deliveries:  make(map[string]*Delivery),
 		generations: make(map[string]int),
+		events:      make(map[string][]RunEvent),
 		retryDelay: func(attempt int) time.Duration {
 			d := time.Duration(1<<uint(attempt)) * time.Second
 			if d > 30*time.Second {
@@ -364,6 +376,52 @@ func (e *Engine) generationLocked(conv string) int {
 	return 1
 }
 
+func (e *Engine) recordEvent(runID string, ev RunEvent) {
+	if runID == "" {
+		return
+	}
+	ev.RunID = runID
+	if ev.CreatedAt.IsZero() {
+		ev.CreatedAt = e.now()
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	list := append(e.events[runID], ev)
+	if len(list) > 100 {
+		list = list[len(list)-100:]
+	}
+	e.events[runID] = list
+}
+
+// RunEvents 返回一次运行的事件列表。
+func (e *Engine) RunEvents(runID string) []RunEvent {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]RunEvent, len(e.events[runID]))
+	copy(out, e.events[runID])
+	return out
+}
+
+// RunByID 返回指定运行。
+func (e *Engine) RunByID(runID string) *Run {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.runs[runID]
+}
+
+// DeliveriesFor 返回某次运行的投递记录。
+func (e *Engine) DeliveriesFor(runID string) []*Delivery {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []*Delivery
+	for _, d := range e.deliveries {
+		if d.RunID == runID {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // Status 返回会话的排队数与当前运行。
 func (e *Engine) Status(conv string) (queued int, runID string) {
 	e.mu.Lock()
@@ -561,6 +619,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 
 	lastProgress := time.Time{}
 	progress := func(phase string) {
+		e.recordEvent(run.ID, RunEvent{Kind: "phase", Name: phase})
 		if cardHandle == "" || e.presenter == nil || phase == "" {
 			return
 		}
@@ -573,7 +632,18 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		}
 	}
 
-	input := agent.Input{ConversationID: conv, Progress: progress, History: e.history(conv, batch)}
+	input := agent.Input{
+		ConversationID: conv,
+		Progress:       progress,
+		History:        e.history(conv, batch),
+		OnTool: func(name string, dur time.Duration, err error) {
+			detail := "ok"
+			if err != nil {
+				detail = err.Error()
+			}
+			e.recordEvent(run.ID, RunEvent{Kind: "tool", Name: name, Detail: detail, DurationMS: dur.Milliseconds()})
+		},
+	}
 	for _, m := range batch {
 		input.Messages = append(input.Messages, agent.Message{ID: m.ID, Text: m.Text, Attachments: m.Attachments})
 	}

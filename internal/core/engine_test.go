@@ -417,3 +417,37 @@ func TestDeliveryRetriesThenSucceeds(t *testing.T) {
 		t.Fatalf("重试后应成功投递一次，实际 %d", ch.sent)
 	}
 }
+
+type toolAgent struct{}
+
+func (toolAgent) Run(_ context.Context, in agent.Input) (agent.Output, error) {
+	if in.Progress != nil {
+		in.Progress("正在分析")
+	}
+	if in.OnTool != nil {
+		in.OnTool("mcp_demo_get_time", 5*time.Millisecond, nil)
+	}
+	return agent.Output{Text: "done"}, nil
+}
+
+func TestRunEventsRecorded(t *testing.T) {
+	ch := &captureChannel{}
+	eng := newEngine(t, ch, toolAgent{})
+	ctx := context.Background()
+	if _, err := eng.Submit(ctx, inbound("om_evt", "hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events := eng.RunEvents("run_1")
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2", len(events))
+	}
+	if events[0].Kind != "phase" || events[1].Kind != "tool" {
+		t.Fatalf("events = %+v", events)
+	}
+	if events[1].DurationMS < 0 || events[1].Name != "mcp_demo_get_time" {
+		t.Fatalf("tool event = %+v", events[1])
+	}
+}

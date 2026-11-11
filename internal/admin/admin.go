@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/sessions", s.handleSessions)
 	mux.HandleFunc("GET /admin/api/v1/sessions/{id}", s.handleSession)
 	mux.HandleFunc("GET /admin/api/v1/runs", s.handleRuns)
+	mux.HandleFunc("GET /admin/api/v1/runs/{id}", s.handleRunDetail)
 
 	mux.HandleFunc("GET /admin/api/v1/skills", s.handleSkills)
 	mux.HandleFunc("GET /admin/api/v1/skills/{name}", s.handleSkill)
@@ -199,6 +200,20 @@ func (s *Server) handleSession(rw http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRuns(rw http.ResponseWriter, _ *http.Request) {
 	runs := s.engine.Runs()
 	writeJSON(rw, http.StatusOK, map[string]any{"items": runs, "total": len(runs)})
+}
+
+func (s *Server) handleRunDetail(rw http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run := s.engine.RunByID(id)
+	if run == nil {
+		writeError(rw, http.StatusNotFound, "运行不存在或已过期")
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{
+		"run":        run,
+		"events":     s.engine.RunEvents(id),
+		"deliveries": s.engine.DeliveriesFor(id),
+	})
 }
 
 func (s *Server) handleSkills(rw http.ResponseWriter, r *http.Request) {

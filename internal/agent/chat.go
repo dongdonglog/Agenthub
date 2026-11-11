@@ -99,7 +99,14 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		})
 		for _, call := range msg.ToolCalls {
 			progress("正在调用工具：" + call.Function.Name)
-			result := c.executeTool(ctx, call)
+			started := time.Now()
+			result, callErr := c.executeTool(ctx, call)
+			if in.OnTool != nil {
+				in.OnTool(call.Function.Name, time.Since(started), callErr)
+			}
+			if callErr != nil {
+				result = "工具执行失败：" + callErr.Error()
+			}
 			messages = append(messages, map[string]any{
 				"role":         "tool",
 				"tool_call_id": call.ID,
@@ -189,7 +196,7 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any) (assista
 	return out.Choices[0].Message, nil
 }
 
-func (c *Chat) executeTool(ctx context.Context, call toolCall) string {
+func (c *Chat) executeTool(ctx context.Context, call toolCall) (string, error) {
 	for _, t := range c.Tools {
 		if t.Name() != call.Function.Name {
 			continue
@@ -203,12 +210,9 @@ func (c *Chat) executeTool(ctx context.Context, call toolCall) string {
 		if c.Logger != nil {
 			c.Logger.Info("tool call", "tool", t.Name(), "duration_ms", time.Since(start).Milliseconds(), "error", err != nil)
 		}
-		if err != nil {
-			return "工具执行失败：" + err.Error()
-		}
-		return out
+		return out, err
 	}
-	return "未知工具：" + call.Function.Name
+	return "", errors.New("未知工具：" + call.Function.Name)
 }
 
 func (c *Chat) systemPrompt() string {

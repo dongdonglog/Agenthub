@@ -86,6 +86,7 @@ async function render() {
   try {
     if (page === 'overview') return await renderOverview(overview);
     if (page === 'sessions') return rest[0] ? await renderSession(rest[0]) : await renderSessions();
+    if (page === 'runs') return await renderRun(rest[0]);
     if (page === 'skills') return await renderSkills();
     if (page === 'mcps') return await renderMCPs();
     if (page === 'settings') return await renderSettings();
@@ -174,6 +175,28 @@ async function renderSession(id) {
     el('div', { className: 'actions' }, [
       el('a', { href: '#/sessions', className: 'muted' }, ['← 返回会话列表']),
     ]),
+  );
+}
+
+async function renderRun(id) {
+  const data = await api(`/runs/${encodeURIComponent(id)}`);
+  const run = data.run;
+  const events = data.events.map((e) => [
+    new Date(e.created_at).toLocaleTimeString(),
+    badge(e.kind, e.kind === 'tool' ? 'warn' : ''),
+    e.name,
+    e.detail || '',
+    e.duration_ms ? `${e.duration_ms} ms` : '',
+  ]);
+  const deliveries = data.deliveries.map((d) => [d.State || d.state, d.Attempts ?? d.attempts, d.Error || d.error || '']);
+  content.replaceChildren(
+    el('h2', {}, ['运行详情']),
+    el('p', { className: 'lede' }, [`${id} · ${run.State || run.state} · 输入 ${run.InputIDs?.length ?? run.input_ids?.length ?? 0} 条`]),
+    el('h3', {}, ['阶段与工具']),
+    events.length ? table(['时间', '类型', '名称', '结果', '耗时'], events) : empty('⏱️', '没有事件记录'),
+    el('h3', {}, ['投递']),
+    deliveries.length ? table(['状态', '尝试', '错误'], deliveries) : empty('📮', '没有投递记录'),
+    el('div', { className: 'actions' }, [el('a', { href: '#/sessions', className: 'muted' }, ['← 返回会话列表'])]),
   );
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/moying/agenthub/internal/channel"
 )
@@ -25,6 +26,8 @@ type Input struct {
 	Messages []Message
 	// Progress 是阶段回调，可为空；实现方不得阻塞。
 	Progress func(phase string)
+	// OnTool 在每次工具调用结束后回调，可为空。
+	OnTool func(name string, duration time.Duration, err error)
 }
 
 // Output 是一次运行的产出。

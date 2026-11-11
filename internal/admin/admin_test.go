@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/moying/agenthub/internal/admin"
 	"github.com/moying/agenthub/internal/agent"
+	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 )
@@ -132,5 +134,41 @@ func TestMCPValidation(t *testing.T) {
 	rec := do(t, newServer(t), http.MethodPut, "/admin/api/v1/mcps/bad", `{"transport":"stdio"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("stdio 缺 command 应 400，实际 %d", rec.Code)
+	}
+}
+
+func TestRunDetail(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{Storage: config.StorageConfig{Dir: dir}}
+	store, err := admin.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	engine := core.New(agent.Echo{}, nil, logger)
+	ctx := context.Background()
+	if _, err := engine.Submit(ctx, channel.Inbound{
+		Channel: "feishu", Tenant: "t", ExternalID: "e1",
+		Chat:   channel.Chat{ID: "c1", Kind: "p2p"},
+		Sender: channel.Sender{OpenID: "u1"}, Text: "hi",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h := admin.New(cfg, engine, store, admin.Options{Version: "test", Agent: agent.Echo{}}, logger).Handler()
+
+	rec := do(t, h, http.MethodGet, "/admin/api/v1/runs/run_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "\"run\"") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodGet, "/admin/api/v1/runs/nope", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing run status = %d", rec.Code)
 	}
 }
