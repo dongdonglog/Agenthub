@@ -82,6 +82,14 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 			"reason", reason, "chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
 		return nil
 	}
+	if msg.ParentID != "" && d.opts.Client != nil {
+		quoteCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if quoted, err := d.opts.Client.GetMessageText(quoteCtx, msg.ParentID); err == nil && quoted != "" {
+			msg.Text = "（引用消息：" + quoted + "）\n" + msg.Text
+		}
+		cancel()
+	}
+
 	if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
 		d.handleCommand(ctx, msg)
 		return nil

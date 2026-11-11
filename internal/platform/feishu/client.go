@@ -184,6 +184,31 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 	return nil
 }
 
+// GetMessageText 读取一条消息的文本表达，用于补齐引用上下文。
+//
+// @throws 消息不存在、无权限或解析失败时返回错误
+func (c *Client) GetMessageText(ctx context.Context, messageID string) (string, error) {
+	var out struct {
+		Code int `json:"code"`
+		Data struct {
+			Items []struct {
+				MsgType string `json:"msg_type"`
+				Body    struct {
+					Content string `json:"content"`
+				} `json:"body"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/open-apis/im/v1/messages/"+url.PathEscape(messageID), nil, &out); err != nil {
+		return "", err
+	}
+	if len(out.Data.Items) == 0 {
+		return "", fmt.Errorf("消息不存在")
+	}
+	text, _ := extractContent(Message{MessageType: out.Data.Items[0].MsgType, Content: out.Data.Items[0].Body.Content})
+	return strings.TrimSpace(text), nil
+}
+
 // DownloadResource 流式下载消息资源到 w。
 //
 // @param kind image 走图片资源接口，其余走文件接口

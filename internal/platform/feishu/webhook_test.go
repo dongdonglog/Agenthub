@@ -48,6 +48,14 @@ func newFakeAPI(t *testing.T) (*fakeAPI, *httptest.Server) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"code": 0, "msg": "ok", "tenant_access_token": "t-test", "expire": 7200,
 			})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/im/v1/messages/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]any{"items": []any{map[string]any{
+					"msg_type": "text",
+					"body":     map[string]string{"content": `{"text":"被引用的原始消息"}`},
+				}}},
+			})
 		case strings.Contains(r.URL.Path, "/resources/"):
 			_, _ = w.Write([]byte("attachment-bytes"))
 		case strings.Contains(r.URL.Path, "/im/v1/messages"):
@@ -289,5 +297,30 @@ func TestCommandUnknownRepliesHelp(t *testing.T) {
 	content, _ := sent[0].body["content"].(string)
 	if !strings.Contains(content, "/help") {
 		t.Fatalf("content = %s", content)
+	}
+}
+
+func replyEventJSON(eventID, messageID, chatID, parentID string, text string) string {
+	content, _ := json.Marshal(map[string]string{"text": text})
+	return fmt.Sprintf(`{
+	  "schema":"2.0",
+	  "header":{"event_id":"%s","event_type":"im.message.receive_v1","tenant_key":"tenant_1","app_id":"cli_test","token":"vt","create_time":"1700000000000"},
+	  "event":{
+	    "sender":{"sender_id":{"open_id":"ou_user"},"sender_type":"user"},
+	    "message":{"message_id":"%s","chat_id":"%s","chat_type":"p2p","message_type":"text","content":%q,"parent_id":"%s","create_time":"1700000000000"}
+	  }
+	}`, eventID, messageID, chatID, string(content), parentID)
+}
+
+func TestQuotedMessageIsAddedToPrompt(t *testing.T) {
+	hook, engine, _ := newHook(t)
+	post(t, hook, replyEventJSON("ev_q", "om_q", "oc_1", "om_parent", "这个结论对吗？"))
+
+	msgs := engine.Messages("tenant_1:oc_1:ou_user")
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Text, "被引用的原始消息") || !strings.Contains(msgs[0].Text, "这个结论对吗") {
+		t.Fatalf("text = %q", msgs[0].Text)
 	}
 }
