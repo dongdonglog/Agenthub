@@ -30,9 +30,16 @@ type Input struct {
 	OnTool func(name string, duration time.Duration, err error)
 }
 
+// Usage 是一次运行的 token 用量。
+type Usage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
 // Output 是一次运行的产出。
 type Output struct {
-	Text string
+	Text  string
+	Usage Usage
 }
 
 // Agent 执行一批输入并返回结果。

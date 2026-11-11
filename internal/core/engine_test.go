@@ -451,3 +451,25 @@ func TestRunEventsRecorded(t *testing.T) {
 		t.Fatalf("tool event = %+v", events[1])
 	}
 }
+
+type usageAgent struct{}
+
+func (usageAgent) Run(context.Context, agent.Input) (agent.Output, error) {
+	return agent.Output{Text: "ok", Usage: agent.Usage{InputTokens: 11, OutputTokens: 4}}, nil
+}
+
+func TestRunUsageRecorded(t *testing.T) {
+	ch := &captureChannel{}
+	eng := newEngine(t, ch, usageAgent{})
+	ctx := context.Background()
+	if _, err := eng.Submit(ctx, inbound("om_usage", "hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	runs := eng.Runs()
+	if len(runs) != 1 || runs[0].InputTokens != 11 || runs[0].OutputTokens != 4 {
+		t.Fatalf("runs = %+v", runs)
+	}
+}

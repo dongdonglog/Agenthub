@@ -90,17 +90,20 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 		rounds = 6
 	}
 	var last string
+	var usage Usage
 	for round := 0; round < rounds; round++ {
 		msg, err := c.completeWithRetry(ctx, messages, model)
 		if err != nil {
 			return Output{}, err
 		}
 		last = msg.Content
+		usage.InputTokens += msg.Usage.PromptTokens
+		usage.OutputTokens += msg.Usage.CompletionTokens
 		if len(msg.ToolCalls) == 0 {
 			if msg.Content == "" {
 				return Output{}, errors.New("模型未返回内容")
 			}
-			return Output{Text: msg.Content}, nil
+			return Output{Text: msg.Content, Usage: usage}, nil
 		}
 
 		messages = append(messages, map[string]any{
@@ -129,7 +132,7 @@ func (c *Chat) Run(ctx context.Context, in Input) (Output, error) {
 	if last == "" {
 		return Output{}, errors.New("工具调用轮数超限")
 	}
-	return Output{Text: last}, nil
+	return Output{Text: last, Usage: usage}, nil
 }
 
 type toolCall struct {
@@ -144,6 +147,10 @@ type toolCall struct {
 type assistantMessage struct {
 	Content   string     `json:"content"`
 	ToolCalls []toolCall `json:"tool_calls"`
+	Usage     struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 }
 
 // completeWithRetry 在 429/5xx 时退避重试，仍失败则尝试备用模型。
@@ -242,6 +249,10 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any, model st
 		Choices []struct {
 			Message assistantMessage `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		return assistantMessage{}, fmt.Errorf("解析模型响应失败: %w", err)
@@ -249,7 +260,10 @@ func (c *Chat) complete(ctx context.Context, messages []map[string]any, model st
 	if len(out.Choices) == 0 {
 		return assistantMessage{}, errors.New("模型未返回 choices")
 	}
-	return out.Choices[0].Message, nil
+	msg := out.Choices[0].Message
+	msg.Usage.PromptTokens = out.Usage.PromptTokens
+	msg.Usage.CompletionTokens = out.Usage.CompletionTokens
+	return msg, nil
 }
 
 func (c *Chat) executeTool(ctx context.Context, call toolCall) (string, error) {

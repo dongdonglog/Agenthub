@@ -334,3 +334,22 @@ func TestChatWithoutVisionModelSendsText(t *testing.T) {
 		t.Fatalf("未启用视觉时应为纯文本: %s", raw)
 	}
 }
+
+func TestChatAggregatesUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": "ok"}}},
+			"usage":   map[string]int{"prompt_tokens": 12, "completion_tokens": 7},
+		})
+	}))
+	defer srv.Close()
+
+	c := &agent.Chat{BaseURL: srv.URL, APIKey: "k", Model: "m"}
+	out, err := c.Run(context.Background(), agent.Input{Messages: []agent.Message{{Text: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Usage.InputTokens != 12 || out.Usage.OutputTokens != 7 {
+		t.Fatalf("usage = %+v", out.Usage)
+	}
+}

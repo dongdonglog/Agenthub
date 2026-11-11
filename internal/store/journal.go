@@ -49,14 +49,16 @@ func (j *Journal) SetMessageStatus(ctx context.Context, ids []string, status str
 func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 	inputs, _ := json.Marshal(r.InputIDs)
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO run_state (id, conversation_id, state, input_ids, output, error, started_at, ended_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		INSERT INTO run_state (id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (id) DO UPDATE SET
 			state = EXCLUDED.state,
 			output = EXCLUDED.output,
 			error = EXCLUDED.error,
-			ended_at = EXCLUDED.ended_at`,
-		r.ID, r.ConversationID, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt)
+			ended_at = EXCLUDED.ended_at,
+			input_tokens = EXCLUDED.input_tokens,
+			output_tokens = EXCLUDED.output_tokens`,
+		r.ID, r.ConversationID, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt, r.InputTokens, r.OutputTokens)
 	return err
 }
 
@@ -193,7 +195,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	}
 
 	runRows, err := j.pool.Query(ctx, `
-		SELECT id, conversation_id, state, input_ids, output, error, started_at, ended_at
+		SELECT id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens
 		FROM run_state ORDER BY started_at DESC NULLS LAST LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
@@ -204,7 +206,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 		r := &core.Run{}
 		var inputs []byte
 		var started, ended *time.Time
-		if err := runRows.Scan(&r.ID, &r.ConversationID, &r.State, &inputs, &r.Output, &r.Error, &started, &ended); err != nil {
+		if err := runRows.Scan(&r.ID, &r.ConversationID, &r.State, &inputs, &r.Output, &r.Error, &started, &ended, &r.InputTokens, &r.OutputTokens); err != nil {
 			return nil, nil, err
 		}
 		_ = json.Unmarshal(inputs, &r.InputIDs)

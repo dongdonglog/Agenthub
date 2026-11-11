@@ -191,7 +191,10 @@ async function renderRun(id) {
   const deliveries = data.deliveries.map((d) => [d.State || d.state, d.Attempts ?? d.attempts, d.Error || d.error || '']);
   content.replaceChildren(
     el('h2', {}, ['运行详情']),
-    el('p', { className: 'lede' }, [`${id} · ${run.State || run.state} · 输入 ${run.InputIDs?.length ?? run.input_ids?.length ?? 0} 条`]),
+    el('p', { className: 'lede' }, [
+      `${id} · ${run.State || run.state} · 输入 ${run.InputIDs?.length ?? run.input_ids?.length ?? 0} 条`,
+      ` · token ${run.InputTokens ?? run.input_tokens ?? 0}/${run.OutputTokens ?? run.output_tokens ?? 0}`,
+    ]),
     el('h3', {}, ['阶段与工具']),
     events.length ? table(['时间', '类型', '名称', '结果', '耗时'], events) : empty('⏱️', '没有事件记录'),
     el('h3', {}, ['投递']),

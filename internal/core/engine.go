@@ -45,6 +45,8 @@ type Run struct {
 	Error          string
 	StartedAt      time.Time
 	EndedAt        time.Time
+	InputTokens    int
+	OutputTokens   int
 }
 
 // Delivery 是一次结果投递。
@@ -695,6 +697,8 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 
 	e.mu.Lock()
 	run.EndedAt = e.now()
+	run.InputTokens = out.Usage.InputTokens
+	run.OutputTokens = out.Usage.OutputTokens
 	text := out.Text
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
