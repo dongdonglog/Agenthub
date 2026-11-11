@@ -29,6 +29,17 @@ go run ./cmd/agentd
 | WebSocket 长连接（默认） | `FEISHU_TRANSPORT=websocket` | 无需公网入口与回调地址；SDK 负责握手、心跳与自动重连；断线按指数退避重试 |
 | 事件回调 | `FEISHU_TRANSPORT=webhook` + `AGENTHUB_WEBHOOK_ADDR` | 需要飞书能访问到该地址，适合已有网关的部署 |
 
+## Docker 部署
+
+```bash
+cp .env.example .env        # 填 FEISHU_APP_ID / SECRET / BOT_OPEN_ID / POSTGRES_PASSWORD
+docker compose up -d --build
+```
+
+- 应用与 PostgreSQL 两个服务，数据在 `aadata` / `pgdata` 卷；
+- 健康检查与指标、管理台默认只发布到宿主机回环；
+- 启动时自动执行 `migrations/` 下的迁移。
+
 ## 管理台
 
 启动后打开 **http://127.0.0.1:8788/admin/**（默认只绑回环；远端访问用 SSH 隧道或网关）。

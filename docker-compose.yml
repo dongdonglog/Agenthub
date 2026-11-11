@@ -1,0 +1,40 @@
+# AgentHub 最小部署：应用 + PostgreSQL
+# 用法：
+#   cp .env.example .env   # 填 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BOT_OPEN_ID
+#   docker compose up -d --build
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?需要设置 POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AGENTHUB_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres?sslmode=disable
+      AGENTHUB_DATA_DIR: /data
+      AGENTHUB_HTTP_ADDR: 0.0.0.0:8787
+      AGENTHUB_ADMIN_ADDR: 0.0.0.0:8788
+    ports:
+      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:8788:8788"
+    volumes:
+      - aadata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  aadata:
