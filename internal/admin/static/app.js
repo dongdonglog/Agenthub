@@ -1,5 +1,6 @@
 const content = document.getElementById('content');
 const statusEl = document.getElementById('status');
+const statusText = document.getElementById('statusText');
 const nav = document.getElementById('nav');
 
 async function api(path, options = {}) {
@@ -23,11 +24,10 @@ function el(tag, props = {}, children = []) {
   return node;
 }
 
-function card(k, v) {
-  return el('div', { className: 'card' }, [
-    el('div', { className: 'k' }, [k]),
-    el('div', { className: 'v' }, [v]),
-  ]);
+function card(k, v, hint) {
+  const children = [el('div', { className: 'k' }, [k]), el('div', { className: 'v' }, [v])];
+  if (hint) children.push(el('div', { className: 'hint' }, [hint]));
+  return el('div', { className: 'card' }, children);
 }
 
 function table(headers, rows, onClick) {
@@ -53,10 +53,22 @@ function badge(text, kind = '') {
   return el('span', { className: `badge ${kind}` }, [text]);
 }
 
+function empty(big, text) {
+  return el('div', { className: 'empty' }, [
+    el('div', { className: 'big' }, [big]),
+    el('div', {}, [text]),
+  ]);
+}
+
 function toast(message, isError = false) {
   const node = el('div', { className: `toast ${isError ? 'err' : ''}` }, [message]);
-  content.append(node);
-  setTimeout(() => node.remove(), 4000);
+  document.body.append(node);
+  setTimeout(() => node.remove(), 3600);
+}
+
+function setStatus(text, online) {
+  statusText.textContent = `飞书：${text}`;
+  statusEl.className = `status ${online ? 'ok' : 'bad'}`;
 }
 
 async function render() {
@@ -65,51 +77,82 @@ async function render() {
   for (const a of nav.querySelectorAll('a')) {
     a.classList.toggle('active', a.dataset.page === page);
   }
+  content.replaceChildren(el('p', { className: 'muted' }, ['加载中…']));
+  let overview = null;
   try {
-    if (page === 'overview') return await renderOverview();
+    overview = await api('/overview');
+    setStatus(overview.feishu, overview.feishu === 'connected');
+  } catch { /* 状态失败不阻塞页面 */ }
+  try {
+    if (page === 'overview') return await renderOverview(overview);
     if (page === 'sessions') return rest[0] ? await renderSession(rest[0]) : await renderSessions();
     if (page === 'skills') return await renderSkills();
     if (page === 'mcps') return await renderMCPs();
     if (page === 'settings') return await renderSettings();
-    content.replaceChildren(el('p', { className: 'muted' }, ['页面不存在']));
+    content.replaceChildren(empty('🧭', '页面不存在'));
   } catch (err) {
-    content.replaceChildren(el('p', { className: 'toast err' }, [err.message]));
+    content.replaceChildren(empty('⚠️', err.message));
   }
 }
 
-async function renderOverview() {
-  const data = await api('/overview');
-  const online = data.feishu === 'connected';
-  statusEl.textContent = `飞书：${data.feishu}`;
-  statusEl.className = `status ${online ? 'ok' : 'bad'}`;
+async function renderOverview(data) {
+  if (!data) data = await api('/overview');
 
-  const cards = el('div', { className: 'cards' }, [
-    card('会话', data.counts.conversations),
-    card('运行', data.counts.runs),
-    card('技能', data.counts.skills),
-    card('MCP', data.counts.mcps),
-  ]);
-  const model = el('div', { className: 'card' }, [
-    el('div', { className: 'k' }, ['模型']),
-    el('div', { className: 'v' }, [data.model.echo ? '未配置（回显）' : data.model.model]),
-    el('div', { className: 'muted' }, [data.model.base_url || '']),
-  ]);
+  const testInput = el('textarea', { placeholder: '输入一句话，直接用当前模型试跑（会带上技能）', style: 'min-height:90px' });
+  const result = el('div', { className: 'result', style: 'display:none' });
+  const runBtn = el('button', {}, ['试跑']);
+  runBtn.addEventListener('click', async () => {
+    const text = testInput.value.trim();
+    if (!text) return toast('先输入内容', true);
+    runBtn.disabled = true;
+    runBtn.textContent = '调用中…';
+    result.style.display = 'none';
+    try {
+      const res = await api('/test', { method: 'POST', body: JSON.stringify({ text }) });
+      result.style.display = 'block';
+      result.textContent = `${res.output}\n\n（${res.latency_ms} ms）`;
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = '试跑';
+    }
+  });
+
   content.replaceChildren(
     el('h2', {}, ['概览']),
-    el('p', { className: 'muted' }, [`版本 ${data.version} · 通道 ${data.channel}/${data.transport}`]),
-    cards, model,
+    el('p', { className: 'lede' }, [`版本 ${data.version} · 通道 ${data.channel}/${data.transport}`]),
+    el('div', { className: 'cards' }, [
+      card('会话', data.counts.conversations),
+      card('运行', data.counts.runs),
+      card('技能', data.counts.skills),
+      card('MCP', data.counts.mcps),
+    ]),
+    el('div', { className: 'panel' }, [
+      el('div', { className: 'head' }, [el('b', {}, ['模型'])]),
+      el('div', { className: 'muted' }, data.model.echo ? '未配置 API Key，当前为回显模式' : `${data.model.model} · ${data.model.base_url}`),
+    ]),
+    el('div', { className: 'panel' }, [
+      el('div', { className: 'head' }, [el('b', {}, ['在线试跑']), el('span', { className: 'muted' }, ['验证模型与技能是否生效'])]),
+      el('div', { className: 'form' }, [testInput, el('div', { className: 'actions' }, [runBtn])]),
+      result,
+    ]),
   );
 }
 
 async function renderSessions() {
   const data = await api('/sessions');
+  if (!data.items.length) {
+    content.replaceChildren(el('h2', {}, ['会话']), empty('💬', '还没有会话。在飞书里 @机器人 发一条消息就会出现在这里。'));
+    return;
+  }
   const rows = data.items.map((s) => [
     s.id, s.chat_id, s.sender, s.messages, s.queued,
     s.active_run_id ? badge('运行中', 'warn') : badge('空闲'),
   ]);
   content.replaceChildren(
     el('h2', {}, ['会话']),
-    el('p', { className: 'muted' }, ['当前为内存存储，重启后清空；点击行查看消息与运行。']),
+    el('p', { className: 'lede' }, ['当前为内存存储，重启后清空；点击行查看消息与运行。']),
     table(['会话', 'chat', '发送者', '消息', '排队', '状态'], rows, (row) => {
       location.hash = `#/sessions/${row[0]}`;
     }),
@@ -122,11 +165,11 @@ async function renderSession(id) {
   const runRows = data.runs.map((r) => [r.ID || r.id, r.State || r.state, (r.Output || r.output || '').slice(0, 60)]);
   content.replaceChildren(
     el('h2', {}, ['会话详情']),
-    el('p', { className: 'muted' }, [id]),
+    el('p', { className: 'lede' }, [id]),
     el('h3', {}, ['消息']),
-    table(['ID', '状态', '内容'], msgRows),
+    msgRows.length ? table(['ID', '状态', '内容'], msgRows) : empty('📭', '没有消息'),
     el('h3', {}, ['运行']),
-    table(['ID', '状态', '输出'], runRows),
+    runRows.length ? table(['ID', '状态', '输出'], runRows) : empty('⚙️', '没有运行记录'),
     el('div', { className: 'actions' }, [
       el('a', { href: '#/sessions', className: 'muted' }, ['← 返回会话列表']),
     ]),
@@ -140,7 +183,6 @@ async function renderSkills() {
   const list = el('div');
 
   async function select(name) {
-    if (!name) return;
     const item = await api(`/skills/${encodeURIComponent(name)}`);
     nameInput.value = item.name;
     textarea.value = item.content;
@@ -155,7 +197,7 @@ async function renderSkills() {
         method: 'PUT',
         body: JSON.stringify({ content: textarea.value }),
       });
-      toast('已保存');
+      toast('已保存，下次运行自动生效');
       await renderSkills();
     } catch (err) { toast(err.message, true); }
   });
@@ -171,19 +213,19 @@ async function renderSkills() {
     } catch (err) { toast(err.message, true); }
   });
 
-  const rows = data.items.map((s) => [el('a', { href: '#' }, [s.name]), (s.content || '').split('\n')[0]]);
-  if (rows.length) {
-    const t = table(['名称', '首行'], rows, async (row) => {
-      await select(row[0].textContent);
-    });
-    list.append(t);
+  if (data.items.length) {
+    const rows = data.items.map((s) => [
+      el('a', { href: '#' }, [s.name]),
+      (s.content || '').split('\n').find((l) => l.trim().startsWith('>'))?.replace(/^>\s*/, '') || '—',
+    ]);
+    list.append(table(['名称', '描述'], rows, async (row) => { await select(row[0].textContent); }));
   } else {
-    list.append(el('p', { className: 'muted' }, ['还没有技能。']));
+    list.append(empty('🧩', '还没有技能。下面填名称和内容保存即可。'));
   }
 
   content.replaceChildren(
     el('h2', {}, ['技能']),
-    el('p', { className: 'muted' }, ['Markdown 文件保存在 data/skills/；每次运行自动加载，无需重启。']),
+    el('p', { className: 'lede' }, ['Markdown 文件保存在 data/skills/，每次运行自动注入系统提示词，无需重启。']),
     list,
     el('h3', {}, ['编辑']),
     el('div', { className: 'form' }, [
@@ -204,16 +246,19 @@ async function renderMCPs() {
   const url = el('input', { placeholder: 'http 地址' });
   const enabled = el('input', { type: 'checkbox', checked: true });
 
-  const rows = data.items.map((m) => [m.name, m.transport, m.command || m.url || '', m.enabled ? badge('启用', 'ok') : badge('停用')]);
-  const list = rows.length ? table(['名称', '传输', '目标', '状态'], rows, async (row) => {
-    const item = data.items.find((m) => m.name === row[0]);
-    nameInput.value = item.name;
-    transport.value = item.transport;
-    command.value = item.command || '';
-    args.value = (item.args || []).join(' ');
-    url.value = item.url || '';
-    enabled.checked = item.enabled;
-  }) : el('p', { className: 'muted' }, ['还没有 MCP 配置。']);
+  const list = data.items.length
+    ? table(['名称', '传输', '目标', '状态'], data.items.map((m) => [
+      m.name, m.transport, m.command || m.url || '', m.enabled ? badge('启用', 'ok') : badge('停用'),
+    ]), async (row) => {
+      const item = data.items.find((m) => m.name === row[0]);
+      nameInput.value = item.name;
+      transport.value = item.transport;
+      command.value = item.command || '';
+      args.value = (item.args || []).join(' ');
+      url.value = item.url || '';
+      enabled.checked = item.enabled;
+    })
+    : empty('🔌', '还没有 MCP 配置。');
 
   const save = el('button', {}, ['保存']);
   save.addEventListener('click', async () => {
@@ -248,7 +293,7 @@ async function renderMCPs() {
 
   content.replaceChildren(
     el('h2', {}, ['MCP']),
-    el('p', { className: 'muted' }, ['配置保存在 data/mcp.yaml。当前仅保存配置，运行时接入在下一阶段。']),
+    el('p', { className: 'lede' }, ['配置保存在 data/mcp.yaml。当前仅保存配置，运行时接入在下一阶段。']),
     list,
     el('h3', {}, ['编辑']),
     el('div', { className: 'form' }, [
@@ -267,7 +312,7 @@ async function renderSettings() {
   const data = await api('/settings');
   content.replaceChildren(
     el('h2', {}, ['设置']),
-    el('p', { className: 'muted' }, ['以下为当前生效配置，修改 .env 后重启生效。']),
+    el('p', { className: 'lede' }, ['当前生效配置；修改 .env 后重启生效。']),
     el('h3', {}, ['模型']),
     el('pre', {}, [JSON.stringify(data.model, null, 2)]),
     el('h3', {}, ['飞书']),

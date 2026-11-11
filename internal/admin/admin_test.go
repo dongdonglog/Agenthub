@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/moying/agenthub/internal/admin"
+	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 )
@@ -25,7 +26,11 @@ func newServer(t *testing.T) http.Handler {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	engine := core.New(nil, nil, logger)
-	return admin.New(cfg, engine, store, admin.Options{Version: "test", FeishuStatus: func() string { return "connected" }}, logger).Handler()
+	return admin.New(cfg, engine, store, admin.Options{
+		Version:      "test",
+		FeishuStatus: func() string { return "connected" },
+		Agent:        agent.Echo{},
+	}, logger).Handler()
 }
 
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -34,6 +39,23 @@ func do(t *testing.T, h http.Handler, method, path, body string) *httptest.Respo
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestAdminTestRun(t *testing.T) {
+	rec := do(t, newServer(t), http.MethodPost, "/admin/api/v1/test", `{"text":"你好"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "你好") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestAdminTestRunRejectsEmpty(t *testing.T) {
+	rec := do(t, newServer(t), http.MethodPost, "/admin/api/v1/test", `{"text":"  "}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", rec.Code)
+	}
 }
 
 func TestOverview(t *testing.T) {

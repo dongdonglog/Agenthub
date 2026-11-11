@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 )
@@ -24,6 +25,8 @@ type Options struct {
 	Version string
 	// FeishuStatus 返回通道连接状态：connected / reconnecting / connecting。
 	FeishuStatus func() string
+	// Agent 用于管理台的在线试跑。
+	Agent agent.Agent
 }
 
 // Server 提供管理页面与管理 API。
@@ -71,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/v1/mcps/{name}", s.handleMCP)
 
 	mux.HandleFunc("GET /admin/api/v1/settings", s.handleSettings)
+	mux.HandleFunc("POST /admin/api/v1/test", s.handleTest)
 	return mux
 }
 
@@ -289,6 +293,39 @@ func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(rw, http.StatusMethodNotAllowed, "方法不支持")
 	}
+}
+
+func (s *Server) handleTest(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Agent == nil {
+		writeError(rw, http.StatusServiceUnavailable, "执行器未就绪")
+		return
+	}
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(body.Text) == "" {
+		writeError(rw, http.StatusBadRequest, "内容不能为空")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	start := time.Now()
+	out, err := s.opts.Agent.Run(ctx, agent.Input{
+		ConversationID: "admin-test",
+		Messages:       []agent.Message{{ID: "admin-test", Text: body.Text}},
+	})
+	if err != nil {
+		writeError(rw, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{
+		"output":     out.Text,
+		"latency_ms": time.Since(start).Milliseconds(),
+	})
 }
 
 func (s *Server) handleSettings(rw http.ResponseWriter, _ *http.Request) {

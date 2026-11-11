@@ -75,7 +75,8 @@ func run() int {
 		ch = feishu.NewChannel(client)
 	}
 
-	engine := core.New(newAgent(cfg, skillsDir, logger), ch, logger)
+	runner := newAgent(cfg, skillsDir, logger)
+	engine := core.New(runner, ch, logger)
 	metrics := obs.NewMetrics()
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 
@@ -91,6 +92,7 @@ func run() int {
 	adminSrv := admin.New(cfg, engine, adminStore, admin.Options{
 		Version:      version.Version,
 		FeishuStatus: feishuStatus,
+		Agent:        runner,
 	}, logger)
 
 	go func() {

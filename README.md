@@ -33,6 +33,8 @@ go run ./cmd/agentd
 
 启动后打开 **http://127.0.0.1:8788/admin/**（默认只绑回环；远端访问用 SSH 隧道或网关）。
 
+![管理台概览](docs/images/admin-overview.png)
+
 | 页面 | 内容 |
 |---|---|
 | 概览 | 通道连接状态、模型配置、会话/运行/技能/MCP 数量 |
