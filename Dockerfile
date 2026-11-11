@@ -16,7 +16,6 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/agentd /app/agentd
 COPY migrations /app/migrations
-COPY --chown=nonroot:nonroot skills /app/skills
 COPY --from=build --chown=nonroot:nonroot /out/data /data
 ENV AGENTHUB_HTTP_ADDR=0.0.0.0:8787
 ENV AGENTHUB_DATA_DIR=/data

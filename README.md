@@ -123,20 +123,17 @@ go run ./cmd/agentd
 
 ## 技能
 
-技能就是一组 Markdown：`SKILL.md` 写流程，`references/` 放清单和手册。回答时注入系统提示词，
-由模型自行判断是否适用；默认给 6 个运维技能：
+技能是一组 Markdown：`SKILL.md` 写流程，`references/` 放清单和手册。回答时注入系统提示词，
+由模型自行判断是否适用。
 
-| 技能 | 用途 |
-|---|---|
-| `tiangong-deploy` | 天工单机/集群/db-ha 部署、分阶段重跑 |
-| `tiangong-troubleshoot` | 部署与运行故障排查（卡下载、Pod 异常、证书到期等） |
-| `k8s-business-release` | K8s 业务发版、跑数据迁移、回滚 |
-| `ldap-account-ops` | 入职/离职账号同步、LDAP 登录异常 |
-| `gitlab-cicd-release` | 打 tag、镜像 promote、升级 CI 组件 |
-| `victorialogs-query` | 查服务日志、按关键字过滤、常见查询写法 |
+**仓库不内置业务技能**，每个部署方自带：
 
-管理台可以：编辑文件树、新建/删除文件、**ZIP 整包导入**、停用/归档/删除；
-Profile 把技能与 MCP 组合成配置档案，**绑定到会话代**，不同群可以用不同配置。
+- 把技能目录放进数据目录（容器里是 `/data/skills`，可用 volume 挂载）；
+- 或在管理台「Skill → 导入 ZIP」上传整包；
+- 示例模板见 `examples/skills/example/SKILL.md`。
+
+管理台可以编辑文件树、新建/删除文件、停用/归档/删除；Profile 把技能与 MCP 组合成配置档案，
+绑定到会话代，不同群可以用不同配置。
 
 ## 管理台
 
@@ -212,7 +209,7 @@ internal/mcp/              MCP stdio 客户端
 internal/admin/            管理台与 API
 internal/store/            PostgreSQL、迁移、持久化
 migrations/                SQL 迁移（只前进）
-skills/                    随仓库分发的技能种子
+examples/skills/           技能模板（不含业务内容）
 deploy/prometheus/         告警规则
 scripts/                   备份与恢复
 docs/                      PRD、架构、部署、运维、路线图

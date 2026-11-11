@@ -67,7 +67,7 @@ curl -s 127.0.0.1:8787/metrics | grep agenthub_health_check
 docker compose logs --tail=50 app
 ```
 
-容器启动时会自动执行迁移、把 `skills/` 种子复制到 `/data/skills`。
+容器启动时会自动执行迁移；技能不随镜像分发，部署时挂载 `/data` 或用管理台导入 ZIP。
 
 只做冒烟（不接飞书，避免与线上重复收事件）：
 

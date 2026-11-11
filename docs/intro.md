@@ -36,7 +36,7 @@ AgentHub 把入口放进飞书，把过程做成卡片，把配置放进管理�
 - 飞书长连接（无需公网入口），私聊/群聊，免 @ 群白名单；
 - 文本、富文本、图片（视觉模型）、文件与引用上下文；
 - 进度卡片、结果卡片、长文分块、`/status` `/model` `/stop` `/clear` `/reset` `/help`；
-- 6 个内置运维技能：天工部署/排障、K8s 发版、LDAP 账号、GitLab CI/CD、VictoriaLogs 查询；
+- 技能由部署方自带（Markdown 包），可文件树编辑、ZIP 导入、按 Profile 组合；
 - MCP stdio 工具调用；
 - Profile 绑定会话代，不同群可用不同技能/工具组合；
 - 管理台：运行概览、在线/历史会话、Profile、Skill（文件树 + ZIP 导入）、MCP、审计；

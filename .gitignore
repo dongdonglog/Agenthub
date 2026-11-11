@@ -4,3 +4,4 @@ data/
 *.log
 coverage.out
 backups/
+skills/
