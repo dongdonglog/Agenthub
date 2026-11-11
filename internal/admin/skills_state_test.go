@@ -1,6 +1,8 @@
 package admin_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -287,5 +289,75 @@ func TestHistoryDetailEndpoint(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/admin/api/v1/history/t:c1:u1/abc", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("非法代 = %d", rec.Code)
+	}
+}
+
+func buildZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestSkillImportZip(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	payload := buildZip(t, map[string]string{
+		"demo/SKILL.md":           "---\nname: demo\ndescription: 演示\n---\n正文",
+		"demo/references/note.md": "参考",
+	})
+	names, err := st.ImportZip(payload, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "demo" {
+		t.Fatalf("imported = %v", names)
+	}
+	if content, err := st.ReadFile("demo", "references/note.md"); err != nil || content != "参考" {
+		t.Fatalf("read = %q err=%v", content, err)
+	}
+	if _, err := st.ImportZip(payload, false); err == nil {
+		t.Fatal("同名技能未覆盖时应报错")
+	}
+	if _, err := st.ImportZip(payload, true); err != nil {
+		t.Fatalf("overwrite 应成功: %v", err)
+	}
+}
+
+func TestSkillImportRejectsZipSlip(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	payload := buildZip(t, map[string]string{
+		"../evil.md": "x",
+	})
+	if _, err := st.ImportZip(payload, true); err == nil {
+		t.Fatal("应拒绝路径穿越")
+	}
+}
+
+func TestSkillImportFlatRoot(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	payload := buildZip(t, map[string]string{
+		"SKILL.md": "---\nname: flat-skill\n---\n正文",
+	})
+	names, err := st.ImportZip(payload, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "flat-skill" {
+		t.Fatalf("imported = %v", names)
 	}
 }

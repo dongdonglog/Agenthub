@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/skills/{name}", s.handleSkill)
 	mux.HandleFunc("PUT /admin/api/v1/skills/{name}", s.handleSkill)
 	mux.HandleFunc("PUT /admin/api/v1/skills/{name}/status", s.handleSkillStatus)
+	mux.HandleFunc("POST /admin/api/v1/skills/import", s.handleSkillImport)
 	mux.HandleFunc("GET /admin/api/v1/skills/{name}/files", s.handleSkillFiles)
 	mux.HandleFunc("GET /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
 	mux.HandleFunc("PUT /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
@@ -517,6 +518,32 @@ func (s *Server) handleSkill(rw http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(rw, http.StatusMethodNotAllowed, "方法不支持")
 	}
+}
+
+func (s *Server) handleSkillImport(rw http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		writeError(rw, http.StatusBadRequest, "需要 multipart/form-data")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(rw, http.StatusBadRequest, "缺少 file 字段")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, 20<<20))
+	if err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	overwrite := r.URL.Query().Get("overwrite") == "1"
+	names, err := s.store.ImportZip(data, overwrite)
+	if err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.audit(r, "skill.import", strings.Join(names, ","), "")
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "imported": names})
 }
 
 func (s *Server) handleSkillFiles(rw http.ResponseWriter, r *http.Request) {

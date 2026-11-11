@@ -364,6 +364,27 @@ async function renderSkills() {
     } catch (err) { toast(err.message, true); }
   });
 
+  const importInput = el('input', { type: 'file', accept: '.zip', style: 'display:none' });
+  const importBtn = el('button', { className: 'ghost' }, ['导入 ZIP']);
+  importBtn.addEventListener('click', () => importInput.click());
+  importInput.addEventListener('change', async () => {
+    const file = importInput.files[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await fetch('/admin/api/v1/skills/import?overwrite=1', {
+        method: 'POST',
+        body: form,
+        headers: { 'X-Requested-With': 'agenthub' },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '导入失败');
+      toast(`已导入：${data.imported.join(', ')}`);
+      await renderSkills();
+    } catch (err) { toast(err.message, true); }
+  });
+
   const newFile = el('button', { className: 'ghost' }, ['新建文件']);
   newFile.addEventListener('click', async () => {
     if (!currentSkill) return toast('先选择一个技能', true);
@@ -395,7 +416,7 @@ async function renderSkills() {
     el('h3', {}, ['编辑']),
     el('div', { className: 'form' }, [
       el('label', {}, ['名称', nameInput]),
-      el('div', { className: 'file-bar' }, [fileLabel, el('div', { className: 'actions' }, [newFile, delFile])]),
+      el('div', { className: 'file-bar' }, [fileLabel, el('div', { className: 'actions' }, [importBtn, importInput, newFile, delFile])]),
       fileList,
       el('label', {}, ['内容', textarea]),
       el('div', { className: 'actions' }, [save]),
