@@ -5,47 +5,25 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-
-	"github.com/moying/agenthub/internal/channel"
-	"github.com/moying/agenthub/internal/core"
 )
 
-// WebhookOptions 是事件入口的策略配置。
-type WebhookOptions struct {
-	// VerificationToken 非空时校验事件来源。
-	VerificationToken string
-	// BotOpenID 是机器人自身 open_id；为空时把任意 @ 视为 @机器人。
-	BotOpenID string
-	// RequireMention 为 true 时群聊必须 @机器人。
-	RequireMention bool
-	// AllowedUsers 非空时只接受列表内的 open_id。
-	AllowedUsers []string
-	// AllowedChats 非空时只接受列表内的 chat_id。
-	AllowedChats []string
-}
-
-// Webhook 处理飞书事件回调。
+// Webhook 处理飞书事件回调（将事件发送至开发者服务器）。
+//
+// @remarks 长连接模式不需要本入口；两种入口共用 {@link Dispatcher} 的策略。
 type Webhook struct {
-	engine       *core.Engine
-	opts         WebhookOptions
-	log          *slog.Logger
-	allowedUsers map[string]struct{}
-	allowedChats map[string]struct{}
+	dispatcher        *Dispatcher
+	verificationToken string
+	log               *slog.Logger
 }
 
-// NewWebhook 构造事件入口。
-func NewWebhook(engine *core.Engine, opts WebhookOptions, log *slog.Logger) *Webhook {
+// NewWebhook 构造回调入口。
+//
+// @param verificationToken 非空时校验事件来源；为空表示不校验（仅限内网调试）
+func NewWebhook(dispatcher *Dispatcher, verificationToken string, log *slog.Logger) *Webhook {
 	if log == nil {
 		log = slog.Default()
 	}
-	w := &Webhook{
-		engine:       engine,
-		opts:         opts,
-		log:          log,
-		allowedUsers: toSet(opts.AllowedUsers),
-		allowedChats: toSet(opts.AllowedChats),
-	}
-	return w
+	return &Webhook{dispatcher: dispatcher, verificationToken: verificationToken, log: log}
 }
 
 // ServeHTTP 处理一次事件回调。
@@ -68,7 +46,7 @@ func (w *Webhook) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if w.opts.VerificationToken != "" && !w.tokenOK(&p) {
+	if w.verificationToken != "" && !verifyToken(&p, w.verificationToken) {
 		w.log.Warn("feishu webhook token mismatch")
 		http.Error(rw, "forbidden", http.StatusForbidden)
 		return
@@ -79,66 +57,24 @@ func (w *Webhook) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, ok := ParseMessage(&p, w.opts.BotOpenID)
-	if !ok {
-		writeJSON(rw, http.StatusOK, map[string]int{"code": 0})
-		return
-	}
-	if !w.allowed(msg) {
-		w.log.Info("feishu message rejected by policy",
-			"chat", msg.Chat.ID, "sender", msg.Sender.OpenID, "kind", msg.Chat.Kind)
-		writeJSON(rw, http.StatusOK, map[string]int{"code": 0})
-		return
-	}
-
-	if _, err := w.engine.Submit(r.Context(), msg); err != nil {
-		w.log.Error("submit failed", "error", err, "message", msg.ExternalID)
-		http.Error(rw, "submit failed", http.StatusInternalServerError)
+	if err := w.dispatcher.HandleEvent(r.Context(), &p); err != nil {
+		w.log.Error("handle event failed", "error", err, "message", p.Event.Message.MessageID)
+		http.Error(rw, "handle failed", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(rw, http.StatusOK, map[string]int{"code": 0})
 }
 
-func (w *Webhook) tokenOK(p *Payload) bool {
+func verifyToken(p *Payload, want string) bool {
 	token := p.Header.Token
 	if token == "" {
 		token = p.Token
 	}
-	return token == w.opts.VerificationToken
-}
-
-func (w *Webhook) allowed(msg channel.Inbound) bool {
-	if len(w.allowedChats) > 0 {
-		if _, ok := w.allowedChats[msg.Chat.ID]; !ok {
-			return false
-		}
-	}
-	if len(w.allowedUsers) > 0 {
-		if _, ok := w.allowedUsers[msg.Sender.OpenID]; !ok {
-			return false
-		}
-	}
-	if w.opts.RequireMention && msg.Chat.Kind != "p2p" && !msg.MentionsBot {
-		return false
-	}
-	return true
+	return token == want
 }
 
 func writeJSON(rw http.ResponseWriter, status int, body any) {
 	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
 	rw.WriteHeader(status)
 	_ = json.NewEncoder(rw).Encode(body)
-}
-
-func toSet(items []string) map[string]struct{} {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		if item != "" {
-			out[item] = struct{}{}
-		}
-	}
-	return out
 }

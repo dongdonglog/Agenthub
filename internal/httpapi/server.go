@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/moying/agenthub/internal/config"
@@ -23,11 +24,30 @@ type Server struct {
 	metrics *obs.Metrics
 	db      *store.DB
 	version string
+
+	mu     sync.RWMutex
+	checks map[string]func() (bool, string)
 }
 
 // New 构造 HTTP 服务。
 func New(cfg *config.Config, log *slog.Logger, metrics *obs.Metrics, db *store.DB, version string) *Server {
-	return &Server{cfg: cfg, log: log, metrics: metrics, db: db, version: version}
+	return &Server{
+		cfg:     cfg,
+		log:     log,
+		metrics: metrics,
+		db:      db,
+		version: version,
+		checks:  make(map[string]func() (bool, string)),
+	}
+}
+
+// RegisterCheck 注册一个运行期健康检查。
+//
+// @remarks 检查函数会被并发调用，必须无副作用；返回 false 时 /healthz 返回 503。
+func (s *Server) RegisterCheck(name string, fn func() (bool, string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.checks[name] = fn
 }
 
 // Handler 返回路由表。

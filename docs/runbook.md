@@ -38,8 +38,9 @@ docker run --rm -p 127.0.0.1:8787:8787 --env-file .env agenthub:dev
 
 1. 飞书开放平台 → 创建**企业自建应用**；
 2. 添加「机器人」能力；
-3. 事件订阅 → 先选择**将事件发送至开发者服务器**，请求地址填 `https://<网关>/feishu/events`，订阅 `im.message.receive_v1`；
-   （长连接模式在 M1 后续接入，接口已预留）
+3. 事件订阅 → 选择**使用长连接接收事件**（默认，无需公网）；若必须用回调，改为「将事件发送至开发者服务器」，
+   地址填 `https://<网关>/feishu/events`，并设置 `FEISHU_TRANSPORT=webhook`；
+   订阅 `im.message.receive_v1`；
 4. 权限：按 [feishu-capabilities.md](feishu-capabilities.md) §7 申请；
 5. 卡片：配置回调地址或确认长连接可用（见 Spike S1）；
 6. 发布应用，把机器人加入目标群；
@@ -53,7 +54,9 @@ docker run --rm -p 127.0.0.1:8787:8787 --env-file .env agenthub:dev
 | `AGENTHUB_CHANNEL` | `off` | `off` 只跑骨架；`feishu` 接飞书 |
 | `AGENTHUB_HTTP_ADDR` | `127.0.0.1:8787` | 健康检查与指标 |
 | `AGENTHUB_ADMIN_ADDR` | `127.0.0.1:8788` | 管理面（无内置登录） |
-| `AGENTHUB_WEBHOOK_ADDR` | `127.0.0.1:8789` | 飞书事件回调监听 |
+| `AGENTHUB_WEBHOOK_ADDR` | `127.0.0.1:8789` | 飞书事件回调监听（仅 webhook 模式） |
+| `FEISHU_TRANSPORT` | `websocket` | `websocket` 长连接（无需公网入口）/ `webhook` 回调地址 |
+| `FEISHU_DOMAIN` | `https://open.feishu.cn` | 开放平台地址，Lark 海外改为 `https://open.larksuite.com` |
 | `AGENTHUB_DB_URL` | 空 | PostgreSQL 连接串；空则无持久化 |
 | `AGENTHUB_DB_MAX_CONNS` | `10` | 连接池上限 |
 | `AGENTHUB_DATA_DIR` | `./data` | 附件与产物目录 |
@@ -86,6 +89,7 @@ docker run --rm -p 127.0.0.1:8787:8787 --env-file .env agenthub:dev
 ```
 
 - `db=skipped` 表示未配置数据库（骨架模式）；
+- `feishu` 在长连接模式下为 `connecting` / `connected` / `reconnecting`，三者都返回 200，断线不触发重启；
 - 任一 `error` 返回 503。
 
 **`GET /metrics`**（Prometheus 文本）
@@ -103,7 +107,8 @@ docker run --rm -p 127.0.0.1:8787:8787 --env-file .env agenthub:dev
 | 现象 | 排查 | 处置 |
 |---|---|---|
 | 启动退出码 2 | 看日志字段名 | 补配置 |
-| 收不到消息 | 长连接是否建立、机器人是否发布、白名单 | 检查飞书后台与应用状态 |
+| 收不到消息 | 长连接是否建立、机器人是否发布、白名单 | 看日志 `feishu websocket ready`；确认应用已发布、机器人已进群 |
+| 长连接反复重连 | 应用凭据、网络、出口防火墙 | 日志出现 `app_id is invalid` 说明凭据错；否则检查 443 出网 |
 | 卡片不出现 | 卡片权限/模板、更新频率 | 降级文本，查 `card` 日志 |
 | 重复回复 | 检查幂等键与投递状态 | 查 `delivery` 表 |
 | 消息处理超时 | 模型/工具耗时 | 调小批次或超时，看 trace |

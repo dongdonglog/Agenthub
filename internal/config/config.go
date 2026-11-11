@@ -71,6 +71,10 @@ type WebhookConfig struct {
 
 // FeishuConfig 是飞书通道配置。
 type FeishuConfig struct {
+	// Transport 是事件传输方式：websocket（长连接，默认）或 webhook（回调地址）。
+	Transport string `yaml:"transport"`
+	// Domain 是开放平台地址，Lark 海外部署可覆盖。
+	Domain            string   `yaml:"domain"`
 	AppID             string   `yaml:"app_id"`
 	AppSecret         string   `yaml:"app_secret"`
 	VerificationToken string   `yaml:"verification_token"`
@@ -131,9 +135,13 @@ func defaults() Config {
 		DB:      DBConfig{MaxConns: 10},
 		Storage: StorageConfig{Dir: "./data"},
 		Webhook: WebhookConfig{Addr: "127.0.0.1:8789"},
-		Feishu:  FeishuConfig{RequireMention: true},
-		Agent:   AgentConfig{Provider: "openai", Model: "gpt-4.1-mini", MaxRunSeconds: 1800},
-		Log:     LogConfig{Level: "info", Format: "json"},
+		Feishu: FeishuConfig{
+			Transport:      "websocket",
+			Domain:         "https://open.feishu.cn",
+			RequireMention: true,
+		},
+		Agent: AgentConfig{Provider: "openai", Model: "gpt-4.1-mini", MaxRunSeconds: 1800},
+		Log:   LogConfig{Level: "info", Format: "json"},
 	}
 }
 
@@ -146,6 +154,8 @@ func applyEnv(cfg *Config) {
 	setInt32(&cfg.DB.MaxConns, "AGENTHUB_DB_MAX_CONNS")
 	setStr(&cfg.Storage.Dir, "AGENTHUB_DATA_DIR")
 	setStr(&cfg.Webhook.Addr, "AGENTHUB_WEBHOOK_ADDR")
+	setStr(&cfg.Feishu.Transport, "FEISHU_TRANSPORT")
+	setStr(&cfg.Feishu.Domain, "FEISHU_DOMAIN")
 	setStr(&cfg.Feishu.BotOpenID, "FEISHU_BOT_OPEN_ID")
 	setStr(&cfg.Feishu.AppID, "FEISHU_APP_ID")
 	setStr(&cfg.Feishu.AppSecret, "FEISHU_APP_SECRET")
@@ -197,6 +207,12 @@ func (c *Config) Validate() error {
 		}
 		if c.Feishu.AppSecret == "" {
 			return errors.New("feishu.app_secret 不能为空")
+		}
+		if c.Feishu.Transport != "websocket" && c.Feishu.Transport != "webhook" {
+			return fmt.Errorf("feishu.transport 非法：%s", c.Feishu.Transport)
+		}
+		if c.Feishu.Transport == "websocket" && c.Feishu.Domain == "" {
+			return errors.New("feishu.domain 不能为空")
 		}
 	default:
 		return fmt.Errorf("channel 非法：%s", c.Channel)

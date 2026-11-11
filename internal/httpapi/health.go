@@ -33,6 +33,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	checks["db"] = dbStatus
 
+	s.mu.RLock()
+	for name, fn := range s.checks {
+		ok, status := fn()
+		if ok {
+			checks[name] = status
+			continue
+		}
+		checks[name] = "error"
+	}
+	s.mu.RUnlock()
+
 	status := "ok"
 	code := http.StatusOK
 	for _, v := range checks {

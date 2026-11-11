@@ -66,6 +66,42 @@ func TestFeishuAcceptsCredentials(t *testing.T) {
 	}
 }
 
+func TestFeishuTransportDefaultsToWebsocket(t *testing.T) {
+	t.Setenv("AGENTHUB_CHANNEL", "feishu")
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "secret")
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Feishu.Transport != "websocket" {
+		t.Fatalf("transport = %q, want websocket", cfg.Feishu.Transport)
+	}
+	if cfg.Feishu.Domain == "" {
+		t.Fatal("domain 不能为空")
+	}
+}
+
+func TestFeishuTransportRejectsUnknown(t *testing.T) {
+	t.Setenv("AGENTHUB_CHANNEL", "feishu")
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "secret")
+	t.Setenv("FEISHU_TRANSPORT", "carrier-pigeon")
+	if _, err := config.Load(""); err == nil {
+		t.Fatal("非法 transport 应报错")
+	}
+}
+
+func TestFeishuWebhookTransportAccepted(t *testing.T) {
+	t.Setenv("AGENTHUB_CHANNEL", "feishu")
+	t.Setenv("FEISHU_APP_ID", "cli_test")
+	t.Setenv("FEISHU_APP_SECRET", "secret")
+	t.Setenv("FEISHU_TRANSPORT", "webhook")
+	if _, err := config.Load(""); err != nil {
+		t.Fatalf("webhook 模式应可用: %v", err)
+	}
+}
+
 func TestRejectsInvalidDBURL(t *testing.T) {
 	t.Setenv("AGENTHUB_DB_URL", "mysql://nope")
 	if _, err := config.Load(""); err == nil {

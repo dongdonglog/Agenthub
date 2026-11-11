@@ -89,12 +89,12 @@ func newHook(t *testing.T) (*feishu.Webhook, *core.Engine, *fakeAPI) {
 	client := feishu.NewClient("cli_test", "secret", feishu.WithBaseURL(srv.URL))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	engine := core.New(agent.Echo{}, feishu.NewChannel(client), logger)
-	hook := feishu.NewWebhook(engine, feishu.WebhookOptions{
-		VerificationToken: "vt",
-		BotOpenID:         "ou_bot",
-		RequireMention:    true,
-		AllowedChats:      []string{"oc_1", "oc_group"},
+	dispatcher := feishu.NewDispatcher(engine, feishu.Options{
+		BotOpenID:      "ou_bot",
+		RequireMention: true,
+		AllowedChats:   []string{"oc_1", "oc_group"},
 	}, logger)
+	hook := feishu.NewWebhook(dispatcher, "vt", logger)
 	return hook, engine, api
 }
 

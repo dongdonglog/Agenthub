@@ -55,7 +55,7 @@ func run() int {
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 
 	if cfg.Channel == config.ChannelFeishu {
-		startFeishu(ctx, cfg, logger, stop)
+		startFeishu(ctx, cfg, logger, stop, srv)
 	}
 
 	go func() {
@@ -78,27 +78,62 @@ func run() int {
 	return 0
 }
 
-// startFeishu 装配飞书通道、事件入口与处理循环。
+// startFeishu 装配飞书通道、事件来源与处理循环。
 //
-// @remarks 事件入口单独监听；处理循环用短周期 Flush 把排队消息收敛成批次。
-func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc) {
+// @remarks 事件来源由 feishu.transport 决定：websocket 走长连接（默认，无需公网入口），
+// webhook 走回调监听。两种来源共用同一个 Dispatcher，保证受理策略一致。
+func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server) {
 	client := feishu.NewClient(cfg.Feishu.AppID, cfg.Feishu.AppSecret)
 	engine := core.New(agent.Echo{}, feishu.NewChannel(client), logger)
-
-	hook := feishu.NewWebhook(engine, feishu.WebhookOptions{
-		VerificationToken: cfg.Feishu.VerificationToken,
-		BotOpenID:         cfg.Feishu.BotOpenID,
-		RequireMention:    cfg.Feishu.RequireMention,
-		AllowedUsers:      cfg.Feishu.AllowedUsers,
-		AllowedChats:      cfg.Feishu.AllowedChats,
+	dispatcher := feishu.NewDispatcher(engine, feishu.Options{
+		BotOpenID:      cfg.Feishu.BotOpenID,
+		RequireMention: cfg.Feishu.RequireMention,
+		AllowedUsers:   cfg.Feishu.AllowedUsers,
+		AllowedChats:   cfg.Feishu.AllowedChats,
 	}, logger)
 
-	go func() {
-		if err := httpapi.Serve(ctx, cfg.Webhook.Addr, hook, logger); err != nil {
-			logger.Error("webhook server stopped", "error", err)
-			stop()
-		}
-	}()
+	if cfg.Feishu.Transport == "webhook" {
+		hook := feishu.NewWebhook(dispatcher, cfg.Feishu.VerificationToken, logger)
+		logger.Info("feishu transport", "mode", "webhook", "addr", cfg.Webhook.Addr)
+		go func() {
+			if err := httpapi.Serve(ctx, cfg.Webhook.Addr, hook, logger); err != nil {
+				logger.Error("webhook server stopped", "error", err)
+				stop()
+			}
+		}()
+		health.RegisterCheck("feishu", func() (bool, string) { return true, "webhook" })
+	} else {
+		connector := feishu.NewWSConnector(cfg.Feishu.AppID, cfg.Feishu.AppSecret, cfg.Feishu.Domain, logger)
+		health.RegisterCheck("feishu", func() (bool, string) {
+			if connector.Connected() {
+				return true, "connected"
+			}
+			if connector.Ready() {
+				return true, "reconnecting"
+			}
+			return true, "connecting"
+		})
+		logger.Info("feishu transport", "mode", "websocket", "domain", cfg.Feishu.Domain)
+		go func() {
+			// 长连接断开后按指数退避重试，不让一次网络抖动带走整个服务。
+			backoff := time.Second
+			for ctx.Err() == nil {
+				err := connector.Run(ctx, dispatcher.HandlePayload)
+				if ctx.Err() != nil {
+					return
+				}
+				logger.Error("websocket connector stopped; retrying", "error", err, "backoff", backoff)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
+				if backoff < 30*time.Second {
+					backoff *= 2
+				}
+			}
+		}()
+	}
 
 	go func() {
 		ticker := time.NewTicker(300 * time.Millisecond)

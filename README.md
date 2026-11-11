@@ -14,13 +14,20 @@ curl -s localhost:8787/healthz
 # {"status":"ok","version":"0.1.0-dev","checks":{"config":"ok","db":"skipped"}}
 ```
 
-接飞书：
+接飞书（默认长连接，不需要公网入口）：
 
 ```bash
-cp .env.example .env      # 填 FEISHU_APP_ID / FEISHU_APP_SECRET / AGENTHUB_DB_URL
+cp .env.example .env      # 填 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BOT_OPEN_ID
 set -a && . ./.env && set +a
 go run ./cmd/agentd
 ```
+
+事件接入方式：
+
+| 方式 | 配置 | 说明 |
+|---|---|---|
+| WebSocket 长连接（默认） | `FEISHU_TRANSPORT=websocket` | 无需公网入口与回调地址；SDK 负责握手、心跳与自动重连；断线按指数退避重试 |
+| 事件回调 | `FEISHU_TRANSPORT=webhook` + `AGENTHUB_WEBHOOK_ADDR` | 需要飞书能访问到该地址，适合已有网关的部署 |
 
 ## 本地模拟（不需要真实飞书应用）
 
@@ -34,6 +41,9 @@ go run ./cmd/agentd
 | `TestRapidMessagesMergeIntoOneBatch` | 3 条连发合并为 1 次运行 |
 | `TestStopInterruptsRun` | 停止后运行中断且仍投递说明 |
 | `TestRejectsWrongToken` / `TestChatAllowlist` | 来源校验与白名单 |
+| `TestRawPayloadPrefersRawBody` | 长连接事件走与 webhook 相同的解析路径 |
+| `TestDispatcherHandlesWebsocketPayload` | 长连接报文 → 解析 → 批次 → 投递 |
+| `TestConnectorContract` | Connector 契约：多事件、多会话分发 |
 
 手动起服务验证事件入口：
 
@@ -89,7 +99,9 @@ make vet          # go vet
 - **M0 骨架**：配置校验、日志、指标、健康检查、迁移脚本、优雅退出。
 - **M1 飞书闭环（进行中）**：事件解析（文本/富文本/图片/文件/音视频）、去重、白名单、
   群聊 @ 判定、批次合并、会话串行、停止、投递（回复原消息）已打通，并有 fake API 全链路测试。
-- **M1 待补**：长连接模式、附件流式下载、真实模型接入。
+- **长连接（已完成）**：`FEISHU_TRANSPORT=websocket` 为默认；SDK 负责握手与重连，
+  服务侧带指数退避重试；`/healthz` 暴露 `feishu: connecting|connected|reconnecting`。
+- **M1 待补**：附件流式下载、真实模型接入。
 - **M2+**：PostgreSQL 持久化、outbox 重试、卡片与表情。
 
 详细排期见 [路线图](docs/roadmap.md)。
