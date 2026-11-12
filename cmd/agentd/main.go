@@ -22,6 +22,7 @@ import (
 	"github.com/moying/agenthub/internal/httpapi"
 	"github.com/moying/agenthub/internal/mcp"
 	"github.com/moying/agenthub/internal/obs"
+	"github.com/moying/agenthub/internal/platform/dingtalk"
 	"github.com/moying/agenthub/internal/platform/feishu"
 	"github.com/moying/agenthub/internal/store"
 	"github.com/moying/agenthub/internal/version"
@@ -111,10 +112,24 @@ func run() int {
 	}
 
 	var ch channel.Channel
+	var dt *dingtalk.Channel
 	feishuStatus := func() string { return "off" }
 	if cfg.Channel == config.ChannelFeishu {
 		client := feishu.NewClient(cfg.Feishu.AppID, cfg.Feishu.AppSecret)
 		ch = feishu.NewChannel(client)
+	}
+	if cfg.Channel == config.ChannelDingtalk {
+		dt = dingtalk.New(dingtalk.Config{
+			ClientID:       cfg.Dingtalk.ClientID,
+			ClientSecret:   cfg.Dingtalk.ClientSecret,
+			RequireMention: cfg.Dingtalk.RequireMention,
+			AllowedUsers:   cfg.Dingtalk.AllowedUsers,
+			AllowedChats:   cfg.Dingtalk.AllowedChats,
+			BotName:        cfg.Dingtalk.BotName,
+			ModelName:      cfg.Agent.Model,
+			ModelBaseURL:   cfg.Agent.BaseURL,
+		}, nil, logger)
+		ch = dt
 	}
 
 	mcpManager := mcp.StartAll(ctx, filepath.Join(cfg.Storage.Dir, "mcp.yaml"), logger)
@@ -158,6 +173,9 @@ func run() int {
 	if fc, ok := ch.(*feishu.Channel); ok {
 		engine.SetPresenter(feishu.NewCardPresenter(fc.Client(), logger).WithStopButton(cfg.Feishu.CardActionEnabled))
 	}
+	if dt != nil {
+		dt.SetEngine(engine)
+	}
 
 	var journal *store.Journal
 	if db != nil {
@@ -191,6 +209,16 @@ func run() int {
 
 	if cfg.Channel == config.ChannelFeishu {
 		feishuStatus = startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal)
+	}
+	if dt != nil {
+		go func() {
+			if err := dt.Start(workCtx); err != nil {
+				logger.Error("dingtalk stream stopped", "error", err)
+				stop()
+			}
+		}()
+		feishuStatus = func() string { return "connected" }
+		srv.RegisterCheck("dingtalk", func() (bool, string) { return true, "stream" })
 	}
 
 	adminStore, err := admin.NewStore(cfg.Storage.Dir)

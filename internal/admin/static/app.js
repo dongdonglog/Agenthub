@@ -85,8 +85,9 @@ function toast(message, isError = false) {
   setTimeout(() => node.remove(), 3600);
 }
 
-function setStatus(text, online) {
-  statusText.textContent = `飞书：${text}`;
+function setStatus(text, online, channel) {
+  const label = channel === 'dingtalk' ? '钉钉' : '飞书';
+  statusText.textContent = `${label}：${text}`;
   statusEl.className = `status ${online ? 'ok' : 'bad'}`;
 }
 
@@ -100,7 +101,7 @@ async function render() {
   let overview = null;
   try {
     overview = await api('/overview');
-    setStatus(overview.feishu, overview.feishu === 'connected');
+    setStatus(overview.feishu, overview.feishu === 'connected', overview.channel);
   } catch { /* 状态失败不阻塞页面 */ }
   try {
     if (page === 'overview') return await renderOverview(overview);

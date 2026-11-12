@@ -134,3 +134,27 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+func TestDingtalkChannelRequiresCredentials(t *testing.T) {
+	base := func() *config.Config {
+		return &config.Config{
+			Channel: config.ChannelDingtalk,
+			HTTP:    config.HTTPConfig{Addr: "127.0.0.1:1"},
+			Admin:   config.AdminConfig{Addr: "127.0.0.1:2"},
+			Storage: config.StorageConfig{Dir: t.TempDir()},
+			Webhook: config.WebhookConfig{Addr: "127.0.0.1:3"},
+			DB:      config.DBConfig{MaxConns: 4},
+			Agent:   config.AgentConfig{MaxRunSeconds: 60},
+			Log:     config.LogConfig{Level: "info", Format: "text"},
+		}
+	}
+	c := base()
+	if err := c.Validate(); err == nil {
+		t.Fatal("缺少 client_id 应报错")
+	}
+	c.Dingtalk.ClientID = "id"
+	c.Dingtalk.ClientSecret = "secret"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("合法配置不应报错: %v", err)
+	}
+}

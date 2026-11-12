@@ -22,6 +22,8 @@ const (
 	ChannelOff ChannelMode = "off"
 	// ChannelFeishu 接入飞书自建应用。
 	ChannelFeishu ChannelMode = "feishu"
+	// ChannelDingtalk 接入钉钉机器人（Stream 模式）。
+	ChannelDingtalk ChannelMode = "dingtalk"
 )
 
 // Config 是服务的全部运行配置。
@@ -33,11 +35,12 @@ type Config struct {
 	DB      DBConfig      `yaml:"db"`
 	Storage StorageConfig `yaml:"storage"`
 	// RetentionDays 是历史数据保留天数；0 表示不清理。
-	RetentionDays int           `yaml:"retention_days"`
-	Webhook       WebhookConfig `yaml:"webhook"`
-	Feishu        FeishuConfig  `yaml:"feishu"`
-	Agent         AgentConfig   `yaml:"agent"`
-	Log           LogConfig     `yaml:"log"`
+	RetentionDays int            `yaml:"retention_days"`
+	Webhook       WebhookConfig  `yaml:"webhook"`
+	Feishu        FeishuConfig   `yaml:"feishu"`
+	Dingtalk      DingtalkConfig `yaml:"dingtalk"`
+	Agent         AgentConfig    `yaml:"agent"`
+	Log           LogConfig      `yaml:"log"`
 }
 
 // HTTPConfig 是健康检查与指标监听配置。
@@ -92,6 +95,18 @@ type FeishuConfig struct {
 	MentionFreeChats []string `yaml:"mention_free_chats"`
 	// CardActionEnabled 为 true 时卡片带停止按钮，并启用回调入口。
 	CardActionEnabled bool `yaml:"card_action_enabled"`
+}
+
+// DingtalkConfig 是钉钉机器人配置。
+type DingtalkConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	// RequireMention 为 true 时群聊必须 @机器人。
+	RequireMention bool     `yaml:"require_mention"`
+	AllowedUsers   []string `yaml:"allowed_users"`
+	AllowedChats   []string `yaml:"allowed_chats"`
+	// BotName 用于去掉文本开头的 @机器人。
+	BotName string `yaml:"bot_name"`
 }
 
 // AgentConfig 是模型与执行配置。
@@ -161,6 +176,9 @@ func defaults() Config {
 			Domain:         "https://open.feishu.cn",
 			RequireMention: true,
 		},
+		Dingtalk: DingtalkConfig{
+			RequireMention: true,
+		},
 		Agent: AgentConfig{
 			Provider:      "openai",
 			Model:         "gpt-4.1-mini",
@@ -194,6 +212,12 @@ func applyEnv(cfg *Config) {
 	setBool(&cfg.Feishu.RequireMention, "FEISHU_REQUIRE_MENTION")
 	setList(&cfg.Feishu.MentionFreeChats, "FEISHU_MENTION_FREE_CHATS")
 	setBool(&cfg.Feishu.CardActionEnabled, "FEISHU_CARD_ACTION")
+	setStr(&cfg.Dingtalk.ClientID, "DINGTALK_CLIENT_ID")
+	setStr(&cfg.Dingtalk.ClientSecret, "DINGTALK_CLIENT_SECRET")
+	setBool(&cfg.Dingtalk.RequireMention, "DINGTALK_REQUIRE_MENTION")
+	setList(&cfg.Dingtalk.AllowedUsers, "DINGTALK_ALLOWED_USERS")
+	setList(&cfg.Dingtalk.AllowedChats, "DINGTALK_ALLOWED_CHATS")
+	setStr(&cfg.Dingtalk.BotName, "DINGTALK_BOT_NAME")
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
@@ -249,6 +273,13 @@ func (c *Config) Validate() error {
 		}
 		if c.Feishu.Transport == "websocket" && c.Feishu.Domain == "" {
 			return errors.New("feishu.domain 不能为空")
+		}
+	case ChannelDingtalk:
+		if c.Dingtalk.ClientID == "" {
+			return errors.New("dingtalk.client_id 不能为空")
+		}
+		if c.Dingtalk.ClientSecret == "" {
+			return errors.New("dingtalk.client_secret 不能为空")
 		}
 	default:
 		return fmt.Errorf("channel 非法：%s", c.Channel)

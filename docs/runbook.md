@@ -85,6 +85,12 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_DB_URL` | 空 | PostgreSQL 连接串；空则无持久化（会话/消息重启即丢） |
 | `AGENTHUB_MIGRATIONS_DIR` | `migrations` | 迁移目录；启动时按文件名顺序应用 |
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数；0 关闭清理 |
+| `DINGTALK_CLIENT_ID` | 空 | 钉钉应用 Client ID（channel=dingtalk 必填） |
+| `DINGTALK_CLIENT_SECRET` | 空 | 钉钉应用 Client Secret |
+| `DINGTALK_REQUIRE_MENTION` | `true` | 钉钉群聊是否必须 @机器人 |
+| `DINGTALK_ALLOWED_USERS` | 空 | staffId 白名单，空表示不限 |
+| `DINGTALK_ALLOWED_CHATS` | 空 | 会话白名单，空表示不限 |
+| `DINGTALK_BOT_NAME` | 空 | 去掉文本开头的 @机器人 |
 | `AGENTHUB_DB_MAX_CONNS` | `10` | 连接池上限 |
 | `AGENTHUB_DATA_DIR` | `./data` | 附件与产物目录 |
 | `FEISHU_APP_ID` | 必填（feishu 模式） | 应用 ID |

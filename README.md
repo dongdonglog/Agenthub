@@ -119,7 +119,16 @@ go run ./cmd/agentd
 6. 白名单：`FEISHU_ALLOWED_USERS`（留空 = 拒绝所有人）、`FEISHU_ALLOWED_GROUPS`；
    测试群免 @ 把 `openConversationId` 填进 `FEISHU_MENTION_FREE_CHATS`。
 
-详见 [部署指南](docs/deploy.md)。
+### 钉钉（Stream 模式）
+
+1. 钉钉开放平台创建**企业内部应用**，添加机器人；
+2. 消息接收模式选择 **Stream 模式**；
+3. 申请机器人发消息权限（可选：通讯录读取用于展示姓名）；
+4. 把 `Client ID` / `Client Secret` 填进 `.env`，并设置 `AGENTHUB_CHANNEL=dingtalk`；
+5. 可选：`DINGTALK_REQUIRE_MENTION`、`DINGTALK_ALLOWED_USERS`、`DINGTALK_ALLOWED_CHATS`、`DINGTALK_BOT_NAME`。
+
+钉钉回复走会话 `sessionWebhook`（有效期约 1.5 小时），长任务超过有效期会投递失败；
+卡片暂未接入，进度以文本呈现。详见 [部署指南](docs/deploy.md)。
 
 ## 技能
 
@@ -158,7 +167,7 @@ API Key 只显示掩码）。其余配置仍由 `.env` 控制。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `AGENTHUB_CHANNEL` | `off` | `off` 骨架 / `feishu` 接飞书 |
+| `AGENTHUB_CHANNEL` | `off` | `off` 骨架 / `feishu` 飞书 / `dingtalk` 钉钉 |
 | `AGENTHUB_DB_URL` | 空 | 空则内存模式 |
 | `FEISHU_TRANSPORT` | `websocket` | `websocket` / `webhook` |
 | `FEISHU_REQUIRE_MENTION` | `true` | 群聊是否必须 @ |
@@ -168,6 +177,12 @@ API Key 只显示掩码）。其余配置仍由 `.env` 控制。
 | `AGENTHUB_AGENT_VISION_MODEL` | 空 | 图片消息使用的视觉模型 |
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数 |
 | `AGENTHUB_ADMIN_TOKEN` | 空 | 管理台访问令牌 |
+| `DINGTALK_CLIENT_ID` | 空 | 钉钉应用 Client ID |
+| `DINGTALK_CLIENT_SECRET` | 空 | 钉钉应用 Client Secret |
+| `DINGTALK_REQUIRE_MENTION` | `true` | 群聊是否必须 @机器人 |
+| `DINGTALK_ALLOWED_USERS` | 空 | 钉钉 staffId 白名单 |
+| `DINGTALK_ALLOWED_CHATS` | 空 | 会话 ID 白名单 |
+| `DINGTALK_BOT_NAME` | 空 | 用于去掉文本开头的 @机器人 |
 
 完整列表见 [运维手册](docs/runbook.md)。
 

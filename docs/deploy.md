@@ -37,6 +37,29 @@ echo 'POSTGRES_PASSWORD=强密码' >> .env
 docker compose up -d --build
 ```
 
+## 钉钉接入
+
+1. 开放平台创建**企业内部应用**，添加「机器人」；
+2. 机器人消息接收模式选择 **Stream 模式**（无需公网回调）；
+3. 申请权限：机器人发送消息；通讯录读取为可选（用于会话列表显示姓名）；
+4. 在「应用信息」获取 Client ID / Client Secret；
+5. 配置：
+
+```bash
+AGENTHUB_CHANNEL=dingtalk
+DINGTALK_CLIENT_ID=dingxxxxxxxx
+DINGTALK_CLIENT_SECRET=xxxxxxxx
+DINGTALK_REQUIRE_MENTION=true
+DINGTALK_ALLOWED_USERS=staffId1,staffId2   # 可选
+DINGTALK_ALLOWED_CHATS=cidxxxx             # 可选
+DINGTALK_BOT_NAME=助手                      # 可选，去掉 @前缀
+```
+
+验收：私聊机器人发一句「你好」，或群里 @机器人；`/help` 查看命令。
+
+限制：回复使用消息自带的 `sessionWebhook`（约 1.5 小时有效），超过有效期的长任务会投递失败；
+进度卡片未接入，回复为文本。
+
 ## 端口
 
 默认只发布到宿主机回环：
