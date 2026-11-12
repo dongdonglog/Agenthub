@@ -104,6 +104,7 @@ func (s *Scheduler) submit(ctx context.Context, task store.ScheduledTask) error 
 		Chat:       channel.Chat{ID: task.ChatID, Kind: "group"},
 		Text:       task.Prompt,
 		MsgType:    "text",
+		NoReply:    true,
 	})
 	return err
 }

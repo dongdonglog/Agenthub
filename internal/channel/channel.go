@@ -34,16 +34,18 @@ type Attachment struct {
 
 // Inbound 是通道转换后的标准入站消息。
 type Inbound struct {
-	Channel      string
-	Tenant       string
-	ExternalID   string
-	SentAt       time.Time
-	Sender       Sender
-	Chat         Chat
-	Text         string
-	MsgType      string
-	MentionsBot  bool
-	ParentID     string
+	Channel     string
+	Tenant      string
+	ExternalID  string
+	SentAt      time.Time
+	Sender      Sender
+	Chat        Chat
+	Text        string
+	MsgType     string
+	MentionsBot bool
+	ParentID    string
+	// NoReply 为 true 时投递不回挂消息（用于定时任务等没有平台消息 ID 的来源）。
+	NoReply      bool
 	Attachments  []Attachment
 	RawEventType string
 }

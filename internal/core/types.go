@@ -18,6 +18,7 @@ type Message struct {
 	ConversationID string
 	ChatID         string
 	ExternalID     string
+	NoReply        bool
 	SenderOpenID   string
 	Text           string
 	MsgType        string

@@ -305,6 +305,7 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 		Generation:     e.generation(conv),
 		TraceID:        newTraceID(),
 		ExternalID:     in.ExternalID,
+		NoReply:        in.NoReply,
 		SenderOpenID:   in.Sender.OpenID,
 		Text:           in.Text,
 		MsgType:        in.MsgType,

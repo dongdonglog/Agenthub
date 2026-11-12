@@ -798,3 +798,32 @@ func TestDispatchAgingPreventsStarvation(t *testing.T) {
 		t.Fatal("运行未结束")
 	}
 }
+
+func TestScheduledMessageDoesNotReplyToExternalID(t *testing.T) {
+	ch := &captureChannel{}
+	eng := newEngine(t, ch, agent.Echo{})
+	ctx := context.Background()
+	if _, err := eng.Submit(ctx, channel.Inbound{
+		Channel: "cron", Tenant: "cron", ExternalID: "cron_task_1_2",
+		NoReply: true,
+		Chat:    channel.Chat{ID: "oc_test", Kind: "group"},
+		Sender:  channel.Sender{OpenID: "scheduler"},
+		Text:    "定时任务自检",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	if len(ch.sent) == 0 {
+		t.Fatal("没有投递")
+	}
+	if ch.sent[0].ReplyTo != "" {
+		t.Fatalf("定时任务不应回复消息，ReplyTo = %q", ch.sent[0].ReplyTo)
+	}
+	if ch.sent[0].ChatID != "oc_test" {
+		t.Fatalf("ChatID = %s", ch.sent[0].ChatID)
+	}
+}

@@ -64,7 +64,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		handle, err := e.presenter.Open(ctx, Presentation{
 			ConversationID: conv,
 			ChatID:         batch[0].ChatID,
-			ReplyTo:        batch[0].ExternalID,
+			ReplyTo:        replyTarget(batch[0]),
 			RunID:          run.ID,
 			Inputs:         len(batch),
 		})
@@ -164,7 +164,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		RunID:          run.ID,
 		IdempotencyKey: run.ID + ":result",
 		ChatID:         batch[0].ChatID,
-		ReplyTo:        batch[0].ExternalID,
+		ReplyTo:        replyTarget(batch[0]),
 		Text:           text,
 		State:          "pending",
 	}
@@ -264,3 +264,11 @@ func (e *Engine) appendAssistant(conv, runID, text string) {
 
 // maxDeliveryAttempts 是投递重试上限。
 const maxDeliveryAttempts = 3
+
+// replyTarget 返回投递时的回复目标；定时任务没有平台消息 ID，返回空。
+func replyTarget(m *Message) string {
+	if m == nil || m.NoReply {
+		return ""
+	}
+	return m.ExternalID
+}
