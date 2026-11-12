@@ -38,7 +38,7 @@ AgentHub 把入口放进飞书，把过程做成卡片，把配置放进管理�
 - 进度卡片、结果卡片、长文分块、`/status` `/model` `/stop` `/clear` `/reset` `/help`；
 - 技能由部署方自带（Markdown 包），可文件树编辑、ZIP 导入、按 Profile 组合；
 - MCP stdio 工具调用；
-- Profile 绑定会话代，不同群可用不同技能/工具组合；
+- Profile 切换技能/工具组合（部署级，同一部署内技能共享）；
 - 管理台：运行概览、在线/历史会话、Profile、Skill（文件树 + ZIP 导入）、MCP、审计；
 - 运维：健康检查、Prometheus 指标、告警规则、备份/恢复、镜像发布（打 tag 自动构建）。
 
