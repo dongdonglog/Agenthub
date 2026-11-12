@@ -47,6 +47,12 @@ type Engine struct {
 	profileSrc  func() ProfileSelection
 	identities  map[string]Identity
 	events      map[string][]RunEvent
+	// runSem 限制跨会话并发运行数；nil 表示不限制。
+	runSem chan struct{}
+	// rateLimit 是每会话每窗口允许的消息数；0 表示不限制。
+	rateLimit  int
+	rateWindow time.Duration
+	hits       map[string][]time.Time
 	// retryDelay 计算投递重试间隔，默认指数退避。
 	retryDelay func(attempt int) time.Duration
 
@@ -84,6 +90,8 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		generations:        make(map[string]int),
 		profiles:           make(map[string]ProfileSelection),
 		identities:         make(map[string]Identity),
+		hits:               make(map[string][]time.Time),
+		rateWindow:         time.Minute,
 		events:             make(map[string][]RunEvent),
 		maxMessagesPerConv: 100,
 		maxConversations:   200,
@@ -144,6 +152,25 @@ func (e *Engine) SetJournal(j Journal) {
 // Restore 从持久化恢复最近消息与运行。
 //
 // @remarks 重启时处于 processing 的消息重新排队，避免中断后卡住。
+// SetConcurrency 限制跨会话并发运行数；n <= 0 表示不限制。
+func (e *Engine) SetConcurrency(n int) {
+	if n <= 0 {
+		e.runSem = nil
+		return
+	}
+	e.runSem = make(chan struct{}, n)
+}
+
+// SetRateLimit 设置每会话每窗口的消息上限；n <= 0 关闭限流。
+func (e *Engine) SetRateLimit(n int, window time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rateLimit = n
+	if window > 0 {
+		e.rateWindow = window
+	}
+}
+
 // SetProfileSource 设置新会话代绑定配置的来源（通常是当前生效 Profile）。
 func (e *Engine) SetProfileSource(fn func() ProfileSelection) {
 	e.profileSrc = fn
@@ -225,6 +252,10 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 	if _, ok := e.dedupe[dedupeKey]; ok {
 		e.mu.Unlock()
 		return false, nil
+	}
+	if e.rateLimit > 0 && !e.allowLocked(conv, e.now()) {
+		e.mu.Unlock()
+		return false, ErrRateLimited
 	}
 
 	e.seq[conv]++

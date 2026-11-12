@@ -190,6 +190,8 @@ API Key 只显示掩码）。其余配置仍由 `.env` 控制。
 | `AGENTHUB_AGENT_FALLBACK_MODEL` | 空 | 主模型失败兜底 |
 | `AGENTHUB_AGENT_VISION_MODEL` | 空 | 图片消息使用的视觉模型 |
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数 |
+| `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
+| `AGENTHUB_RATE_LIMIT_PER_MIN` | `0` | 每会话每分钟消息上限，0 关闭 |
 | `AGENTHUB_ADMIN_TOKEN` | 空 | 管理台访问令牌 |
 | `DINGTALK_CLIENT_ID` | 空 | 钉钉应用 Client ID |
 | `DINGTALK_CLIENT_SECRET` | 空 | 钉钉应用 Client Secret |

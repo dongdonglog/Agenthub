@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -126,6 +127,12 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 
 	inserted, err := d.engine.Submit(ctx, msg)
 	if err != nil {
+		if errors.Is(err, core.ErrRateLimited) {
+			if d.opts.Client != nil {
+				_, _ = d.opts.Client.SendText(ctx, msg.Chat.ID, msg.ExternalID, "请求太频繁，请稍后再试。")
+			}
+			return nil
+		}
 		return err
 	}
 	if inserted {

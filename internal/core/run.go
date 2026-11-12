@@ -13,7 +13,7 @@ import (
 
 func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	e.mu.Lock()
-	if e.active[conv] != "" {
+	if cur := e.active[conv]; cur != "" && cur != "pending" {
 		e.mu.Unlock()
 		return nil
 	}

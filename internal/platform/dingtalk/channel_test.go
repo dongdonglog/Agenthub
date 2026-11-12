@@ -110,12 +110,12 @@ func TestSendTextUsesSessionWebhook(t *testing.T) {
 		got = body.Text.Content
 	}))
 	defer srv.Close()
-	c.rememberHook("conv-x", srv.URL, time.Now().Add(time.Hour).UnixMilli())
+	c.rememberHook("conv-x", srv.URL, time.Now().Add(time.Hour).UnixMilli(), "张三")
 
 	if _, err := c.SendText(context.Background(), channel.Outbound{ChatID: "conv-x", Text: "结果"}); err != nil {
 		t.Fatal(err)
 	}
-	if got != "结果" {
+	if !strings.HasSuffix(got, "结果") {
 		t.Fatalf("got = %q", got)
 	}
 }

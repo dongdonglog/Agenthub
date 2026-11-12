@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/moying/agenthub/internal/channel"
@@ -89,6 +90,9 @@ type Presenter interface {
 	Update(ctx context.Context, handle, phase, detail string) error
 	Close(ctx context.Context, handle, body string, failed bool) error
 }
+
+// ErrRateLimited 表示会话消息发送过于频繁。
+var ErrRateLimited = errors.New("rate limited")
 
 // Identity 是会话的展示信息。
 type Identity struct {

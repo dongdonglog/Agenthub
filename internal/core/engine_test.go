@@ -642,3 +642,75 @@ func TestSessionInfosDisplayName(t *testing.T) {
 		t.Fatalf("info = %+v", infos[0])
 	}
 }
+
+type concurrentAgent struct {
+	started chan string
+	release chan struct{}
+}
+
+func (a *concurrentAgent) Run(ctx context.Context, in agent.Input) (agent.Output, error) {
+	a.started <- in.ConversationID
+	select {
+	case <-a.release:
+	case <-ctx.Done():
+		return agent.Output{}, ctx.Err()
+	}
+	return agent.Output{Text: "ok"}, nil
+}
+
+func TestDispatchRunsConversationsConcurrently(t *testing.T) {
+	ca := &concurrentAgent{started: make(chan string, 4), release: make(chan struct{})}
+	eng := newEngine(t, &captureChannel{}, ca)
+	eng.SetConcurrency(2)
+	ctx := context.Background()
+
+	for i, conv := range []string{"a", "b"} {
+		if _, err := eng.Submit(ctx, channel.Inbound{
+			Channel: "feishu", Tenant: "t", ExternalID: "e" + conv,
+			Chat:   channel.Chat{ID: "chat-" + conv, Kind: "p2p"},
+			Sender: channel.Sender{OpenID: "u" + conv}, Text: "hi" + conv,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_ = i
+	}
+	eng.Dispatch(ctx)
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case conv := <-ca.started:
+			seen[conv] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("并发未生效，已启动: %v", seen)
+		}
+	}
+	close(ca.release)
+	idle, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !eng.WaitIdle(idle) {
+		t.Fatal("运行未结束")
+	}
+}
+
+func TestRateLimitPerConversation(t *testing.T) {
+	eng := newEngine(t, &captureChannel{}, agent.Echo{})
+	eng.SetRateLimit(1, time.Minute)
+	ctx := context.Background()
+	in := inbound("om_rate_1", "hi")
+	if _, err := eng.Submit(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	in.ExternalID = "om_rate_2"
+	if _, err := eng.Submit(ctx, in); !errors.Is(err, core.ErrRateLimited) {
+		t.Fatalf("第二次应限流，err = %v", err)
+	}
+	// 另一个会话不受影响。
+	other := channel.Inbound{
+		Channel: "feishu", Tenant: "t", ExternalID: "om_rate_3",
+		Chat:   channel.Chat{ID: "chat-other", Kind: "p2p"},
+		Sender: channel.Sender{OpenID: "u-other"}, Text: "hi",
+	}
+	if _, err := eng.Submit(ctx, other); err != nil {
+		t.Fatalf("其他会话不应被限流: %v", err)
+	}
+}

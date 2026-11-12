@@ -166,6 +166,8 @@ func run() int {
 	})
 	runner := newAgent(cfg, skillsDir, tools, profiles, modelHolder, logger)
 	engine := core.New(runner, ch, logger)
+	engine.SetConcurrency(cfg.MaxConcurrentRuns)
+	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
 	engine.SetProfileSource(func() core.ProfileSelection {
 		active := profiles.Active()
 		return core.ProfileSelection{Name: active.Name, Skills: active.Skills, MCPs: active.MCPs}
@@ -573,11 +575,7 @@ func flushLoop(ctx context.Context, engine *core.Engine, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			go func() {
-				if err := engine.Flush(ctx); err != nil {
-					logger.Error("flush failed", "error", err)
-				}
-			}()
+			engine.Dispatch(ctx)
 		}
 	}
 }

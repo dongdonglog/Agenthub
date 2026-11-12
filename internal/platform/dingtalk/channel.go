@@ -43,6 +43,7 @@ type Channel struct {
 type webhook struct {
 	url      string
 	expireAt time.Time
+	userName string
 }
 
 // New 构造钉钉通道。
@@ -107,7 +108,7 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 	}
 
 	conv := "dingtalk:" + data.ConversationId + ":" + sender
-	c.rememberHook(data.ConversationId, data.SessionWebhook, data.SessionWebhookExpiredTime)
+	c.rememberHook(data.ConversationId, data.SessionWebhook, data.SessionWebhookExpiredTime, data.SenderNick)
 	c.engine.SetIdentity(conv, data.ConversationTitle, data.SenderNick)
 
 	if c.handleCommand(ctx, conv, data.ConversationId, text) {
@@ -125,6 +126,10 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 		MsgType:     "text",
 		MentionsBot: data.IsInAtList,
 	}); err != nil {
+		if errors.Is(err, core.ErrRateLimited) {
+			_, _ = c.SendText(ctx, channel.Outbound{ChatID: data.ConversationId, Text: "请求太频繁，请稍后再试。"})
+			return nil, nil
+		}
 		c.log.Error("dingtalk submit failed", "error", err)
 	}
 	return nil, nil
@@ -141,14 +146,18 @@ func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.R
 	if time.Now().After(hook.expireAt.Add(-30 * time.Second)) {
 		return channel.Receipt{}, errors.New("会话 webhook 已过期")
 	}
+	text := out.Text
+	if hook.userName != "" && !strings.HasPrefix(text, "@"+hook.userName) {
+		text = "@" + hook.userName + " " + text
+	}
 	replier := chatbot.NewChatbotReplier()
-	if err := replier.SimpleReplyText(ctx, hook.url, []byte(out.Text)); err != nil {
+	if err := replier.SimpleReplyText(ctx, hook.url, []byte(text)); err != nil {
 		return channel.Receipt{}, err
 	}
 	return channel.Receipt{}, nil
 }
 
-func (c *Channel) rememberHook(convID, url string, expireAtMs int64) {
+func (c *Channel) rememberHook(convID, url string, expireAtMs int64, userName string) {
 	if url == "" {
 		return
 	}
@@ -157,7 +166,7 @@ func (c *Channel) rememberHook(convID, url string, expireAtMs int64) {
 		expire = time.Now().Add(time.Hour)
 	}
 	c.mu.Lock()
-	c.hooks[convID] = webhook{url: url, expireAt: expire}
+	c.hooks[convID] = webhook{url: url, expireAt: expire, userName: userName}
 	c.mu.Unlock()
 }
 

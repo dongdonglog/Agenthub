@@ -35,12 +35,16 @@ type Config struct {
 	DB      DBConfig      `yaml:"db"`
 	Storage StorageConfig `yaml:"storage"`
 	// RetentionDays 是历史数据保留天数；0 表示不清理。
-	RetentionDays int            `yaml:"retention_days"`
-	Webhook       WebhookConfig  `yaml:"webhook"`
-	Feishu        FeishuConfig   `yaml:"feishu"`
-	Dingtalk      DingtalkConfig `yaml:"dingtalk"`
-	Agent         AgentConfig    `yaml:"agent"`
-	Log           LogConfig      `yaml:"log"`
+	RetentionDays int `yaml:"retention_days"`
+	// MaxConcurrentRuns 是跨会话并发运行上限。
+	MaxConcurrentRuns int `yaml:"max_concurrent_runs"`
+	// RateLimitPerMin 是每会话每分钟消息上限；0 表示不限。
+	RateLimitPerMin int            `yaml:"rate_limit_per_min"`
+	Webhook         WebhookConfig  `yaml:"webhook"`
+	Feishu          FeishuConfig   `yaml:"feishu"`
+	Dingtalk        DingtalkConfig `yaml:"dingtalk"`
+	Agent           AgentConfig    `yaml:"agent"`
+	Log             LogConfig      `yaml:"log"`
 }
 
 // HTTPConfig 是健康检查与指标监听配置。
@@ -163,14 +167,15 @@ func Load(path string) (*Config, error) {
 
 func defaults() Config {
 	return Config{
-		Env:           "development",
-		Channel:       ChannelOff,
-		HTTP:          HTTPConfig{Addr: "127.0.0.1:8787"},
-		Admin:         AdminConfig{Addr: "127.0.0.1:8788"},
-		DB:            DBConfig{MaxConns: 10},
-		Storage:       StorageConfig{Dir: "./data"},
-		RetentionDays: 90,
-		Webhook:       WebhookConfig{Addr: "127.0.0.1:8789"},
+		Env:               "development",
+		Channel:           ChannelOff,
+		HTTP:              HTTPConfig{Addr: "127.0.0.1:8787"},
+		Admin:             AdminConfig{Addr: "127.0.0.1:8788"},
+		DB:                DBConfig{MaxConns: 10},
+		Storage:           StorageConfig{Dir: "./data"},
+		RetentionDays:     90,
+		MaxConcurrentRuns: 4,
+		Webhook:           WebhookConfig{Addr: "127.0.0.1:8789"},
 		Feishu: FeishuConfig{
 			Transport:      "websocket",
 			Domain:         "https://open.feishu.cn",
@@ -199,6 +204,8 @@ func applyEnv(cfg *Config) {
 	setInt32(&cfg.DB.MaxConns, "AGENTHUB_DB_MAX_CONNS")
 	setStr(&cfg.Storage.Dir, "AGENTHUB_DATA_DIR")
 	setInt(&cfg.RetentionDays, "AGENTHUB_RETENTION_DAYS")
+	setInt(&cfg.MaxConcurrentRuns, "AGENTHUB_MAX_CONCURRENT_RUNS")
+	setInt(&cfg.RateLimitPerMin, "AGENTHUB_RATE_LIMIT_PER_MIN")
 	setStr(&cfg.Webhook.Addr, "AGENTHUB_WEBHOOK_ADDR")
 	setStr(&cfg.Feishu.Transport, "FEISHU_TRANSPORT")
 	setStr(&cfg.Feishu.Domain, "FEISHU_DOMAIN")
@@ -283,6 +290,12 @@ func (c *Config) Validate() error {
 		}
 	default:
 		return fmt.Errorf("channel 非法：%s", c.Channel)
+	}
+	if c.MaxConcurrentRuns <= 0 {
+		c.MaxConcurrentRuns = 4
+	}
+	if c.RateLimitPerMin < 0 {
+		return errors.New("rate_limit_per_min 不能为负数")
 	}
 	if c.RetentionDays < 0 {
 		return errors.New("retention_days 不能为负数")
