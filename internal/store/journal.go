@@ -129,12 +129,43 @@ func defaultRole(role string) string {
 	return role
 }
 
+// SavePriority 记录会话调度优先级；priority 为 nil 表示清除。
+func (j *Journal) SavePriority(ctx context.Context, conv string, priority int) error {
+	_, err := j.pool.Exec(ctx, `
+		INSERT INTO conversation_state (id, chat_id, sender, generation, priority)
+		VALUES ($1, split_part($1, ':', 2), split_part($1, ':', 3), 1, $2)
+		ON CONFLICT (id) DO UPDATE SET priority = EXCLUDED.priority`,
+		conv, priority)
+	return err
+}
+
+// LoadPriorities 读取显式设置过的会话优先级。
+func (j *Journal) LoadPriorities(ctx context.Context, limit int) (map[string]int, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT id, priority FROM conversation_state
+		WHERE priority IS NOT NULL LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]int)
+	for rows.Next() {
+		var conv string
+		var priority int
+		if err := rows.Scan(&conv, &priority); err != nil {
+			return nil, err
+		}
+		out[conv] = priority
+	}
+	return out, rows.Err()
+}
+
 // SaveIdentity 记录会话的群名与用户名。
 func (j *Journal) SaveIdentity(ctx context.Context, conv, chatName, userName string) error {
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO conversation_state (conversation_id, generation, chat_name, user_name)
-		VALUES ($1, 1, $2, $3)
-		ON CONFLICT (conversation_id) DO UPDATE SET
+		INSERT INTO conversation_state (id, chat_id, sender, generation, chat_name, user_name)
+		VALUES ($1, split_part($1, ':', 2), split_part($1, ':', 3), 1, $2, $3)
+		ON CONFLICT (id) DO UPDATE SET
 			chat_name = EXCLUDED.chat_name,
 			user_name = EXCLUDED.user_name`,
 		conv, chatName, userName)
@@ -144,7 +175,7 @@ func (j *Journal) SaveIdentity(ctx context.Context, conv, chatName, userName str
 // LoadIdentities 读取会话展示名。
 func (j *Journal) LoadIdentities(ctx context.Context, limit int) (map[string][2]string, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT conversation_id, chat_name, user_name FROM conversation_state
+		SELECT id, chat_name, user_name FROM conversation_state
 		WHERE chat_name <> '' OR user_name <> '' LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

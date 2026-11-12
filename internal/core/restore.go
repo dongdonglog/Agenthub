@@ -59,6 +59,12 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 	}
 
+	if priorities, err := e.journal.LoadPriorities(ctx, 5000); err == nil {
+		for conv, p := range priorities {
+			e.priority[conv] = p
+		}
+	}
+
 	// 启动补偿：上次未送达的结果继续投递。
 	if pending, err := e.journal.LoadPendingDeliveries(ctx, 100); err == nil {
 		for _, d := range pending {

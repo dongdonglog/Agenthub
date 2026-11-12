@@ -445,6 +445,7 @@ func (s *Server) handleSession(rw http.ResponseWriter, r *http.Request) {
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"id":       id,
 		"profile":  s.engine.ProfileOf(id),
+		"priority": priorityResponse(s.engine, id),
 		"messages": messages,
 		"runs":     runs,
 	})
@@ -464,7 +465,10 @@ func (s *Server) handleSessionPriority(rw http.ResponseWriter, r *http.Request) 
 		writeError(rw, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.engine.SetPriority(id, body.Priority)
+	if err := s.engine.SetPriority(r.Context(), id, body.Priority); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
 	s.audit(r, "session.priority", id, fmt.Sprintf("%d", body.Priority))
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "priority": body.Priority})
 }
@@ -817,6 +821,13 @@ func (s *Server) handleModel(rw http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "model.update", next.Model, "")
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "has_key": next.APIKey != ""})
+}
+
+func priorityResponse(e *core.Engine, id string) any {
+	if p, ok := e.PriorityOf(id); ok {
+		return p
+	}
+	return nil
 }
 
 func maskKey(key string) string {

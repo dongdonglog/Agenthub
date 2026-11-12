@@ -130,6 +130,8 @@ type Journal interface {
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
 	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
 	SaveIdentity(ctx context.Context, conv, chatName, userName string) error
+	SavePriority(ctx context.Context, conv string, priority int) error
+	LoadPriorities(ctx context.Context, limit int) (map[string]int, error)
 	LoadIdentities(ctx context.Context, limit int) (map[string][2]string, error)
 	SaveProfileBinding(ctx context.Context, conv string, generation int, p ProfileSelection) error
 	LoadProfileBindings(ctx context.Context, limit int) (map[string]ProfileSelection, error)

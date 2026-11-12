@@ -204,7 +204,12 @@ async function renderSession(id) {
     profileSelect.append(el('option', { value: p.name }, [p.name]));
   }
   if (data.profile) profileSelect.value = data.profile;
-  const priorityInput = el('input', { type: 'number', value: '5', style: 'width:100px' });
+  const priorityInput = el('input', {
+    type: 'number',
+    value: data.priority ?? '',
+    placeholder: '默认',
+    style: 'width:100px',
+  });
   const savePriority = el('button', { className: 'ghost' }, ['设置优先级']);
   savePriority.addEventListener('click', async () => {
     try {

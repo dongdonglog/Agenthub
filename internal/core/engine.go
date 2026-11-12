@@ -154,11 +154,23 @@ func (e *Engine) SetJournal(j Journal) {
 // Restore 从持久化恢复最近消息与运行。
 //
 // @remarks 重启时处于 processing 的消息重新排队，避免中断后卡住。
-// SetPriority 覆盖会话的调度优先级（数值越大越优先）。
-func (e *Engine) SetPriority(conv string, p int) {
+// SetPriority 覆盖会话的调度优先级并持久化（数值越大越优先）。
+func (e *Engine) SetPriority(ctx context.Context, conv string, p int) error {
+	e.mu.Lock()
+	e.priority[conv] = p
+	e.mu.Unlock()
+	if e.journal != nil {
+		return e.journal.SavePriority(ctx, conv, p)
+	}
+	return nil
+}
+
+// PriorityOf 返回会话已显式设置的优先级。
+func (e *Engine) PriorityOf(conv string) (int, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.priority[conv] = p
+	p, ok := e.priority[conv]
+	return p, ok
 }
 
 // SetNow 替换时钟，供测试使用。
