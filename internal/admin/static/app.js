@@ -644,9 +644,10 @@ async function renderProfiles() {
 
 async function renderTasks() {
   const data = await api('/tasks');
+  const items = data.items || [];
   const create = el('button', {}, ['新建定时任务']);
   create.addEventListener('click', () => { location.hash = '#/tasks/new'; });
-  const rows = data.items.map((t) => {
+  const rows = items.map((t) => {
     const name = el('div', { className: 'strong' }, [t.name]);
     name.dataset.id = t.id;
     return [
@@ -736,11 +737,12 @@ async function renderTaskDetail(id) {
 
 async function renderAudits() {
   const data = await api('/audits');
-  if (!data.items.length) {
+  const items = data.items || [];
+  if (!items.length) {
     content.replaceChildren(el('h2', {}, ['审计']), empty('📜', '还没有审计记录。修改技能、MCP 或 Profile 后会记录在这里。'));
     return;
   }
-  const rows = data.items.map((a) => [
+  const rows = items.map((a) => [
     new Date(a.created_at).toLocaleString(), a.actor || '—', a.action, a.target, a.detail || '',
   ]);
   content.replaceChildren(

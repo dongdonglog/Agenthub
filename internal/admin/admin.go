@@ -473,6 +473,9 @@ func (s *Server) handleTasks(rw http.ResponseWriter, r *http.Request) {
 			writeError(rw, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if items == nil {
+			items = []store.ScheduledTask{}
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 		return
 	}

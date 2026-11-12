@@ -31,7 +31,7 @@ func (j *Journal) ListTasks(ctx context.Context) ([]ScheduledTask, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []ScheduledTask
+	out := make([]ScheduledTask, 0)
 	for rows.Next() {
 		var t ScheduledTask
 		if err := rows.Scan(&t.ID, &t.Name, &t.Cron, &t.Timezone, &t.ChatID, &t.Channel,
@@ -94,7 +94,7 @@ func (j *Journal) ClaimDue(ctx context.Context, now time.Time) ([]ScheduledTask,
 		return nil, err
 	}
 	defer rows.Close()
-	var out []ScheduledTask
+	out := make([]ScheduledTask, 0)
 	for rows.Next() {
 		var t ScheduledTask
 		if err := rows.Scan(&t.ID, &t.Name, &t.Cron, &t.Timezone, &t.ChatID, &t.Channel, &t.Prompt, &t.Enabled); err != nil {
