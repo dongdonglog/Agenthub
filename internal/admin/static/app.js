@@ -121,6 +121,7 @@ async function render() {
 
 async function renderOverview(data) {
   if (!data) data = await api('/overview');
+  const queue = await api('/queue').catch(() => ({ items: [] }));
 
   const testInput = el('textarea', { placeholder: '输入一句话，直接用当前模型试跑（会带上技能）', style: 'min-height:90px' });
   const result = el('div', { className: 'result', style: 'display:none' });
@@ -157,6 +158,12 @@ async function renderOverview(data) {
       el('div', { className: 'head' }, [el('b', {}, ['模型']), el('span', { className: 'muted' }, [`Profile：${data.active_profile || '未指定'} · `, el('a', { href: '#/settings' }, ['去配置'])])]),
       el('div', { className: 'muted' }, data.model.echo ? '未配置 API Key，当前为回显模式' : `${data.model.model} · ${data.model.base_url}`),
     ]),
+    queue.items.length ? el('div', { className: 'panel' }, [
+      el('div', { className: 'head' }, [el('b', {}, ['调度队列']), el('span', { className: 'muted' }, ['按有效优先级排序（含等待老化）'])]),
+      table(['会话', '排队', '基础优先级', '有效优先级'], queue.items.slice(0, 8).map((q) => [
+        q.conversation_id, q.queued, q.priority, q.effective,
+      ])),
+    ]) : '',
     el('div', { className: 'panel' }, [
       el('div', { className: 'head' }, [el('b', {}, ['在线试跑']), el('span', { className: 'muted' }, ['验证模型与技能是否生效'])]),
       el('div', { className: 'form' }, [testInput, el('div', { className: 'actions' }, [runBtn])]),
@@ -197,6 +204,18 @@ async function renderSession(id) {
     profileSelect.append(el('option', { value: p.name }, [p.name]));
   }
   if (data.profile) profileSelect.value = data.profile;
+  const priorityInput = el('input', { type: 'number', value: '5', style: 'width:100px' });
+  const savePriority = el('button', { className: 'ghost' }, ['设置优先级']);
+  savePriority.addEventListener('click', async () => {
+    try {
+      await api(`/sessions/${encodeURIComponent(id)}/priority`, {
+        method: 'PUT',
+        body: JSON.stringify({ priority: Number(priorityInput.value) || 0 }),
+      });
+      toast('已更新优先级');
+    } catch (err) { toast(err.message, true); }
+  });
+
   const applyProfile = el('button', {}, ['应用 Profile']);
   applyProfile.addEventListener('click', async () => {
     try {
@@ -214,7 +233,7 @@ async function renderSession(id) {
     el('p', { className: 'lede' }, [id, data.profile ? ` · Profile：${data.profile}` : '']),
     el('div', { className: 'panel' }, [
       el('div', { className: 'head' }, [el('b', {}, ['配置档案']), el('span', { className: 'muted' }, ['只影响当前会话代'])]),
-      el('div', { className: 'actions' }, [profileSelect, applyProfile]),
+      el('div', { className: 'actions' }, [profileSelect, applyProfile, priorityInput, savePriority]),
     ]),
     el('h3', {}, ['消息']),
     msgRows.length ? table(['ID', '状态', '内容'], msgRows) : empty('📭', '没有消息'),

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -81,6 +82,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/sessions", s.handleSessions)
 	mux.HandleFunc("GET /admin/api/v1/sessions/{id}", s.handleSession)
 	mux.HandleFunc("PUT /admin/api/v1/sessions/{id}/profile", s.handleSessionProfile)
+	mux.HandleFunc("GET /admin/api/v1/queue", s.handleQueue)
+	mux.HandleFunc("PUT /admin/api/v1/sessions/{id}/priority", s.handleSessionPriority)
 	mux.HandleFunc("GET /admin/api/v1/runs", s.handleRuns)
 	mux.HandleFunc("GET /admin/api/v1/runs/{id}", s.handleRunDetail)
 
@@ -445,6 +448,25 @@ func (s *Server) handleSession(rw http.ResponseWriter, r *http.Request) {
 		"messages": messages,
 		"runs":     runs,
 	})
+}
+
+func (s *Server) handleQueue(rw http.ResponseWriter, _ *http.Request) {
+	items := s.engine.QueueSnapshot()
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleSessionPriority(rw http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Priority int `json:"priority"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.engine.SetPriority(id, body.Priority)
+	s.audit(r, "session.priority", id, fmt.Sprintf("%d", body.Priority))
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "priority": body.Priority})
 }
 
 func (s *Server) handleSessionProfile(rw http.ResponseWriter, r *http.Request) {

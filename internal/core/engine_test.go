@@ -714,3 +714,87 @@ func TestRateLimitPerConversation(t *testing.T) {
 		t.Fatalf("其他会话不应被限流: %v", err)
 	}
 }
+
+func TestDispatchPriorityAndFIFO(t *testing.T) {
+	ca := &concurrentAgent{started: make(chan string, 8), release: make(chan struct{})}
+	eng := newEngine(t, &captureChannel{}, ca)
+	eng.SetConcurrency(1)
+	ctx := context.Background()
+
+	submit := func(tenant, chat, user, kind, ext string) {
+		t.Helper()
+		if _, err := eng.Submit(ctx, channel.Inbound{
+			Channel: "feishu", Tenant: tenant, ExternalID: ext,
+			Chat:   channel.Chat{ID: chat, Kind: kind},
+			Sender: channel.Sender{OpenID: user}, Text: "hi",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 先来一个群聊（优先级 5），再来一个私聊（优先级 10）。
+	submit("t", "chat-group", "u1", "group", "g1")
+	submit("t", "chat-p2p", "u2", "p2p", "p1")
+	eng.Dispatch(ctx)
+	select {
+	case conv := <-ca.started:
+		if !strings.Contains(conv, "chat-p2p") {
+			t.Fatalf("应优先调度私聊，实际 %s", conv)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("没有运行启动")
+	}
+	close(ca.release)
+	idle, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !eng.WaitIdle(idle) {
+		t.Fatal("运行未结束")
+	}
+}
+
+func TestDispatchAgingPreventsStarvation(t *testing.T) {
+	ca := &concurrentAgent{started: make(chan string, 8), release: make(chan struct{})}
+	eng := newEngine(t, &captureChannel{}, ca)
+	eng.SetConcurrency(1)
+	ctx := context.Background()
+	base := time.Now()
+	eng.SetNow(func() time.Time { return base })
+
+	if _, err := eng.Submit(ctx, channel.Inbound{
+		Channel: "feishu", Tenant: "t", ExternalID: "old-group",
+		Chat:   channel.Chat{ID: "old-group", Kind: "group"},
+		Sender: channel.Sender{OpenID: "u1"}, Text: "排队很久的群消息",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 10 分钟后来了一个私聊：老化让旧群消息的有效优先级更高。
+	eng.SetNow(func() time.Time { return base.Add(10 * time.Minute) })
+	if _, err := eng.Submit(ctx, channel.Inbound{
+		Channel: "feishu", Tenant: "t", ExternalID: "new-p2p",
+		Chat:   channel.Chat{ID: "new-p2p", Kind: "p2p"},
+		Sender: channel.Sender{OpenID: "u2"}, Text: "新私聊",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items := eng.QueueSnapshot()
+	if len(items) != 2 || items[0].ConversationID != "t:old-group:u1" {
+		t.Fatalf("老化后应优先旧群消息: %+v", items)
+	}
+	eng.Dispatch(ctx)
+	select {
+	case conv := <-ca.started:
+		if conv != "t:old-group:u1" {
+			t.Fatalf("应调度等待更久的会话，实际 %s", conv)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("没有运行启动")
+	}
+	close(ca.release)
+	idle, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !eng.WaitIdle(idle) {
+		t.Fatal("运行未结束")
+	}
+}

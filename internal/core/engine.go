@@ -46,6 +46,7 @@ type Engine struct {
 	profiles    map[string]ProfileSelection
 	profileSrc  func() ProfileSelection
 	identities  map[string]Identity
+	priority    map[string]int
 	events      map[string][]RunEvent
 	// runSem 限制跨会话并发运行数；nil 表示不限制。
 	runSem chan struct{}
@@ -90,6 +91,7 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		generations:        make(map[string]int),
 		profiles:           make(map[string]ProfileSelection),
 		identities:         make(map[string]Identity),
+		priority:           make(map[string]int),
 		hits:               make(map[string][]time.Time),
 		rateWindow:         time.Minute,
 		events:             make(map[string][]RunEvent),
@@ -152,6 +154,22 @@ func (e *Engine) SetJournal(j Journal) {
 // Restore 从持久化恢复最近消息与运行。
 //
 // @remarks 重启时处于 processing 的消息重新排队，避免中断后卡住。
+// SetPriority 覆盖会话的调度优先级（数值越大越优先）。
+func (e *Engine) SetPriority(conv string, p int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.priority[conv] = p
+}
+
+// SetNow 替换时钟，供测试使用。
+func (e *Engine) SetNow(fn func() time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if fn != nil {
+		e.now = fn
+	}
+}
+
 // SetConcurrency 限制跨会话并发运行数；n <= 0 表示不限制。
 func (e *Engine) SetConcurrency(n int) {
 	if n <= 0 {
@@ -252,6 +270,14 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 	if _, ok := e.dedupe[dedupeKey]; ok {
 		e.mu.Unlock()
 		return false, nil
+	}
+	if _, ok := e.priority[conv]; !ok {
+		switch in.Chat.Kind {
+		case "p2p":
+			e.priority[conv] = 10
+		default:
+			e.priority[conv] = 5
+		}
 	}
 	if e.rateLimit > 0 && !e.allowLocked(conv, e.now()) {
 		e.mu.Unlock()

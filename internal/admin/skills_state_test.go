@@ -413,3 +413,34 @@ func TestModelSettingsStoreRoundTrip(t *testing.T) {
 		t.Fatalf("out = %+v", out)
 	}
 }
+
+func TestQueueAndPriorityAPI(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	engine := core.New(agent.Echo{}, nil, logger)
+	ctx := context.Background()
+	in := channel.Inbound{
+		Channel: "feishu", Tenant: "t", ExternalID: "q1",
+		Chat:   channel.Chat{ID: "c1", Kind: "group"},
+		Sender: channel.Sender{OpenID: "u1"}, Text: "排队消息",
+	}
+	if _, err := engine.Submit(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Storage: config.StorageConfig{Dir: dir}}
+	h := admin.New(cfg, engine, st, admin.Options{}, logger).Handler()
+
+	rec := do(t, h, http.MethodGet, "/admin/api/v1/queue", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"queued":1`) {
+		t.Fatalf("queue = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPut, "/admin/api/v1/sessions/t:c1:u1/priority", `{"priority":99}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("priority = %d %s", rec.Code, rec.Body.String())
+	}
+	items := engine.QueueSnapshot()
+	if len(items) != 1 || items[0].Priority != 99 {
+		t.Fatalf("items = %+v", items)
+	}
+}
