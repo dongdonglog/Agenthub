@@ -47,19 +47,28 @@
 
 ```mermaid
 flowchart LR
-    FS[飞书] --> C[通道适配<br/>长连接 · 解析 · 策略]
-    DT[钉钉] --> C
-    C --> E[Engine<br/>去重 · 批次 · 会话代]
-    E --> A[Agent<br/>模型 · 技能 · MCP 工具]
-    A --> E
-    E --> P[Presenter<br/>进度卡片（飞书）]
-    E --> O[Outbox<br/>重试 · 补偿]
-    O --> FS
-    O --> DT
+    subgraph IN[接入]
+      direction TB
+      FS[飞书<br/>长连接 / Webhook]
+      DT[钉钉<br/>Stream]
+    end
+    FS --> AD[通道适配<br/>解析 · 策略 · 附件]
+    DT --> AD
+    AD --> E[Engine<br/>去重 · 批次 · 会话代]
+    E <--> A[Agent<br/>模型 · 技能 · MCP 工具]
     E <--> DB[(PostgreSQL)]
     A <--> SK[(data/skills)]
     A <--> MCP[MCP stdio]
+    E --> O[Outbox<br/>重试 · 补偿]
+    O --> FR[飞书回复<br/>卡片 / 文本]
+    O --> DR[钉钉回复<br/>文本]
 ```
+
+两条链路各自独立：
+
+- **入站**：飞书长连接 / 钉钉 Stream → 通道适配（解析、@ 判断、白名单、附件）→ Engine；
+- **出站**：Outbox → 回到消息来源通道（飞书卡片或文本，钉钉文本）。
+
 
 一次运行：
 
