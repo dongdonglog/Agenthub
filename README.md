@@ -1,6 +1,6 @@
 # AgentHub
 
-**飞书里的团队 AI 同事：能查、能做、有过程、可治理。**
+**飞书 / 钉钉里的团队 AI 同事：能查、能做、有过程、可治理。**
 
 把「描述问题 → 补材料 → 要结论 → 交付文件」做成一条可追踪、可复用、可治理的对话服务，
 而不是又一个网页聊天框。
@@ -18,7 +18,7 @@
 
 | 断点 | 常见表现 | AgentHub 的做法 |
 |---|---|---|
-| **进不了工作流** | 要开网页、复制粘贴，同事不用 | 入口就在飞书群/私聊，@ 一下就开始 |
+| **进不了工作流** | 要开网页、复制粘贴，同事不用 | 入口就在飞书/钉钉群或私聊，@ 一下就开始 |
 | **看不到过程** | 只有一个转圈，出错不知道卡哪 | 进度卡片 + 阶段事件，运行详情可回放 |
 | **没法治理** | 技能、工具、模型散在配置文件里 | 管理台统一管理，改动留审计，配置按会话代生效 |
 
@@ -26,7 +26,7 @@
 
 ## 它能做什么
 
-- **在群里直接干活**：@机器人 或免 @ 群里直接说，支持引用消息补充上下文；
+- **在群里直接干活**：飞书 / 钉钉，@机器人 或免 @ 群里直接说，支持引用消息补充上下文；
 - **带着技能回答**：把运维手册、发版流程写成 Markdown 技能，回答时自动遵循；
 - **调用真实工具**：MCP stdio 工具（时间、部署脚本、内部系统）可被模型按需调用；
 - **看图、看文件**：截图交给视觉模型，附件落盘后可由模型读取；
@@ -47,16 +47,17 @@
 
 ```mermaid
 flowchart LR
-    FS[飞书] -->|长连接事件| CH[platform/feishu]
-    CH --> D[Dispatcher<br/>解析 · 策略 · 附件]
-    D --> E[Engine<br/>去重 · 批次 · 会话代]
+    FS[飞书] --> C[通道适配<br/>长连接 · 解析 · 策略]
+    DT[钉钉] --> C
+    C --> E[Engine<br/>去重 · 批次 · 会话代]
     E --> A[Agent<br/>模型 · 技能 · MCP 工具]
     A --> E
-    E --> P[Presenter<br/>进度卡片]
+    E --> P[Presenter<br/>进度卡片（飞书）]
     E --> O[Outbox<br/>重试 · 补偿]
     O --> FS
+    O --> DT
     E <--> DB[(PostgreSQL)]
-    A <--> SK[skills/]
+    A <--> SK[(data/skills)]
     A <--> MCP[MCP stdio]
 ```
 
@@ -81,10 +82,12 @@ flowchart LR
 
 ```bash
 cp .env.example .env
-# 必填：FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BOT_OPEN_ID / POSTGRES_PASSWORD
+# 飞书：FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BOT_OPEN_ID
+# 钉钉：AGENTHUB_CHANNEL=dingtalk + DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET
+# 都要：POSTGRES_PASSWORD
 
-AGENTHUB_TAG=0.1.1 docker compose pull
-AGENTHUB_TAG=0.1.1 docker compose up -d
+AGENTHUB_TAG=0.1.2 docker compose pull
+AGENTHUB_TAG=0.1.2 docker compose up -d
 ```
 
 镜像 `donglog/agenthub` 支持 `linux/amd64` 与 `linux/arm64`，打 tag 自动构建发布。
@@ -108,7 +111,9 @@ cp .env.example .env   # 不填数据库则为内存模式，重启丢数据
 go run ./cmd/agentd
 ```
 
-## 接入飞书
+## 接入
+
+### 飞书
 
 1. 开放平台创建**企业自建应用**，添加「机器人」能力；
 2. 事件订阅选 **长连接接收**，订阅 `im.message.receive_v1`；
@@ -149,7 +154,7 @@ go run ./cmd/agentd
 | 页面 | 内容 |
 |---|---|
 | 运行概览 | 通道状态、模型、计数、在线试跑 |
-| 在线会话 | 显示飞书群名/发送人（自动解析），分页；进入详情可重绑 Profile |
+| 在线会话 | 显示群名/发送人（飞书与钉钉均自动解析），分页；进入详情可重绑 Profile |
 | 历史会话 | 按会话代聚合，可点进消息详情 |
 | Profile | 技能/MCP 组合档案，应用后影响新会话代 |
 | Skill | 分页列表（状态/文件数/大小/可执行/引用）；编辑进入独立页面，支持文件树与 ZIP 导入 |
@@ -196,7 +201,7 @@ curl -s 127.0.0.1:8787/healthz
 curl -s 127.0.0.1:8787/metrics | grep agenthub_
 ```
 
-- 指标：`agenthub_health_check{check="db"|"feishu"}`、运行/投递/消息计数；
+- 指标：`agenthub_health_check{check="db"|"feishu"|"dingtalk"}`、运行/投递/消息计数；
 - 告警：`deploy/prometheus/alerts.yml`（不可达、飞书断开、运行/投递失败、调用量异常）；
 - 发版：`git tag v1.2.3 && git push origin v1.2.3`，Actions 跑测试后构建双架构镜像。
 
@@ -211,13 +216,15 @@ AGENTHUB_TEST_DATABASE_URL='postgres://.../agenthub_test?sslmode=disable' \
   go test -p 1 ./internal/core ./internal/store
 ```
 
-120+ 用例覆盖批次、去重、取消竞态、投递重试、重启恢复、卡片、附件、MCP、技能、管理台。
+132 个用例覆盖批次、去重、取消竞态、投递重试、重启恢复、卡片、附件、MCP、技能、管理台、
+飞书与钉钉接入。
 
 ## 目录
 
 ```
 cmd/agentd/                入口与装配
-internal/platform/feishu/  长连接、事件、卡片、附件
+internal/platform/feishu/  飞书长连接、事件、卡片、附件
+internal/platform/dingtalk/ 钉钉 Stream、命令、会话回复
 internal/core/             受理、批次、会话代、投递、事件
 internal/agent/            模型、技能、工具、视觉
 internal/mcp/              MCP stdio 客户端
@@ -232,8 +239,9 @@ docs/                      PRD、架构、部署、运维、路线图
 
 ## 边界
 
-- **单实例**：飞书长连接是集群模式，目前一个应用只跑一个实例（多实例分片在路线图里）；
+- **单实例**：飞书/钉钉长连接都是集群模式，目前一个应用只跑一个实例（多实例分片在路线图里）；
 - **卡片停止按钮**需要飞书能访问 `/feishu/card`，没有公网入口时用 `/stop`；
+- **钉钉**回复走 `sessionWebhook`（约 1.5 小时有效），超长任务可能投递失败；钉钉暂未接入卡片与附件下载；
 - **技能全量注入**：技能很多时需要改为检索式加载，当前按 64KB 预算截断；
 - **管理台**没有内建用户体系，建议只在内网或网关后暴露。
 
