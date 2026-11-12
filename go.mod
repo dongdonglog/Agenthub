@@ -6,6 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/larksuite/oapi-sdk-go/v3 v3.12.2
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
+	github.com/robfig/cron/v3 v3.0.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 

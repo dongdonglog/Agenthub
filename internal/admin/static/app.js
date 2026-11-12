@@ -111,6 +111,7 @@ async function render() {
     if (page === 'history') return rest[0] ? await renderHistoryDetail(decodeURIComponent(rest[0]), rest[1]) : await renderHistory(Number(rest[1]) || 1);
     if (page === 'profiles') return await renderProfiles();
     if (page === 'audits') return await renderAudits();
+    if (page === 'tasks') return rest[0] ? await renderTaskDetail(decodeURIComponent(rest[0])) : await renderTasks();
     if (page === 'mcps') return rest[0] ? await renderMCPDetail(decodeURIComponent(rest[0])) : await renderMCPs(Number(rest[1]) || 1);
     if (page === 'settings') return await renderSettings();
     content.replaceChildren(empty('🧭', '页面不存在'));
@@ -637,6 +638,98 @@ async function renderProfiles() {
       el('label', {}, ['技能（逗号分隔）', skillsInput]),
       el('label', {}, ['MCP（逗号分隔）', mcpInput]),
       el('div', { className: 'actions' }, [save, del]),
+    ]),
+  );
+}
+
+async function renderTasks() {
+  const data = await api('/tasks');
+  const create = el('button', {}, ['新建定时任务']);
+  create.addEventListener('click', () => { location.hash = '#/tasks/new'; });
+  const rows = data.items.map((t) => {
+    const name = el('div', { className: 'strong' }, [t.name]);
+    name.dataset.id = t.id;
+    return [
+      name, t.cron, t.timezone, t.chat_id,
+      t.next_run_at ? new Date(t.next_run_at).toLocaleString() : '—',
+      t.last_status || '—',
+      t.enabled ? badge('启用', 'ok') : badge('停用'),
+    ];
+  });
+  content.replaceChildren(
+    el('h2', {}, ['定时任务']),
+    el('p', { className: 'lede' }, ['按 cron 触发，把 prompt 作为消息投递到指定会话；结果走正常回复链路。']),
+    el('div', { className: 'actions' }, [create]),
+    rows.length ? table(['名称', 'cron', '时区', '会话', '下次执行', '上次状态', '状态'], rows, (row) => {
+      location.hash = `#/tasks/${encodeURIComponent(row[0].dataset.id)}`;
+    }) : empty('⏰', '还没有定时任务。'),
+  );
+}
+
+async function renderTaskDetail(id) {
+  let task = { name: '', cron: '0 9 * * *', timezone: 'Asia/Shanghai', chat_id: '', channel: 'feishu', prompt: '', enabled: true };
+  if (id !== 'new') {
+    task = await api(`/tasks/${encodeURIComponent(id)}`);
+  }
+  const name = el('input', { value: task.name, placeholder: '例如 每日告警汇总' });
+  const cronExpr = el('input', { value: task.cron, placeholder: '0 9 * * *' });
+  const timezone = el('input', { value: task.timezone || 'Asia/Shanghai' });
+  const chatID = el('input', { value: task.chat_id, placeholder: '飞书 oc_xxx / 钉钉 cidxxx' });
+  const channelSel = el('select');
+  channelSel.append(el('option', { value: 'feishu' }, ['飞书']), el('option', { value: 'dingtalk' }, ['钉钉']));
+  channelSel.value = task.channel || 'feishu';
+  const prompt = el('textarea', { rows: '6', placeholder: '触发时发送给机器人的内容，例如：汇总昨天所有 P1 告警' });
+  prompt.value = task.prompt || '';
+  const enabled = el('input', { type: 'checkbox', checked: task.enabled !== false });
+
+  const save = el('button', {}, ['保存']);
+  save.addEventListener('click', async () => {
+    const body = JSON.stringify({
+      name: name.value.trim(), cron: cronExpr.value.trim(), timezone: timezone.value.trim(),
+      chat_id: chatID.value.trim(), channel: channelSel.value,
+      prompt: prompt.value.trim(), enabled: enabled.checked,
+    });
+    try {
+      if (id === 'new') {
+        await api('/tasks', { method: 'POST', body });
+        location.hash = '#/tasks';
+      } else {
+        await api(`/tasks/${encodeURIComponent(id)}`, { method: 'PUT', body });
+        toast('已保存');
+      }
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const runNow = el('button', { className: 'ghost' }, ['立即运行']);
+  runNow.addEventListener('click', async () => {
+    if (id === 'new') return toast('先保存', true);
+    try {
+      await api(`/tasks/${encodeURIComponent(id)}/run`, { method: 'POST' });
+      toast('已触发');
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const del = el('button', { className: 'danger' }, ['删除']);
+  del.addEventListener('click', async () => {
+    if (id === 'new' || !confirm('删除该任务？')) return;
+    try {
+      await api(`/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      location.hash = '#/tasks';
+    } catch (err) { toast(err.message, true); }
+  });
+
+  content.replaceChildren(
+    el('h2', {}, [id === 'new' ? '新建定时任务' : '定时任务']),
+    el('a', { href: '#/tasks', className: 'muted' }, ['← 返回任务列表']),
+    el('div', { className: 'form' }, [
+      el('label', {}, ['名称', name]),
+      el('label', {}, ['cron（分 时 日 月 周）', cronExpr]),
+      el('label', {}, ['时区', timezone]),
+      el('label', {}, ['目标会话 ID', chatID]),
+      el('label', {}, ['通道', channelSel]),
+      el('label', {}, ['内容', prompt]),
+      el('label', {}, ['启用', enabled]),
+      el('div', { className: 'actions' }, id === 'new' ? [save] : [save, runNow, del]),
     ]),
   );
 }

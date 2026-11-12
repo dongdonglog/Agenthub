@@ -24,6 +24,7 @@ import (
 	"github.com/moying/agenthub/internal/obs"
 	"github.com/moying/agenthub/internal/platform/dingtalk"
 	"github.com/moying/agenthub/internal/platform/feishu"
+	"github.com/moying/agenthub/internal/scheduler"
 	"github.com/moying/agenthub/internal/store"
 	"github.com/moying/agenthub/internal/version"
 )
@@ -195,6 +196,12 @@ func run() int {
 		}
 		logger.Info("state restored")
 	}
+	var taskScheduler *scheduler.Scheduler
+	if journal != nil {
+		taskScheduler = scheduler.New(journal, engine, logger)
+		go taskScheduler.Run(workCtx)
+	}
+
 	metrics := obs.NewMetrics()
 	engine.SetMetrics(metrics)
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
@@ -276,6 +283,8 @@ func run() int {
 			}
 			return journal.ListAudit(ctx, limit)
 		},
+		Journal:       journal,
+		Scheduler:     taskScheduler,
 		ModelSettings: func() agent.ModelSettings { return modelHolder.Get() },
 		SetModelSettings: func(v agent.ModelSettings) error {
 			modelHolder.Set(v)
