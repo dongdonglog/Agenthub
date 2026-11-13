@@ -95,8 +95,8 @@ cp .env.example .env
 # 钉钉：AGENTHUB_CHANNEL=dingtalk + DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET
 # 都要：POSTGRES_PASSWORD
 
-AGENTHUB_TAG=0.2.1 docker compose pull
-AGENTHUB_TAG=0.2.1 docker compose up -d
+AGENTHUB_TAG=0.2.2 docker compose pull
+AGENTHUB_TAG=0.2.2 docker compose up -d
 ```
 
 镜像 `donglog/agenthub` 支持 `linux/amd64` 与 `linux/arm64`，打 tag 自动构建发布。
@@ -303,6 +303,7 @@ AgentHub 与 AA 一样，把一次运行交给 **pi**（`@earendil-works/pi-codi
 - **卡片停止按钮**需要飞书能访问 `/feishu/card`，没有公网入口时用 `/stop`；
 - **钉钉**回复走 `sessionWebhook`（约 1.5 小时有效），超长任务可能投递失败；钉钉暂未接入卡片与附件下载；
 - **pi 版本固定**：镜像内置 1.4.0，升级需同步验证会话文件格式；
+- **会话上下文按代隔离**：pi 会话文件随会话代生成，旧内置运行时的历史不会迁移；`/reset` 会清理上一代工作区；
 - **管理台**没有内建用户体系，建议只在内网或网关后暴露。
 
 ## 文档
