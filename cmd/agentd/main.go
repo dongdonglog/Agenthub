@@ -201,6 +201,11 @@ func run() int {
 		ModelFunc:    func() string { return modelHolder.Get().Model },
 	})
 	engine := core.New(runner, ch, logger)
+	engine.SetGenerationCleaner(func(conv string, generation int) {
+		if err := runner.Cleanup(conv, generation); err != nil {
+			logger.Warn("cleanup generation failed", "conversation", conv, "generation", generation, "error", err)
+		}
+	})
 	engine.SetConcurrency(cfg.MaxConcurrentRuns)
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
 	engine.SetProfileSource(func() core.ProfileSelection {

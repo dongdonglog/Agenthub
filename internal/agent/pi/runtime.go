@@ -90,6 +90,20 @@ func New(cfg Config) *Runtime {
 	return &Runtime{cfg: cfg}
 }
 
+// Cleanup 删除某个会话代的工作区与会话文件。
+func (r *Runtime) Cleanup(conv string, generation int) error {
+	base := sessionKey(conv, generation)
+	ws := filepath.Join(r.cfg.WorkspaceDir, base)
+	session := filepath.Join(r.cfg.SessionDir, base+".jsonl")
+	if err := os.RemoveAll(ws); err != nil {
+		return err
+	}
+	if err := os.Remove(session); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // Run 执行一个批次：预写会话文件、启动 pi、等待收敛。
 func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error) {
 	texts := make([]string, 0, len(in.Messages))

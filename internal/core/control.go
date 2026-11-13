@@ -110,17 +110,28 @@ func (e *Engine) Clear(conv string) int {
 //
 // @remarks 新代不再携带旧历史；旧消息仍保留在库中供追溯。
 
+// SetGenerationCleaner 设置旧会话代清理回调（删除工作区/会话文件）。
+func (e *Engine) SetGenerationCleaner(fn func(conv string, generation int)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.genCleaner = fn
+}
+
 func (e *Engine) Reset(conv string) bool {
 	stopped := e.Stop(conv)
 	e.Clear(conv)
 	e.mu.Lock()
-	e.generations[conv] = e.generationLocked(conv) + 1
+	oldGen := e.generationLocked(conv)
+	e.generations[conv] = oldGen + 1
 	gen := e.generations[conv]
 	e.mu.Unlock()
 	if e.journal != nil {
 		if err := e.journal.SaveGeneration(context.Background(), conv, gen); err != nil {
 			e.log.Error("persist generation failed", "error", err)
 		}
+	}
+	if e.genCleaner != nil {
+		go e.genCleaner(conv, oldGen)
 	}
 	return stopped
 }

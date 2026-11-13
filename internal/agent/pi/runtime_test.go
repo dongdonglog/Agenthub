@@ -138,3 +138,47 @@ func TestRuntimeTimeout(t *testing.T) {
 		t.Fatalf("中止耗时过长: %s", time.Since(start))
 	}
 }
+
+func TestCleanupRemovesGeneration(t *testing.T) {
+	rt, _, workspaces := newTestRuntime(t, "completed", 5*time.Second)
+	if _, err := rt.Run(context.Background(), input("feishu:chat:cleanup")); err != nil {
+		t.Fatal(err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(workspaces, "*"))
+	if len(matches) == 0 {
+		t.Fatal("工作区未创建")
+	}
+	if err := rt.Cleanup("feishu:chat:cleanup", 1); err != nil {
+		t.Fatal(err)
+	}
+	matches, _ = filepath.Glob(filepath.Join(workspaces, "*"))
+	if len(matches) != 0 {
+		t.Fatalf("工作区未清理: %v", matches)
+	}
+	// 会话文件也应删除。
+	sessions, _ := filepath.Glob(filepath.Join(filepath.Dir(workspaces), "sessions", "*"))
+	if len(sessions) != 0 {
+		t.Fatalf("会话文件未清理: %v", sessions)
+	}
+}
+
+func TestPrepareAgentDirMCP(t *testing.T) {
+	dir := t.TempDir()
+	mcpFile := filepath.Join(dir, "mcp.yaml")
+	if err := os.WriteFile(mcpFile, []byte("- name: demo\n  transport: stdio\n  command: python3\n  args: [\"server.py\"]\n  enabled: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentDir := filepath.Join(dir, "agent")
+	if err := PrepareAgentDir(AgentConfig{
+		Dir: agentDir, BaseURL: "https://gw/v1", APIKey: "k", Model: "m", MCPFile: mcpFile,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(agentDir, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"demo"`) || !strings.Contains(string(raw), `"python3"`) {
+		t.Fatalf("mcp.json 不正确: %s", raw)
+	}
+}

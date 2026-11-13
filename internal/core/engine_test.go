@@ -827,3 +827,17 @@ func TestScheduledMessageDoesNotReplyToExternalID(t *testing.T) {
 		t.Fatalf("ChatID = %s", ch.sent[0].ChatID)
 	}
 }
+
+func TestResetCleansOldGeneration(t *testing.T) {
+	eng := newEngine(t, &captureChannel{}, agent.Echo{})
+	var cleaned []int
+	eng.SetGenerationCleaner(func(_ string, generation int) { cleaned = append(cleaned, generation) })
+	eng.Reset("tenant_1:oc_chat:ou_user")
+	deadline := time.Now().Add(time.Second)
+	for len(cleaned) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(cleaned) != 1 || cleaned[0] != 1 {
+		t.Fatalf("cleaned = %v", cleaned)
+	}
+}

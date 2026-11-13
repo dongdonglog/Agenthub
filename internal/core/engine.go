@@ -47,6 +47,7 @@ type Engine struct {
 	profileSrc  func() ProfileSelection
 	identities  map[string]Identity
 	priority    map[string]int
+	genCleaner  func(conv string, generation int)
 	events      map[string][]RunEvent
 	// runSem 限制跨会话并发运行数；nil 表示不限制。
 	runSem chan struct{}
