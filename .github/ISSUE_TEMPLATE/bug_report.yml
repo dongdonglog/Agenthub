@@ -1,0 +1,48 @@
+name: Bug report
+description: 报告可复现的问题
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 Issue；不要贴真实密钥、客户数据或完整会话内容。
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 实际行为与预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 部署方式（compose / 镜像 tag / 源码）
+        2. 通道（飞书 / 钉钉）
+        3. 发送的消息或操作
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      placeholder: v0.4.0 / main@abcdef
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 请先脱敏；可附 trace_id
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 已搜索过已有 Issue
+          required: true
+        - label: 已移除密钥与客户数据
+          required: true
