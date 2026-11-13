@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -442,5 +444,52 @@ func TestQueueAndPriorityAPI(t *testing.T) {
 	items := engine.QueueSnapshot()
 	if len(items) != 1 || items[0].Priority != 99 {
 		t.Fatalf("items = %+v", items)
+	}
+}
+
+func TestFlatSkillFilesAndArchive(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := admin.NewStore(dir)
+	skillsDir := filepath.Join(dir, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "flat.md"), []byte("> 扁平技能\n正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := st.ListFiles("flat")
+	if err != nil || len(files) != 1 || files[0].Path != "SKILL.md" {
+		t.Fatalf("files = %+v err=%v", files, err)
+	}
+	content, err := st.ReadFile("flat", "SKILL.md")
+	if err != nil || !strings.Contains(content, "扁平技能") {
+		t.Fatalf("read = %q err=%v", content, err)
+	}
+	if err := st.WriteFile("flat", "SKILL.md", "> 新内容"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.SetSkillStatus("flat", "archived"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sk := range list {
+		if sk.Name == "flat" && sk.Status == "archived" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("归档后的扁平技能应出现在列表: %+v", list)
+	}
+	loaded, _ := agent.LoadSkills(skillsDir)
+	for _, sk := range loaded {
+		if sk.Name == "flat" {
+			t.Fatal("归档技能不应被加载")
+		}
 	}
 }

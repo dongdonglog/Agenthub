@@ -415,7 +415,9 @@ async function renderSkillDetail(name) {
     el('h2', {}, [skill.name]),
     el('p', { className: 'lede' }, [skill.description || '—']),
     el('div', { className: 'actions' }, [back]),
-    el('div', { className: 'file-bar' }, [currentLabel, el('div', { className: 'actions' }, [newFile, delFile])]),
+    skill.flat
+      ? el('div', { className: 'file-bar' }, [currentLabel])
+      : el('div', { className: 'file-bar' }, [currentLabel, el('div', { className: 'actions' }, [newFile, delFile])]),
     fileList,
     el('label', {}, ['内容', textarea]),
     el('div', { className: 'actions' }, [save]),

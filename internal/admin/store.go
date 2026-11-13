@@ -22,6 +22,7 @@ type Skill struct {
 	Files       int    `json:"files"`
 	Bytes       int64  `json:"bytes"`
 	Executable  bool   `json:"executable"`
+	Flat        bool   `json:"flat"`
 	UpdatedAt   string `json:"updated_at"`
 	References  int    `json:"references"`
 }
@@ -104,7 +105,7 @@ func (s *Store) ListSkills() ([]Skill, error) {
 				out = append(out, skill)
 				continue
 			}
-			if status != "active" || !strings.HasSuffix(name, ".md") || !usableSkillFile(name) {
+			if !strings.HasSuffix(name, ".md") || !usableSkillFile(name) {
 				continue
 			}
 			skill := buildSkill(strings.TrimSuffix(name, ".md"), path, status)
@@ -143,6 +144,7 @@ func buildSkill(name, path, status string) Skill {
 				skill.Content = string(raw)
 			}
 		} else {
+			skill.Flat = true
 			skill.UpdatedAt = info.ModTime().Format("2006-01-02 15:04:05")
 			skill.Files = 1
 			skill.Bytes = info.Size()
@@ -352,30 +354,35 @@ type SkillFile struct {
 	Size int64  `json:"size"`
 }
 
-// skillBaseDir 返回技能所在目录（扁平文件返回其所在目录）。
-func (s *Store) skillBaseDir(name string) (string, error) {
+// skillPath 返回技能路径及其是否为目录。
+func (s *Store) skillPath(name string) (string, bool, error) {
 	path, _, err := s.findSkill(name)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if info.IsDir() {
-		return path, nil
-	}
-	return "", errors.New("扁平技能不支持多文件")
+	return path, info.IsDir(), nil
 }
 
-// ListFiles 列出技能目录内的全部文件（相对路径）。
+// ListFiles 列出技能内的文件；扁平技能视为只有一个 SKILL.md。
 func (s *Store) ListFiles(name string) ([]SkillFile, error) {
-	base, err := s.skillBaseDir(name)
+	path, isDir, err := s.skillPath(name)
 	if err != nil {
 		return nil, err
 	}
+	if !isDir {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		return []SkillFile{{Path: "SKILL.md", Size: info.Size()}}, nil
+	}
+
 	var out []SkillFile
-	err = filepath.WalkDir(base, func(path string, entry os.DirEntry, err error) error {
+	err = filepath.WalkDir(path, func(p string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -383,7 +390,7 @@ func (s *Store) ListFiles(name string) ([]SkillFile, error) {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(base, path)
+		rel, err := filepath.Rel(path, p)
 		if err != nil {
 			return err
 		}
@@ -394,18 +401,24 @@ func (s *Store) ListFiles(name string) ([]SkillFile, error) {
 	return out, err
 }
 
-// resolveSkillFile 把相对路径限制在技能目录内。
+// resolveSkillFile 把相对路径限制在技能内；扁平技能只允许 SKILL.md。
 func (s *Store) resolveSkillFile(name, rel string) (string, error) {
-	base, err := s.skillBaseDir(name)
+	path, isDir, err := s.skillPath(name)
 	if err != nil {
 		return "", err
+	}
+	if !isDir {
+		if filepath.ToSlash(rel) != "SKILL.md" {
+			return "", errors.New("扁平技能只有一个文件")
+		}
+		return path, nil
 	}
 	clean := filepath.Clean(filepath.FromSlash(rel))
 	if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 		return "", errors.New("非法文件路径")
 	}
-	full := filepath.Join(base, clean)
-	if !strings.HasPrefix(full, base+string(os.PathSeparator)) {
+	full := filepath.Join(path, clean)
+	if !strings.HasPrefix(full, path+string(os.PathSeparator)) {
 		return "", errors.New("非法文件路径")
 	}
 	return full, nil
