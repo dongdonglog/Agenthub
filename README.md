@@ -229,6 +229,7 @@ AGENTHUB_TEST_DATABASE_URL='postgres://postgres:agenthub@127.0.0.1:55433/agenthu
 - [与 AA 对比 / v1.0 清单](docs/comparison.md)
 - [路线图](docs/roadmap.md)
 - [PRD](docs/PRD.md)
+- [CHANGELOG](CHANGELOG.md)
 
 ## 状态与边界
 
