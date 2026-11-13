@@ -270,6 +270,23 @@ scripts/                   备份与恢复
 docs/                      PRD、架构、部署、运维、路线图
 ```
 
+## 与 AA / pi 的关系
+
+AA 的 agent 由外部 `pi` CLI 运行（Node 生态、按会话物化工作区、通过批输入与 JSON 输出交互）。
+AgentHub 是独立的 Go 实现，**不依赖 pi 或 Node**：内置一个轻量 agent loop（OpenAI 兼容
+`chat/completions` + 工具调用 + 技能注入 + MCP），随二进制一起发布。
+
+| 维度 | AA（pi） | AgentHub（内置） |
+|---|---|---|
+| 运行时 | 外部 pi CLI + 工作区 | 进程内 Go loop |
+| 依赖 | Node、pi、会话工作区 | 单二进制 |
+| 工具 | pi 扩展 + bash 沙箱 | MCP stdio + `read_file` |
+| 隔离 | 容器/工作区 | 进程内；沙箱在路线图 |
+| 技能 | AGENTS.md / pi 扩展 | `SKILL.md` 注入提示词 |
+
+需要 pi 的完整能力（bash 沙箱、扩展、会话恢复）时，可以增加 `AGENTHUB_AGENT_RUNTIME=pi`
+适配器：按会话物化工作区、调用 pi CLI、解析输出；这会重新引入 Node 依赖与工作区管理。
+
 ## 边界
 
 - **单实例**：飞书/钉钉长连接都是集群模式，目前一个应用只跑一个实例（多实例分片在路线图里）；

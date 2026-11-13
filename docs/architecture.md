@@ -95,6 +95,13 @@ queued ──▶ running ──▶ completed
 - `interrupted` 与 `failed` 都必须产生一条"中断/失败说明"投递；
 - 终态不可逆；迟到事件按 `run_id` 丢弃。
 
+## 4.1 与 AA / pi 的差异
+
+AA 把一次运行交给外部 `pi` CLI（Node、按会话工作区、批输入/JSON 输出）；AgentHub 用进程内
+Go agent loop（OpenAI 兼容接口 + 工具调用），不依赖 Node。两者在“批次冻结、单会话单运行、
+投递幂等”这些不变量上一致，差异在运行时与隔离方式：AgentHub 目前没有 pi 的 bash 沙箱与
+扩展机制，工具以 MCP stdio 为主。
+
 ## 5. 数据模型
 
 | 表 | 职责 | 关键约束 |
