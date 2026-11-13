@@ -327,8 +327,14 @@ func run() int {
 			}
 			return journal.ListAudit(ctx, limit)
 		},
-		Journal:       journal,
-		Scheduler:     taskScheduler,
+		Journal:   journal,
+		Scheduler: taskScheduler,
+		ReloadAgentConfig: func() error {
+			if err := preparePi(modelHolder.Get()); err != nil {
+				return err
+			}
+			return pi.SyncAgentConfig(piWorkspaceDir, piAgentDir)
+		},
 		ModelSettings: func() agent.ModelSettings { return modelHolder.Get() },
 		SetModelSettings: func(v agent.ModelSettings) error {
 			modelHolder.Set(v)
