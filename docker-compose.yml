@@ -37,6 +37,7 @@ services:
       AGENTHUB_HTTP_ADDR: 0.0.0.0:8787
       AGENTHUB_ADMIN_ADDR: 0.0.0.0:8788
       AGENTHUB_CHANNEL: ${COMPOSE_CHANNEL:-feishu}
+      PI_ISOLATION: ${PI_ISOLATION:-process_group}
     ports:
       - "127.0.0.1:${AGENTHUB_HTTP_PORT:-8787}:8787"
       - "127.0.0.1:${AGENTHUB_ADMIN_PORT:-8788}:8788"

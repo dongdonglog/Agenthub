@@ -57,8 +57,8 @@ flowchart LR
     AD --> E[Engine<br/>去重 · 批次 · 会话代]
     E <--> A[Agent<br/>模型 · 技能 · MCP 工具]
     E <--> DB[(PostgreSQL)]
-    A <--> SK[(data/skills)]
-    A <--> MCP[MCP stdio]
+    A <--> SK[(data/pi/agent/skills)]
+    A <--> MCP[pi 内置工具 / MCP]
     E --> O[Outbox<br/>重试 · 补偿]
     O --> FR[飞书回复<br/>卡片 / 文本]
     O --> DR[钉钉回复<br/>文本]
@@ -214,6 +214,13 @@ API Key 只显示掩码）。其余配置仍由 `.env` 控制。
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
 | `AGENTHUB_RATE_LIMIT_PER_MIN` | `0` | 每会话每分钟消息上限，0 关闭 |
+| `PI_BIN` | `pi` | pi 可执行文件 |
+| `PI_TOOLS` | `read,bash,grep,find,ls,tool_search` | 暴露给 pi 的工具 |
+| `PI_AGENT_DIR` | `data/pi/agent` | 部署配置（models/SYSTEM/skills） |
+| `PI_SESSION_DIR` | `data/pi/sessions` | 会话文件目录 |
+| `PI_WORKSPACE_DIR` | `data/pi/workspaces` | 会话工作区 |
+| `PI_ISOLATION` | `namespace` | Linux 用 unshare；容器受限时用 `process_group` |
+| `PI_TIMEOUT_SECONDS` | `600` | 单次运行时限 |
 | `AGENTHUB_ADMIN_TOKEN` | 空 | 管理台访问令牌 |
 | `DINGTALK_CLIENT_ID` | 空 | 钉钉应用 Client ID |
 | `DINGTALK_CLIENT_SECRET` | 空 | 钉钉应用 Client Secret |
@@ -259,7 +266,8 @@ cmd/agentd/                入口与装配
 internal/platform/feishu/  飞书长连接、事件、卡片、附件
 internal/platform/dingtalk/ 钉钉 Stream、命令、会话回复
 internal/core/             受理、批次、会话代、投递、事件
-internal/agent/            模型、技能、工具、视觉
+internal/agent/pi/         pi RPC、会话文件、工作区
+internal/agent/            运行接口与模型设置
 internal/mcp/              MCP stdio 客户端
 internal/admin/            管理台与 API
 internal/store/            PostgreSQL、迁移、持久化
@@ -272,27 +280,30 @@ docs/                      PRD、架构、部署、运维、路线图
 
 ## 与 AA / pi 的关系
 
-AA 的 agent 由外部 `pi` CLI 运行（Node 生态、按会话物化工作区、通过批输入与 JSON 输出交互）。
-AgentHub 是独立的 Go 实现，**不依赖 pi 或 Node**：内置一个轻量 agent loop（OpenAI 兼容
-`chat/completions` + 工具调用 + 技能注入 + MCP），随二进制一起发布。
+AgentHub 与 AA 一样，把一次运行交给 **pi**（`@earendil-works/pi-coding-agent`）：
 
-| 维度 | AA（pi） | AgentHub（内置） |
+- 每会话代一个工作区：`.agenthub-agent/`（部署配置副本）、`AGENTS.md`、`attachments/`（只读）、`outbox/`；
+- 批次消息预写 pi 会话文件（v3 JSONL），最后一次 `prompt` 触发作答；
+- 通过 `pi --mode rpc` 读取事件流（`agent_start`、`text_delta`、`tool_execution_*`、`agent_settled`）；
+- 收敛以 `agent_settled` 为准，超时/取消走 `clear_queue` + `abort`。
+
+与 AA 的差异：
+
+| 维度 | AA | AgentHub |
 |---|---|---|
-| 运行时 | 外部 pi CLI + 工作区 | 进程内 Go loop |
-| 依赖 | Node、pi、会话工作区 | 单二进制 |
-| 工具 | pi 扩展 + bash 沙箱 | MCP stdio + `read_file` |
-| 隔离 | 容器/工作区 | 进程内；沙箱在路线图 |
-| 技能 | AGENTS.md / pi 扩展 | `SKILL.md` 注入提示词 |
+| 通道 | 钉钉 | 飞书 + 钉钉 |
+| 技能 | pi 扩展/AGENTS.md | `data/pi/agent/skills` 下的 `SKILL.md` |
+| 进程隔离 | Linux unshare | `PI_ISOLATION`（namespace / process_group） |
+| 投递 | 卡片 + 表情 | 飞书卡片、钉钉文本 |
 
-需要 pi 的完整能力（bash 沙箱、扩展、会话恢复）时，可以增加 `AGENTHUB_AGENT_RUNTIME=pi`
-适配器：按会话物化工作区、调用 pi CLI、解析输出；这会重新引入 Node 依赖与工作区管理。
+镜像内置 Node 22 + pi 1.4.0，`pi --version` 不匹配会在启动时告警。
 
 ## 边界
 
 - **单实例**：飞书/钉钉长连接都是集群模式，目前一个应用只跑一个实例（多实例分片在路线图里）；
 - **卡片停止按钮**需要飞书能访问 `/feishu/card`，没有公网入口时用 `/stop`；
 - **钉钉**回复走 `sessionWebhook`（约 1.5 小时有效），超长任务可能投递失败；钉钉暂未接入卡片与附件下载；
-- **技能全量注入**：技能很多时需要改为检索式加载，当前按 64KB 预算截断；
+- **pi 版本固定**：镜像内置 1.4.0，升级需同步验证会话文件格式；
 - **管理台**没有内建用户体系，建议只在内网或网关后暴露。
 
 ## 文档

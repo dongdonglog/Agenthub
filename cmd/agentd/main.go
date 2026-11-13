@@ -180,6 +180,7 @@ func run() int {
 			Vision:       current.VisionModel,
 			SystemPrompt: pi.SystemPrompt(),
 			SkillsSrc:    skillsDir,
+			MCPFile:      filepath.Join(cfg.Storage.Dir, "mcp.yaml"),
 		})
 	}
 	if err := preparePi(modelHolder.Get()); err != nil {

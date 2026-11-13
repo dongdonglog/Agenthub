@@ -3,6 +3,7 @@
 ## 依赖
 
 - Docker 24+ / Docker Compose v2
+- 镜像已内置 Node 22 与 pi 1.4.0（约 390MB），无需宿主机安装
 - PostgreSQL 17（compose 内置）
 - 一台能出网访问飞书与模型网关的机器（出网 443）
 
@@ -59,6 +60,14 @@ DINGTALK_BOT_NAME=助手                      # 可选，去掉 @前缀
 
 限制：回复使用消息自带的 `sessionWebhook`（约 1.5 小时有效），超过有效期的长任务会投递失败；
 进度卡片未接入，回复为文本。
+
+## pi 运行时
+
+- 镜像内固定 `@earendil-works/pi-coding-agent@1.4.0`，`docker exec <app> pi --version` 可核对；
+- 部署配置在 `/data/pi/agent`（models.json / SYSTEM.md / skills / mcp.json），首次启动自动生成；
+- 会话文件在 `/data/pi/sessions`，工作区在 `/data/pi/workspaces`；
+- `PI_ISOLATION`：容器默认 `process_group`；Linux 主机具备用户命名空间时可设 `namespace` 使用 unshare；
+- 单次运行时限 `PI_TIMEOUT_SECONDS`（默认 600）。
 
 ## 端口
 

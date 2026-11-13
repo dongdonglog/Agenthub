@@ -4,9 +4,9 @@
 
 ## 1. 项目定位
 
-飞书优先的团队 AI 助手：接收飞书消息 → 去重落库 → 批次 → 模型（技能 + MCP 工具）→ 卡片/文本投递。
+飞书/钉钉团队 AI 助手：消息 → 去重落库 → 批次 → pi 运行时（工作区 + 会话文件）→ 卡片/文本投递。
 
-Go 单二进制，PostgreSQL 为事实源，飞书 WebSocket 长连接接入。
+Go 服务 + PostgreSQL 为事实源；agent 由 pi 子进程执行（镜像内置 Node 22 + pi 1.4.0）。
 
 ## 2. 常用命令
 
@@ -38,7 +38,8 @@ internal/config            配置加载与校验
 internal/obs               日志、指标
 internal/store             PostgreSQL、迁移、Journal
 internal/core              受理、批次、会话代、投递、事件
-internal/agent             模型、技能、工具
+internal/agent             运行接口与模型设置
+internal/agent/pi          pi RPC、会话文件、工作区
 internal/mcp               MCP stdio 客户端
 internal/platform/feishu   通道实现
 internal/admin             管理台与 API
@@ -54,7 +55,7 @@ examples/skills/           技能模板（业务技能由部署方提供，不�
 - **迁移只前进**：已应用的 `migrations/NNNN_*.sql` 不允许修改，只能新增编号；启动时 `store.Migrate` 按文件名顺序执行，并用 advisory lock 防并发。
 - 配置优先级 `环境变量 > config.yaml > 默认值`；新增配置必须同步 `.env.example` 与 `docs/runbook.md`。
 - 日志不得包含密钥、临时下载地址、完整敏感载荷；错误信息只给字段名与原因。
-- 技能格式：目录 `<name>/SKILL.md`（frontmatter `name`/`description`）或扁平 `<name>.md`；业务技能不入仓库，部署时放数据目录或走管理台导入。
+- 技能格式：目录 `<name>/SKILL.md`（frontmatter `name`/`description`）或扁平 `<name>.md`；运行时目录为 `<data>/pi/agent/skills`，业务技能不入仓库。
 - MCP 只支持 stdio；新增传输方式需同时补充测试与文档。
 - 管理面没有内置认证，任何新增路由都假定前置网关。
 

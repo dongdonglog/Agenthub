@@ -1,5 +1,5 @@
 # 构建
-FROM golang:1.23-alpine AS build
+FROM golang:1.23-bookworm AS build
 WORKDIR /src
 ARG VERSION=dev
 COPY go.mod go.sum ./
@@ -8,18 +8,25 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X github.com/moying/agenthub/internal/version.Version=${VERSION}" \
     -o /out/agentd ./cmd/agentd
-# 预创建数据目录：命名卷首次挂载会继承镜像内目录的属主，否则非 root 无法写入
 RUN mkdir -p /out/data
 
-# 运行：非 root、只读根文件系统
-FROM gcr.io/distroless/static-debian12:nonroot
+# 运行：Node 22 + pi 1.4.0 + 基础命令行工具
+FROM node:22-bookworm-slim
+ARG PI_VERSION=1.4.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates ripgrep bash procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+    && npm cache clean --force
 WORKDIR /app
 COPY --from=build /out/agentd /app/agentd
 COPY migrations /app/migrations
-COPY --from=build --chown=nonroot:nonroot /out/data /data
+COPY --from=build --chown=node:node /out/data /data
 ENV AGENTHUB_HTTP_ADDR=0.0.0.0:8787
+ENV AGENTHUB_ADMIN_ADDR=0.0.0.0:8788
 ENV AGENTHUB_DATA_DIR=/data
+ENV PI_BIN=/usr/local/bin/pi
+USER node
 EXPOSE 8787 8788
-USER nonroot:nonroot
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["/app/agentd", "-healthcheck"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["/app/agentd", "-healthcheck"]
 ENTRYPOINT ["/app/agentd"]

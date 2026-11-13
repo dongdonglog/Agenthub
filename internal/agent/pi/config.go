@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 // AgentConfig 描述部署级 pi 配置的生成参数。
@@ -17,6 +19,7 @@ type AgentConfig struct {
 	Vision       string
 	SystemPrompt string
 	SkillsSrc    string
+	MCPFile      string
 }
 
 type modelsFile struct {
@@ -66,6 +69,24 @@ func PrepareAgentDir(cfg AgentConfig) error {
 		}
 	}
 
+	if cfg.MCPFile != "" {
+		if raw, err := os.ReadFile(cfg.MCPFile); err == nil {
+			var servers []struct {
+				Name      string   `yaml:"name"`
+				Transport string   `yaml:"transport"`
+				Command   string   `yaml:"command"`
+				Args      []string `yaml:"args"`
+				URL       string   `yaml:"url"`
+				Enabled   bool     `yaml:"enabled"`
+			}
+			if err := yaml.Unmarshal(raw, &servers); err == nil && len(servers) > 0 {
+				if err := writeMCPConfig(filepath.Join(cfg.Dir, "mcp.json"), servers); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	if cfg.SystemPrompt != "" {
 		if err := os.WriteFile(filepath.Join(cfg.Dir, "SYSTEM.md"), []byte(cfg.SystemPrompt), 0o644); err != nil {
 			return err
@@ -102,4 +123,40 @@ func SystemPrompt() string {
 - 附件在 attachments/ 下，只读；需要交付的文件写入 outbox/。
 - 回答尽量简短；长内容用 Markdown 列表或表格。
 `
+}
+
+type mcpServerFile struct {
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	URL     string   `json:"url,omitempty"`
+}
+
+type mcpFile struct {
+	MCPServers map[string]mcpServerFile `json:"mcpServers"`
+}
+
+// writeMCPConfig 把管理台的 MCP 配置转换为 pi 的 mcp.json。
+func writeMCPConfig(path string, servers []struct {
+	Name      string   `yaml:"name"`
+	Transport string   `yaml:"transport"`
+	Command   string   `yaml:"command"`
+	Args      []string `yaml:"args"`
+	URL       string   `yaml:"url"`
+	Enabled   bool     `yaml:"enabled"`
+}) error {
+	out := mcpFile{MCPServers: map[string]mcpServerFile{}}
+	for _, srv := range servers {
+		if srv.Name == "" || !srv.Enabled {
+			continue
+		}
+		if srv.Transport == "http" && srv.URL != "" {
+			out.MCPServers[srv.Name] = mcpServerFile{URL: srv.URL}
+			continue
+		}
+		if srv.Command != "" {
+			out.MCPServers[srv.Name] = mcpServerFile{Command: srv.Command, Args: srv.Args}
+		}
+	}
+	raw, _ := json.MarshalIndent(out, "", "  ")
+	return os.WriteFile(path, raw, 0o600)
 }

@@ -87,6 +87,13 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数；0 关闭清理 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
 | `AGENTHUB_RATE_LIMIT_PER_MIN` | `0` | 每会话每分钟消息上限；0 关闭 |
+| `PI_BIN` | `pi` | pi 可执行文件 |
+| `PI_TOOLS` | `read,bash,grep,find,ls,tool_search` | 暴露给 pi 的工具 |
+| `PI_AGENT_DIR` | `<data>/pi/agent` | 部署配置目录 |
+| `PI_SESSION_DIR` | `<data>/pi/sessions` | 会话文件目录 |
+| `PI_WORKSPACE_DIR` | `<data>/pi/workspaces` | 会话工作区 |
+| `PI_ISOLATION` | `namespace` | `namespace` / `process_group` |
+| `PI_TIMEOUT_SECONDS` | `600` | 单次运行时限 |
 | `DINGTALK_CLIENT_ID` | 空 | 钉钉应用 Client ID（channel=dingtalk 必填） |
 | `DINGTALK_CLIENT_SECRET` | 空 | 钉钉应用 Client Secret |
 | `DINGTALK_REQUIRE_MENTION` | `true` | 钉钉群聊是否必须 @机器人 |
