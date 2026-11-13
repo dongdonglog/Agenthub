@@ -245,7 +245,7 @@ API Key 只显示掩码）。其余配置仍由 `.env` 控制。
 | `FEISHU_REQUIRE_MENTION` | `true` | 群聊是否必须 @ |
 | `FEISHU_ENCRYPT_KEY` | 空 | 配置后校验回调签名并解密 |
 | `AGENTHUB_AGENT_MODEL` | `gpt-4.1-mini` | 主模型 |
-| `AGENTHUB_AGENT_FALLBACK_MODEL` | 空 | 写入模型清单；pi 暂不支持跨模型自动兜底 |
+| `AGENTHUB_AGENT_FALLBACK_MODEL` | 空 | 旧配置兼容：迁移为主线路的备选候选 |
 | `AGENTHUB_AGENT_VISION_MODEL` | 空 | 图片消息使用的视觉模型 |
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
