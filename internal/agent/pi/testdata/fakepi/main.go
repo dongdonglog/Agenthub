@@ -26,6 +26,7 @@ func main() {
 			emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_delta", "delta": "你好"}})
 			emit(map[string]any{"type": "message_end", "message": map[string]any{
 				"role": "assistant", "stopReason": "stop",
+				"usage":   map[string]any{"input": 12, "output": 7},
 				"content": []any{map[string]any{"type": "text", "text": "这是 pi 的回答"}},
 			}})
 			emit(map[string]any{"type": "agent_settled", "aborted": false})

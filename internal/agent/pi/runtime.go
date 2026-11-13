@@ -188,6 +188,10 @@ type assistantMessage struct {
 	Role       string          `json:"role"`
 	StopReason string          `json:"stopReason"`
 	Content    json.RawMessage `json:"content"`
+	Usage      struct {
+		Input  int `json:"input"`
+		Output int `json:"output"`
+	} `json:"usage"`
 }
 
 func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in agent.Input, agentsMD string) (agent.Output, error) {
@@ -288,6 +292,7 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 
 	var final []string
 	var terminalErr string
+	var usage agent.Usage
 	settled := false
 	timer := time.NewTimer(r.cfg.Timeout)
 	defer timer.Stop()
@@ -297,13 +302,13 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 		text := strings.Join(final, "\n\n")
 		switch {
 		case aborted:
-			return agent.Output{Text: text}, errAborted
+			return agent.Output{Text: text, Usage: usage}, errAborted
 		case terminalErr != "":
-			return agent.Output{Text: text}, fmt.Errorf("pi 运行失败: %s", terminalErr)
+			return agent.Output{Text: text, Usage: usage}, fmt.Errorf("pi 运行失败: %s", terminalErr)
 		case strings.TrimSpace(text) == "":
-			return agent.Output{}, errors.New("pi 未返回有效结果")
+			return agent.Output{Usage: usage}, errors.New("pi 未返回有效结果")
 		default:
-			return agent.Output{Text: text}, nil
+			return agent.Output{Text: text, Usage: usage}, nil
 		}
 	}
 
@@ -346,6 +351,8 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 			case "message_end":
 				var m assistantMessage
 				if json.Unmarshal(ev.Message, &m) == nil && m.Role == "assistant" {
+					usage.InputTokens += m.Usage.Input
+					usage.OutputTokens += m.Usage.Output
 					if m.StopReason == "error" || m.StopReason == "aborted" {
 						terminalErr = m.StopReason
 					} else if m.StopReason == "stop" {

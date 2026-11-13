@@ -222,7 +222,7 @@ API Key 只显示掩码）。其余配置仍由 `.env` 控制。
 | `FEISHU_REQUIRE_MENTION` | `true` | 群聊是否必须 @ |
 | `FEISHU_ENCRYPT_KEY` | 空 | 配置后校验回调签名并解密 |
 | `AGENTHUB_AGENT_MODEL` | `gpt-4.1-mini` | 主模型 |
-| `AGENTHUB_AGENT_FALLBACK_MODEL` | 空 | 主模型失败兜底 |
+| `AGENTHUB_AGENT_FALLBACK_MODEL` | 空 | 写入模型清单；pi 暂不支持跨模型自动兜底 |
 | `AGENTHUB_AGENT_VISION_MODEL` | 空 | 图片消息使用的视觉模型 |
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
@@ -318,8 +318,8 @@ AgentHub 与 AA 一样，把一次运行交给 **pi**（`@earendil-works/pi-codi
 - **钉钉**回复走 `sessionWebhook`（约 1.5 小时有效），超长任务可能投递失败；钉钉暂未接入卡片与附件下载；
 - **镜像与内存**：镜像约 388MB；每个并发运行约 100MB（pi 进程），按 `AGENTHUB_MAX_CONCURRENT_RUNS` 估算内存；
 - **pi 版本固定**：镜像内置 1.4.0，会话文件 v3，升级需回归；
-- **成本可见性**：pi 的 token 用量尚未接回 `run_state`，暂无法按会话统计成本；
-- **模型兜底**：pi 内部有重试，但跨模型 fallback 尚未配置；
+- **成本可见性**：每次运行的 token 用量已写入 `run_state`，但未按单价换算金额；
+- **模型兜底**：pi 没有跨模型自动 fallback，`FALLBACK_MODEL` 目前只写入模型清单；
 - **会话上下文按代隔离**：pi 会话文件随会话代生成，旧内置运行时的历史不会迁移；`/reset` 会清理上一代工作区；
 - **管理台**没有内建用户体系，建议只在内网或网关后暴露。
 

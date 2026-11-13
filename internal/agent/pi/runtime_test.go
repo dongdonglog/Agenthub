@@ -68,6 +68,9 @@ func TestRuntimeCompleted(t *testing.T) {
 	if out.Text != "这是 pi 的回答" {
 		t.Fatalf("text = %q", out.Text)
 	}
+	if out.Usage.InputTokens != 12 || out.Usage.OutputTokens != 7 {
+		t.Fatalf("usage = %+v", out.Usage)
+	}
 
 	matches, _ := filepath.Glob(filepath.Join(sessions, "*.jsonl"))
 	if len(matches) != 1 {
@@ -181,4 +184,51 @@ func TestPrepareAgentDirMCP(t *testing.T) {
 	if !strings.Contains(string(raw), `"demo"`) || !strings.Contains(string(raw), `"python3"`) {
 		t.Fatalf("mcp.json 不正确: %s", raw)
 	}
+}
+
+func TestRuntimeRealPiUsage(t *testing.T) {
+	key := os.Getenv("PI_E2E_API_KEY")
+	if key == "" {
+		t.Skip("未设置 PI_E2E_API_KEY，跳过真实 pi 用例")
+	}
+	base := os.Getenv("PI_E2E_BASE_URL")
+	if base == "" {
+		base = "https://llm-gateway.moyingrobotics.com/v1"
+	}
+	model := os.Getenv("PI_E2E_MODEL")
+	if model == "" {
+		model = "my-deepseek-flash"
+	}
+
+	root := t.TempDir()
+	agentDir := filepath.Join(root, "agent")
+	if err := PrepareAgentDir(AgentConfig{Dir: agentDir, BaseURL: base, APIKey: key, Model: model}); err != nil {
+		t.Fatal(err)
+	}
+	rt := New(Config{
+		Bin:          "pi",
+		AgentDir:     agentDir,
+		SessionDir:   filepath.Join(root, "sessions"),
+		WorkspaceDir: filepath.Join(root, "workspaces"),
+		Provider:     "agenthub",
+		Model:        model,
+		Isolation:    "process_group",
+		Timeout:      90 * time.Second,
+	})
+	out, err := rt.Run(context.Background(), agent.Input{
+		ConversationID: "e2e:pi:usage",
+		Generation:     1,
+		RunID:          "run_e2e",
+		Messages:       []agent.Message{{Text: "只回答两个字：你好"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.Text) == "" {
+		t.Fatal("真实 pi 未返回文本")
+	}
+	if out.Usage.InputTokens == 0 && out.Usage.OutputTokens == 0 {
+		t.Fatalf("未解析到 token 用量: %+v", out.Usage)
+	}
+	t.Logf("text=%q usage=%+v", out.Text, out.Usage)
 }
