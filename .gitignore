@@ -5,3 +5,6 @@ data/
 coverage.out
 backups/
 skills/
+
+web/node_modules/
+web/dist/

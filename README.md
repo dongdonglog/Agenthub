@@ -192,10 +192,17 @@ cron: 0 9 * * 1-5
 
 ## 管理台
 
+React + TypeScript + Vite 实现（`web/`），构建产物嵌入 Go 二进制；支持浅色/深色切换。
+
+```bash
+cd web && npm ci && npm run dev   # 本地开发，代理到 18888
+make web                          # 构建并写入 internal/admin/static
+```
+
 | 页面 | 内容 |
 |---|---|
 | 运行概览 | 通道状态、模型、计数、在线试跑 |
-| 在线会话 | 显示群名/发送人（飞书与钉钉均自动解析），分页；可调调度优先级 |
+| 在线会话 | 用户/群聊/私聊/定时任务筛选与搜索；显示群名/发送人；ID 可复制；分页 |
 | 历史会话 | 按会话代聚合，可点进消息详情 |
 | Skill | 分页列表（状态/文件数/大小/可执行/引用）；编辑进入独立页面，支持文件树与 ZIP 导入 |
 | MCP | 分页列表；新建/编辑进入独立页面 |
@@ -276,6 +283,7 @@ AGENTHUB_TEST_DATABASE_URL='postgres://.../agenthub_test?sslmode=disable' \
 
 ```
 cmd/agentd/                入口与装配
+web/                       React 管理台源码（构建产物进 internal/admin/static）
 internal/platform/feishu/  飞书长连接、事件、卡片、附件
 internal/platform/dingtalk/ 钉钉 Stream、命令、会话回复
 internal/core/             受理、批次、会话代、投递、事件

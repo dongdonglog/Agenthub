@@ -14,6 +14,20 @@ jobs:
         with:
           go-version: '1.23'
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: web deps
+        working-directory: web
+        run: npm ci
+      - name: web build
+        working-directory: web
+        run: npm run build
+      - name: web test
+        working-directory: web
+        run: npm test
       - name: gofmt
         run: test -z "$(gofmt -l .)"
       - name: vet

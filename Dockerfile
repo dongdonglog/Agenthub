@@ -1,3 +1,11 @@
+# 前端构建
+FROM node:22-bookworm-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web ./
+RUN npm run build
+
 # 构建
 FROM golang:1.23-bookworm AS build
 WORKDIR /src
@@ -5,6 +13,7 @@ ARG VERSION=dev
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=web /internal/admin/static /src/internal/admin/static
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X github.com/moying/agenthub/internal/version.Version=${VERSION}" \
     -o /out/agentd ./cmd/agentd

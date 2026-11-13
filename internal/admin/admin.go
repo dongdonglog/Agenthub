@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -20,8 +21,16 @@ import (
 	"github.com/moying/agenthub/internal/store"
 )
 
-//go:embed static/*
+//go:embed static
 var staticFS embed.FS
+
+var staticSub = func() fs.FS {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}()
 
 // Options 是管理面的运行期信息。
 type Options struct {
@@ -86,8 +95,10 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /admin/", s.handleIndex)
-	mux.HandleFunc("GET /admin/app.js", s.handleAsset("static/app.js", "application/javascript; charset=utf-8"))
-	mux.HandleFunc("GET /admin/styles.css", s.handleAsset("static/styles.css", "text/css; charset=utf-8"))
+	mux.Handle("GET /admin/assets/", http.StripPrefix("/admin/", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		http.FileServer(http.FS(staticSub)).ServeHTTP(rw, r)
+	})))
 
 	mux.HandleFunc("GET /admin/api/v1/overview", s.handleOverview)
 	mux.HandleFunc("GET /admin/api/v1/sessions", s.handleSessions)
@@ -221,7 +232,7 @@ func (s *Server) handleIndex(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw.Header().Set("Cache-Control", "no-cache")
-	data, err := staticFS.ReadFile("static/index.html")
+	data, err := fs.ReadFile(staticSub, "index.html")
 	if err != nil {
 		http.Error(rw, "missing index", http.StatusInternalServerError)
 		return
@@ -409,9 +420,39 @@ func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleSessions(rw http.ResponseWriter, r *http.Request) {
+	kind := r.URL.Query().Get("kind")
+	if kind == "" {
+		kind = "user"
+	}
+	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	includeInternal := r.URL.Query().Get("include_internal") == "1"
+
 	infos := s.engine.SessionInfos()
+	filtered := make([]core.SessionInfo, 0, len(infos))
+	for _, info := range infos {
+		if !includeInternal && info.Internal {
+			continue
+		}
+		switch kind {
+		case "all":
+		case "user":
+			if info.Kind == "scheduled" {
+				continue
+			}
+		default:
+			if info.Kind != kind {
+				continue
+			}
+		}
+		if query != "" && !strings.Contains(strings.ToLower(info.DisplayName), query) &&
+			!strings.Contains(strings.ToLower(info.ID), query) {
+			continue
+		}
+		filtered = append(filtered, info)
+	}
+
 	page, size := pageParams(r, 20)
-	items, total := slicePage(infos, page, size)
+	items, total := slicePage(filtered, page, size)
 	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": total, "page": page, "size": size})
 }
 
@@ -1040,6 +1081,7 @@ func decode(r *http.Request, out any) error {
 
 func writeJSON(rw http.ResponseWriter, status int, body any) {
 	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
+	rw.Header().Set("Cache-Control", "no-store")
 	rw.WriteHeader(status)
 	_ = json.NewEncoder(rw).Encode(body)
 }

@@ -638,7 +638,7 @@ func TestSessionInfosDisplayName(t *testing.T) {
 	if len(infos) != 1 {
 		t.Fatalf("infos = %+v", infos)
 	}
-	if infos[0].DisplayName != "运维群 · 张三" || infos[0].Messages != 2 {
+	if infos[0].DisplayName != "群聊 · 运维群 · 张三" || infos[0].Messages != 2 {
 		t.Fatalf("info = %+v", infos[0])
 	}
 }

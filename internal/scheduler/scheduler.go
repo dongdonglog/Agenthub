@@ -108,6 +108,7 @@ func (s *Scheduler) RunNow(ctx context.Context, task store.ScheduledTask) error 
 
 func (s *Scheduler) submit(ctx context.Context, task store.ScheduledTask) error {
 	ext := fmt.Sprintf("cron_%s_%d", task.ID, time.Now().UnixNano())
+	s.engine.SetIdentity("cron:"+task.ChatID+":scheduler", "定时任务", task.Name)
 	_, err := s.engine.Submit(ctx, channel.Inbound{
 		Channel:    "cron",
 		Tenant:     "cron",

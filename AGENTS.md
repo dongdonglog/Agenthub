@@ -10,6 +10,16 @@ Go 服务 + PostgreSQL 为事实源；agent 由 pi 子进程执行（镜像内�
 
 ## 2. 常用命令
 
+前端（React + Vite，源码在 `web/`）：
+
+```bash
+cd web && npm ci
+npm run dev     # 代理到 18888
+npm run build   # 产物写入 internal/admin/static
+npm test        # Vitest
+```
+
+
 ```bash
 go build ./...          # 构建
 go test ./...           # 全部测试（数据库相关用例会自动跳过）

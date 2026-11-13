@@ -17,6 +17,7 @@ type Message struct {
 	TraceID        string
 	ConversationID string
 	ChatID         string
+	ChatKind       string
 	ExternalID     string
 	NoReply        bool
 	SenderOpenID   string
@@ -104,11 +105,15 @@ type Identity struct {
 // SessionInfo 是管理台的会话条目。
 type SessionInfo struct {
 	ID          string `json:"id"`
+	Kind        string `json:"kind"` // p2p | group | scheduled | unknown
+	ChatID      string `json:"chat_id"`
+	UserID      string `json:"user_id"`
 	DisplayName string `json:"display_name"`
 	ChatName    string `json:"chat_name"`
 	UserName    string `json:"user_name"`
 	Messages    int    `json:"messages"`
 	LastActive  string `json:"last_active"`
+	Internal    bool   `json:"internal"`
 }
 
 // ProfileSelection 是绑定到会话代的配置档案快照。
