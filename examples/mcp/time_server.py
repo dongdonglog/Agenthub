@@ -16,7 +16,7 @@ for line in sys.stdin:
         continue
     method = req.get("method")
     if method == "initialize":
-        reply(req["id"], {"protocolVersion": "2024-11-05", "capabilities": {}, "serverInfo": {"name": "demo", "version": "0.1"}})
+        reply(req["id"], {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "demo", "version": "0.1"}})
     elif method == "tools/list":
         reply(req["id"], {"tools": [{
             "name": "get_time",

@@ -179,6 +179,12 @@ docker compose up -d --build
 
 告警规则在 `deploy/prometheus/alerts.yml`（服务不可达、飞书断开、运行失败、投递失败、调用量异常）。
 
+## MCP 注意事项
+
+- MCP server 的 `initialize` 必须声明 `capabilities.tools`，否则 pi 会显示 connected 但 0 个工具；
+- `mcp.yaml` 里的相对文件路径会在生成 `mcp.json` 时解析为绝对路径，避免 pi 在会话工作区找不到脚本；
+- 修改 MCP 后保存即热更新 agent 与已有工作区。
+
 ## 已知升级问题
 
 0.2.0–0.2.3 的工作区复制使用硬链接，配置同步时可能截断源文件，表现为技能文件变成 0 字节、

@@ -14,13 +14,14 @@ RUN mkdir -p /out/data
 FROM node:22-bookworm-slim
 ARG PI_VERSION=1.4.0
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ripgrep bash procps \
+    && apt-get install -y --no-install-recommends ca-certificates ripgrep bash procps python3 \
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && npm cache clean --force
 WORKDIR /app
 COPY --from=build /out/agentd /app/agentd
 COPY migrations /app/migrations
+COPY examples/mcp /app/examples/mcp
 COPY --from=build --chown=node:node /out/data /data
 ENV AGENTHUB_HTTP_ADDR=0.0.0.0:8787
 ENV AGENTHUB_ADMIN_ADDR=0.0.0.0:8788

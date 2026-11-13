@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -129,9 +130,10 @@ func SystemPrompt() string {
 }
 
 type mcpServerFile struct {
-	Command string   `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
-	URL     string   `json:"url,omitempty"`
+	Command  string   `json:"command,omitempty"`
+	Args     []string `json:"args,omitempty"`
+	URL      string   `json:"url,omitempty"`
+	Exposure string   `json:"exposure,omitempty"`
 }
 
 type mcpFile struct {
@@ -153,11 +155,23 @@ func writeMCPConfig(path string, servers []struct {
 			continue
 		}
 		if srv.Transport == "http" && srv.URL != "" {
-			out.MCPServers[srv.Name] = mcpServerFile{URL: srv.URL}
+			out.MCPServers[srv.Name] = mcpServerFile{URL: srv.URL, Exposure: "deferred"}
 			continue
 		}
 		if srv.Command != "" {
-			out.MCPServers[srv.Name] = mcpServerFile{Command: srv.Command, Args: srv.Args}
+			args := make([]string, len(srv.Args))
+			for i, arg := range srv.Args {
+				// 相对文件路径按部署目录解析，避免 pi 在会话工作区里找不到脚本。
+				if arg != "" && !filepath.IsAbs(arg) && !strings.HasPrefix(arg, "-") {
+					if _, err := os.Stat(arg); err == nil {
+						if abs, err := filepath.Abs(arg); err == nil {
+							arg = abs
+						}
+					}
+				}
+				args[i] = arg
+			}
+			out.MCPServers[srv.Name] = mcpServerFile{Command: srv.Command, Args: args, Exposure: "deferred"}
 		}
 	}
 	raw, _ := json.MarshalIndent(out, "", "  ")
