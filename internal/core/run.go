@@ -96,6 +96,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		TraceID:        run.TraceID,
 		RunID:          run.ID,
 		ConversationID: conv,
+		Generation:     batch[0].Generation,
 		Progress:       progress,
 		History:        e.history(conv, batch),
 		SkillAllow:     binding.Skills,

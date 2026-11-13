@@ -43,6 +43,7 @@ type Config struct {
 	Webhook         WebhookConfig  `yaml:"webhook"`
 	Feishu          FeishuConfig   `yaml:"feishu"`
 	Dingtalk        DingtalkConfig `yaml:"dingtalk"`
+	Pi              PiConfig       `yaml:"pi"`
 	Agent           AgentConfig    `yaml:"agent"`
 	Log             LogConfig      `yaml:"log"`
 }
@@ -113,6 +114,17 @@ type DingtalkConfig struct {
 	BotName string `yaml:"bot_name"`
 }
 
+// PiConfig 是 pi 运行时配置。
+type PiConfig struct {
+	Bin            string `yaml:"bin"`
+	Tools          string `yaml:"tools"`
+	AgentDir       string `yaml:"agent_dir"`
+	SessionDir     string `yaml:"session_dir"`
+	WorkspaceDir   string `yaml:"workspace_dir"`
+	Isolation      string `yaml:"isolation"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+}
+
 // AgentConfig 是模型与执行配置。
 type AgentConfig struct {
 	Provider string `yaml:"provider"`
@@ -181,6 +193,12 @@ func defaults() Config {
 			Domain:         "https://open.feishu.cn",
 			RequireMention: true,
 		},
+		Pi: PiConfig{
+			Bin:            "pi",
+			Tools:          "read,bash,grep,find,ls,tool_search",
+			Isolation:      "namespace",
+			TimeoutSeconds: 600,
+		},
 		Dingtalk: DingtalkConfig{
 			RequireMention: true,
 		},
@@ -219,6 +237,13 @@ func applyEnv(cfg *Config) {
 	setBool(&cfg.Feishu.RequireMention, "FEISHU_REQUIRE_MENTION")
 	setList(&cfg.Feishu.MentionFreeChats, "FEISHU_MENTION_FREE_CHATS")
 	setBool(&cfg.Feishu.CardActionEnabled, "FEISHU_CARD_ACTION")
+	setStr(&cfg.Pi.Bin, "PI_BIN")
+	setStr(&cfg.Pi.Tools, "PI_TOOLS")
+	setStr(&cfg.Pi.AgentDir, "PI_AGENT_DIR")
+	setStr(&cfg.Pi.SessionDir, "PI_SESSION_DIR")
+	setStr(&cfg.Pi.WorkspaceDir, "PI_WORKSPACE_DIR")
+	setStr(&cfg.Pi.Isolation, "PI_ISOLATION")
+	setInt(&cfg.Pi.TimeoutSeconds, "PI_TIMEOUT_SECONDS")
 	setStr(&cfg.Dingtalk.ClientID, "DINGTALK_CLIENT_ID")
 	setStr(&cfg.Dingtalk.ClientSecret, "DINGTALK_CLIENT_SECRET")
 	setBool(&cfg.Dingtalk.RequireMention, "DINGTALK_REQUIRE_MENTION")

@@ -49,10 +49,18 @@ var validName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
 // NewStore 构造文件存储。
 func NewStore(dataDir string) (*Store, error) {
+	return NewStoreWithSkills(dataDir, filepath.Join(dataDir, "skills"))
+}
+
+// NewStoreWithSkills 指定技能目录构造存储。
+func NewStoreWithSkills(dataDir, skillsDir string) (*Store, error) {
 	if dataDir == "" {
 		return nil, errors.New("数据目录为空")
 	}
-	dir := filepath.Join(dataDir, "skills")
+	dir := skillsDir
+	if dir == "" {
+		dir = filepath.Join(dataDir, "skills")
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}

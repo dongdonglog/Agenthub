@@ -16,6 +16,7 @@ import (
 
 	"github.com/moying/agenthub/internal/admin"
 	"github.com/moying/agenthub/internal/agent"
+	"github.com/moying/agenthub/internal/agent/pi"
 	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
@@ -133,16 +134,6 @@ func run() int {
 		ch = dt
 	}
 
-	mcpManager := mcp.StartAll(ctx, filepath.Join(cfg.Storage.Dir, "mcp.yaml"), logger)
-	defer mcpManager.Close()
-
-	tools := make([]agent.Tool, 0, len(mcpManager.Tools())+1)
-	tools = append(tools, mcpManager.Tools()...)
-	tools = append(tools, &agent.ReadFileTool{Roots: []string{attachmentsDir, skillsDir}})
-	if summary := mcpManager.Summary(); summary != "" {
-		logger.Info("mcp loaded", "summary", summary)
-	}
-
 	profiles := store.NewProfileStore(cfg.Storage.Dir)
 	settingsStore := store.NewModelSettingsStore(cfg.Storage.Dir)
 	if saved, exists, err := settingsStore.Load(); err == nil && exists {
@@ -165,7 +156,47 @@ func run() int {
 		FallbackModel: cfg.Agent.FallbackModel,
 		VisionModel:   cfg.Agent.VisionModel,
 	})
-	runner := newAgent(cfg, skillsDir, tools, profiles, modelHolder, logger)
+
+	piRoot := filepath.Join(cfg.Storage.Dir, "pi")
+	piAgentDir := cfg.Pi.AgentDir
+	if piAgentDir == "" {
+		piAgentDir = filepath.Join(piRoot, "agent")
+	}
+	piSessionDir := cfg.Pi.SessionDir
+	if piSessionDir == "" {
+		piSessionDir = filepath.Join(piRoot, "sessions")
+	}
+	piWorkspaceDir := cfg.Pi.WorkspaceDir
+	if piWorkspaceDir == "" {
+		piWorkspaceDir = filepath.Join(piRoot, "workspaces")
+	}
+	preparePi := func(current agent.ModelSettings) error {
+		return pi.PrepareAgentDir(pi.AgentConfig{
+			Dir:          piAgentDir,
+			BaseURL:      current.BaseURL,
+			APIKey:       current.APIKey,
+			Model:        current.Model,
+			Fallback:     current.FallbackModel,
+			Vision:       current.VisionModel,
+			SystemPrompt: pi.SystemPrompt(),
+			SkillsSrc:    skillsDir,
+		})
+	}
+	if err := preparePi(modelHolder.Get()); err != nil {
+		logger.Error("pi agent dir 初始化失败", "error", err)
+		return 1
+	}
+	runner := pi.New(pi.Config{
+		Bin:          cfg.Pi.Bin,
+		Tools:        cfg.Pi.Tools,
+		AgentDir:     piAgentDir,
+		SessionDir:   piSessionDir,
+		WorkspaceDir: piWorkspaceDir,
+		Isolation:    cfg.Pi.Isolation,
+		Timeout:      time.Duration(cfg.Pi.TimeoutSeconds) * time.Second,
+		Logger:       logger,
+		ModelFunc:    func() string { return modelHolder.Get().Model },
+	})
 	engine := core.New(runner, ch, logger)
 	engine.SetConcurrency(cfg.MaxConcurrentRuns)
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
@@ -230,7 +261,7 @@ func run() int {
 		srv.RegisterCheck("dingtalk", func() (bool, string) { return true, "stream" })
 	}
 
-	adminStore, err := admin.NewStore(cfg.Storage.Dir)
+	adminStore, err := admin.NewStoreWithSkills(cfg.Storage.Dir, filepath.Join(piAgentDir, "skills"))
 	if err != nil {
 		logger.Error("admin storage unavailable", "error", err)
 		return 1
@@ -253,7 +284,7 @@ func run() int {
 		Version:      version.Version,
 		FeishuStatus: feishuStatus,
 		Agent:        runner,
-		Tools:        tools,
+		Tools:        nil,
 		Profiles:     profiles,
 		History: func(ctx context.Context) ([]store.Generation, error) {
 			if journal == nil {
@@ -288,6 +319,9 @@ func run() int {
 		ModelSettings: func() agent.ModelSettings { return modelHolder.Get() },
 		SetModelSettings: func(v agent.ModelSettings) error {
 			modelHolder.Set(v)
+			if err := preparePi(v); err != nil {
+				logger.Warn("regenerate pi config failed", "error", err)
+			}
 			return settingsStore.Save(store.ModelSettings{
 				BaseURL:       v.BaseURL,
 				APIKey:        v.APIKey,

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -36,6 +37,8 @@ type Config struct {
 	// AbortGrace 是发出 abort 后等待进程收敛的时间。
 	AbortGrace time.Duration
 	Logger     *slog.Logger
+	// ModelFunc 返回当前主模型；为空时使用 Model。
+	ModelFunc func() string
 }
 
 // Runtime 用 pi RPC 执行一次运行。
@@ -60,6 +63,30 @@ func New(cfg Config) *Runtime {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	for _, key := range []string{"AgentDir", "SessionDir", "WorkspaceDir"} {
+		var value string
+		switch key {
+		case "AgentDir":
+			value = cfg.AgentDir
+		case "SessionDir":
+			value = cfg.SessionDir
+		case "WorkspaceDir":
+			value = cfg.WorkspaceDir
+		}
+		if value == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(value); err == nil {
+			switch key {
+			case "AgentDir":
+				cfg.AgentDir = abs
+			case "SessionDir":
+				cfg.SessionDir = abs
+			case "WorkspaceDir":
+				cfg.WorkspaceDir = abs
+			}
+		}
+	}
 	return &Runtime{cfg: cfg}
 }
 
@@ -83,7 +110,8 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	ws := filepath.Join(r.cfg.WorkspaceDir, base)
 	session := filepath.Join(r.cfg.SessionDir, base+".jsonl")
 
-	if err := ensureWorkspace(ws, r.cfg.AgentDir, buildAgentsMD(in.ConversationID, in.Generation, attachments)); err != nil {
+	agentsMD := buildAgentsMD(in.ConversationID, in.Generation, attachments)
+	if err := ensureWorkspace(ws, r.cfg.AgentDir, agentsMD); err != nil {
 		return agent.Output{}, err
 	}
 	_, statErr := os.Stat(session)
@@ -106,7 +134,7 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	}
 	prompt := texts[len(texts)-1]
 
-	out, err := r.runProcess(ctx, ws, session, prompt, in)
+	out, err := r.runProcess(ctx, ws, session, prompt, in, agentsMD)
 	if errors.Is(err, errAborted) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		_ = appendAbortMarker(session, in.RunID, "aborted")
 	}
@@ -150,17 +178,28 @@ type assistantMessage struct {
 	Content    json.RawMessage `json:"content"`
 }
 
-func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in agent.Input) (agent.Output, error) {
+func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in agent.Input, agentsMD string) (agent.Output, error) {
 	args := make([]string, 0, 12)
 	bin := r.cfg.Bin
 	if r.cfg.Isolation == "namespace" && runtime.GOOS == "linux" {
 		args = append(args, "--user", "--map-root-user", "--pid", "--fork", bin)
 		bin = "unshare"
 	}
-	if r.cfg.Provider != "" && r.cfg.Model != "" {
-		args = append(args, "--provider", r.cfg.Provider, "--model", r.cfg.Model)
+	model := r.cfg.Model
+	if r.cfg.ModelFunc != nil {
+		if current := r.cfg.ModelFunc(); current != "" {
+			model = current
+		}
 	}
-	args = append(args, "--mode", "rpc", "--session", session, "--tools", r.cfg.Tools)
+	provider := r.cfg.Provider
+	if provider == "" {
+		provider = "agenthub"
+	}
+	if model != "" {
+		args = append(args, "--provider", provider, "--model", model)
+	}
+	args = append(args, "--mode", "rpc", "--session", session, "--tools", r.cfg.Tools,
+		"--no-context-files", "--append-system-prompt", agentsMD)
 	if !r.cfg.Approve {
 		args = append(args, "--no-approve")
 	}
@@ -203,10 +242,13 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 		_, err = stdin.Write(append(raw, '\n'))
 		return err
 	}
+	var stderrTail string
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			r.cfg.Logger.Debug("pi stderr", "line", truncate(sc.Text(), 300))
+			line := sc.Text()
+			stderrTail = truncate(line, 500)
+			r.cfg.Logger.Debug("pi stderr", "line", truncate(line, 300))
 		}
 	}()
 
@@ -221,7 +263,11 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 		for sc.Scan() {
 			lines <- lineMsg{line: append([]byte(nil), sc.Bytes()...)}
 		}
-		lines <- lineMsg{err: sc.Err()}
+		if err := sc.Err(); err != nil {
+			lines <- lineMsg{err: err}
+			return
+		}
+		lines <- lineMsg{err: io.EOF}
 	}()
 
 	if err := sendRequest(write, "prompt", map[string]any{"message": prompt}); err != nil {
@@ -259,6 +305,12 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 			return settle(true)
 		case lm := <-lines:
 			if lm.err != nil {
+				if lm.err == io.EOF || lm.err == context.Canceled {
+					if terminalErr == "" && len(final) == 0 && stderrTail != "" {
+						terminalErr = "进程提前退出：" + stderrTail
+					}
+					return settle(false)
+				}
 				return settle(false)
 			}
 			var ev rpcEvent
