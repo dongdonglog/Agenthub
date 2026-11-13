@@ -55,6 +55,8 @@ type Options struct {
 	Journal *store.Journal
 	// Scheduler 用于立即执行定时任务。
 	Scheduler *scheduler.Scheduler
+	// ReloadAgentConfig 在 MCP/模型配置变更后重新生成 pi 配置。
+	ReloadAgentConfig func() error
 }
 
 // Server 提供管理页面与管理 API。
@@ -876,6 +878,11 @@ func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("mcp saved", "name", name)
+		if s.opts.ReloadAgentConfig != nil {
+			if err := s.opts.ReloadAgentConfig(); err != nil {
+				s.log.Warn("reload agent config failed", "error", err)
+			}
+		}
 		s.audit(r, "mcp.save", name, "")
 		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok", "name": name})
 	case http.MethodDelete:
@@ -884,6 +891,11 @@ func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("mcp deleted", "name", name)
+		if s.opts.ReloadAgentConfig != nil {
+			if err := s.opts.ReloadAgentConfig(); err != nil {
+				s.log.Warn("reload agent config failed", "error", err)
+			}
+		}
 		s.audit(r, "mcp.delete", name, "")
 		writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 	default:

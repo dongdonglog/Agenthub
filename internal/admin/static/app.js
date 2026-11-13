@@ -156,7 +156,7 @@ async function renderOverview(data) {
       card('工具', data.counts.tools),
     ]),
     el('div', { className: 'panel' }, [
-      el('div', { className: 'head' }, [el('b', {}, ['模型']), el('span', { className: 'muted' }, [`Profile：${data.active_profile || '未指定'} · `, el('a', { href: '#/settings' }, ['去配置'])])]),
+      el('div', { className: 'head' }, [el('b', {}, ['模型']), el('span', { className: 'muted' }, [el('a', { href: '#/settings' }, ['去配置'])])]),
       el('div', { className: 'muted' }, data.model.echo ? '未配置 API Key，当前为回显模式' : `${data.model.model} · ${data.model.base_url}`),
       el('div', { className: 'muted small' }, [`运行时 ${data.runtime || '—'} ${data.pi_version || ''}`]),
     ]),
@@ -201,11 +201,6 @@ async function renderSession(id) {
   ]);
   const msgRows = data.messages.map((m) => [m.ID || m.id, m.Status || m.status, (m.Text || m.text || '').slice(0, 60)]);
   const runRows = data.runs.map((r) => [r.ID || r.id, r.State || r.state, (r.Output || r.output || '').slice(0, 60)]);
-  const profileSelect = el('select');
-  for (const p of profiles.items) {
-    profileSelect.append(el('option', { value: p.name }, [p.name]));
-  }
-  if (data.profile) profileSelect.value = data.profile;
   const priorityInput = el('input', {
     type: 'number',
     value: data.priority ?? '',
@@ -223,24 +218,12 @@ async function renderSession(id) {
     } catch (err) { toast(err.message, true); }
   });
 
-  const applyProfile = el('button', {}, ['应用 Profile']);
-  applyProfile.addEventListener('click', async () => {
-    try {
-      await api(`/sessions/${encodeURIComponent(id)}/profile`, {
-        method: 'PUT',
-        body: JSON.stringify({ name: profileSelect.value }),
-      });
-      toast(`已应用到 ${profileSelect.value}`);
-      await renderSession(id);
-    } catch (err) { toast(err.message, true); }
-  });
-
   content.replaceChildren(
     el('h2', {}, ['会话详情']),
-    el('p', { className: 'lede' }, [id, data.profile ? ` · Profile：${data.profile}` : '']),
+    el('p', { className: 'lede' }, [id]),
     el('div', { className: 'panel' }, [
-      el('div', { className: 'head' }, [el('b', {}, ['配置档案']), el('span', { className: 'muted' }, ['只影响当前会话代'])]),
-      el('div', { className: 'actions' }, [profileSelect, applyProfile, priorityInput, savePriority]),
+      el('div', { className: 'head' }, [el('b', {}, ['调度优先级']), el('span', { className: 'muted' }, ['影响排队顺序'])]),
+      el('div', { className: 'actions' }, [priorityInput, savePriority]),
     ]),
     el('h3', {}, ['消息']),
     msgRows.length ? table(['ID', '状态', '内容'], msgRows) : empty('📭', '没有消息'),

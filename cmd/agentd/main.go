@@ -187,6 +187,9 @@ func run() int {
 		logger.Error("pi agent dir 初始化失败", "error", err)
 		return 1
 	}
+	if err := pi.SyncAgentConfig(piWorkspaceDir, piAgentDir); err != nil {
+		logger.Warn("sync pi workspaces failed", "error", err)
+	}
 	piVersion := detectPiVersion(cfg.Pi.Bin)
 	logger.Info("pi runtime", "bin", cfg.Pi.Bin, "version", piVersion)
 	runner := pi.New(pi.Config{
@@ -358,6 +361,7 @@ func run() int {
 	if db != nil {
 		go purgeLoop(ctx, db, cfg.RetentionDays, logger)
 	}
+	go workspaceCleanupLoop(workCtx, piWorkspaceDir, piSessionDir, cfg.RetentionDays, logger)
 
 	<-ctx.Done()
 	logger.Info("shutting down; draining in-flight runs")
@@ -547,6 +551,29 @@ func detectPiVersion(bin string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// workspaceCleanupLoop 定期清理超过保留期的 pi 工作区与会话文件。
+func workspaceCleanupLoop(ctx context.Context, workspaces, sessions string, days int, logger *slog.Logger) {
+	if days <= 0 {
+		return
+	}
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cutoff := time.Now().AddDate(0, 0, -days)
+			removed, err := pi.CleanupExpired(workspaces, sessions, cutoff)
+			if err != nil {
+				logger.Warn("pi workspace cleanup failed", "error", err)
+			} else if removed > 0 {
+				logger.Info("pi workspace cleanup", "removed", removed)
+			}
+		}
+	}
 }
 
 func purgeLoop(ctx context.Context, db *store.DB, days int, logger *slog.Logger) {

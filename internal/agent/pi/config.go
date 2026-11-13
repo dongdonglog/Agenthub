@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -159,4 +160,76 @@ func writeMCPConfig(path string, servers []struct {
 	}
 	raw, _ := json.MarshalIndent(out, "", "  ")
 	return os.WriteFile(path, raw, 0o600)
+}
+
+// SyncAgentConfig 把部署配置同步到已有会话工作区（模型/系统提示/MCP/技能）。
+func SyncAgentConfig(workspacesDir, agentDir string) error {
+	entries, err := os.ReadDir(workspacesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	files := []string{"models.json", "SYSTEM.md", "mcp.json"}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		target := filepath.Join(workspacesDir, entry.Name(), ".agenthub-agent")
+		if _, err := os.Stat(target); err != nil {
+			continue
+		}
+		for _, name := range files {
+			src := filepath.Join(agentDir, name)
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			if err := copyFile(src, filepath.Join(target, name)); err != nil {
+				return err
+			}
+		}
+		srcSkills := filepath.Join(agentDir, "skills")
+		if _, err := os.Stat(srcSkills); err == nil {
+			if err := copyTree(srcSkills, filepath.Join(target, "skills")); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// CleanupExpired 删除超过保留期的工作区与会话文件。
+func CleanupExpired(workspacesDir, sessionDir string, cutoff time.Time) (int, error) {
+	removed := 0
+	entries, err := os.ReadDir(workspacesDir)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(workspacesDir, entry.Name())); err == nil {
+			removed++
+		}
+	}
+	sessions, err := os.ReadDir(sessionDir)
+	if err != nil && !os.IsNotExist(err) {
+		return removed, err
+	}
+	for _, entry := range sessions {
+		info, err := entry.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(sessionDir, entry.Name())); err == nil {
+			removed++
+		}
+	}
+	return removed, nil
 }
