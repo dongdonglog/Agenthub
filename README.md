@@ -160,7 +160,7 @@ go run ./cmd/agentd
 
 ## 技能
 
-技能是一组 Markdown：`SKILL.md` 写流程，`references/` 放清单和手册。回答时注入系统提示词，
+技能是一组 Markdown：`SKILL.md` 写流程，`references/` 放清单和手册；也兼容单个 `.md` 扁平技能。回答时注入系统提示词，
 由模型自行判断是否适用。
 
 **仓库不内置业务技能**，每个部署方自带：
