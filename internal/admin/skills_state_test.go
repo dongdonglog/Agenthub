@@ -18,6 +18,7 @@ import (
 	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
+	"github.com/moying/agenthub/internal/modelcfg"
 	"github.com/moying/agenthub/internal/store"
 )
 
@@ -368,35 +369,36 @@ func TestModelSettingsAPI(t *testing.T) {
 	dir := t.TempDir()
 	st, _ := admin.NewStore(dir)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	current := agent.ModelSettings{BaseURL: "https://gw/v1", APIKey: "sk-secret1234", Model: "flash", VisionModel: "v"}
-	var updated agent.ModelSettings
+	current := modelcfg.Config{
+		Version:   2,
+		Providers: []modelcfg.Provider{{Name: "p", BaseURL: "https://gw/v1", APIKey: "sk-secret1234"}},
+		Models:    []modelcfg.Model{{ID: "m", Provider: "p", Model: "flash"}},
+		Routes:    []modelcfg.Route{{Name: "main", Candidates: []string{"m"}}},
+	}
+	var updated modelcfg.Config
 	var audited []string
 	h := admin.New(&config.Config{Storage: config.StorageConfig{Dir: dir}}, core.New(nil, nil, logger), st, admin.Options{
-		ModelSettings:    func() agent.ModelSettings { return current },
-		SetModelSettings: func(v agent.ModelSettings) error { updated = v; current = v; return nil },
-		AuditRecord:      func(actor, action, target, detail string) { audited = append(audited, action) },
+		ModelConfig:    func() modelcfg.Config { return current },
+		SetModelConfig: func(v modelcfg.Config) error { updated = v; current = v; return nil },
+		AuditRecord:    func(actor, action, target, detail string) { audited = append(audited, action) },
 	}, logger).Handler()
 
 	rec := do(t, h, http.MethodGet, "/admin/api/v1/model", "")
 	body := rec.Body.String()
-	if strings.Contains(body, "sk-secret1234") || !strings.Contains(body, `"key_hint":"****1234"`) || !strings.Contains(body, `"has_key":true`) {
+	if strings.Contains(body, "sk-secret1234") || !strings.Contains(body, `"config"`) {
 		t.Fatalf("GET 泄露或格式错误: %s", body)
 	}
 
-	rec = do(t, h, http.MethodPut, "/admin/api/v1/model", `{"base_url":"https://gw2/v1","model":"pro","api_key":""}`)
+	put := `{"version":2,"providers":[{"name":"p","base_url":"https://gw2/v1"}],"models":[{"id":"m","provider":"p","model":"pro"}],"routes":[{"name":"main","candidates":["m"]}]}`
+	rec = do(t, h, http.MethodPut, "/admin/api/v1/model", put)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d %s", rec.Code, rec.Body.String())
 	}
-	if updated.BaseURL != "https://gw2/v1" || updated.Model != "pro" || updated.APIKey != "sk-secret1234" {
+	if updated.Providers[0].BaseURL != "https://gw2/v1" || updated.Providers[0].APIKey != "sk-secret1234" {
 		t.Fatalf("updated = %+v", updated)
 	}
 	if len(audited) == 0 || audited[0] != "model.update" {
 		t.Fatalf("audit = %v", audited)
-	}
-
-	rec = do(t, h, http.MethodPut, "/admin/api/v1/model", `{"base_url":"https://gw2/v1","model":"pro","clear_key":true}`)
-	if rec.Code != http.StatusOK || updated.APIKey != "" {
-		t.Fatalf("clear key 失败: %d %+v", rec.Code, updated)
 	}
 }
 

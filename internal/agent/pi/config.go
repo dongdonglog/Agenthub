@@ -22,6 +22,13 @@ type AgentConfig struct {
 	SystemPrompt string
 	SkillsSrc    string
 	MCPFile      string
+	// RouterURL/RouterToken 非空时使用内置模型路由。
+	RouterURL      string
+	RouterToken    string
+	RouteName      string
+	ContextWindow  int
+	MaxTokens      int
+	SupportsImages bool
 }
 
 type modelsFile struct {
@@ -37,7 +44,10 @@ type providerConfig struct {
 }
 
 type modelConfig struct {
-	ID string `json:"id"`
+	ID            string   `json:"id"`
+	ContextWindow int      `json:"contextWindow,omitempty"`
+	MaxTokens     int      `json:"maxTokens,omitempty"`
+	Input         []string `json:"input,omitempty"`
 }
 
 // PrepareAgentDir 生成 models.json / SYSTEM.md 并迁移技能目录。
@@ -49,28 +59,64 @@ func PrepareAgentDir(cfg AgentConfig) error {
 		return err
 	}
 
-	seen := map[string]bool{}
-	var models []modelConfig
-	for _, id := range []string{cfg.Model, cfg.Fallback, cfg.Vision} {
-		if id == "" || seen[id] {
-			continue
+	if cfg.RouterURL != "" {
+		route := cfg.RouteName
+		if route == "" {
+			route = "main"
 		}
-		seen[id] = true
-		models = append(models, modelConfig{ID: id})
-	}
-	if len(models) > 0 {
+		window := cfg.ContextWindow
+		if window <= 0 {
+			window = 128000
+		}
+		maxTokens := cfg.MaxTokens
+		if maxTokens <= 0 {
+			maxTokens = 8192
+		}
+		input := []string{"text"}
+		if cfg.SupportsImages {
+			input = append(input, "image")
+		}
 		file := modelsFile{
 			Schema: "https://pi.dev/schemas/models.schema.json",
 			Providers: map[string]providerConfig{
-				"agenthub": {BaseURL: cfg.BaseURL, API: "openai-completions", APIKey: cfg.APIKey, Models: models},
+				"agenthub": {
+					BaseURL: cfg.RouterURL,
+					API:     "openai-completions",
+					APIKey:  cfg.RouterToken,
+					Models: []modelConfig{{
+						ID: route, ContextWindow: window, MaxTokens: maxTokens, Input: input,
+					}},
+				},
 			},
 		}
 		raw, _ := json.MarshalIndent(file, "", "  ")
 		if err := os.WriteFile(filepath.Join(cfg.Dir, "models.json"), raw, 0o600); err != nil {
 			return err
 		}
-		// pi 会缓存模型目录；配置变更后清掉，避免旧缓存导致 provider 不存在。
 		_ = os.Remove(filepath.Join(cfg.Dir, "models-store.json"))
+	} else {
+		seen := map[string]bool{}
+		var models []modelConfig
+		for _, id := range []string{cfg.Model, cfg.Fallback, cfg.Vision} {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			models = append(models, modelConfig{ID: id})
+		}
+		if len(models) > 0 {
+			file := modelsFile{
+				Schema: "https://pi.dev/schemas/models.schema.json",
+				Providers: map[string]providerConfig{
+					"agenthub": {BaseURL: cfg.BaseURL, API: "openai-completions", APIKey: cfg.APIKey, Models: models},
+				},
+			}
+			raw, _ := json.MarshalIndent(file, "", "  ")
+			if err := os.WriteFile(filepath.Join(cfg.Dir, "models.json"), raw, 0o600); err != nil {
+				return err
+			}
+			_ = os.Remove(filepath.Join(cfg.Dir, "models-store.json"))
+		}
 	}
 
 	if cfg.MCPFile != "" {

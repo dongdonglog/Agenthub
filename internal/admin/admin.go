@@ -17,6 +17,8 @@ import (
 	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
+	"github.com/moying/agenthub/internal/modelcfg"
+	"github.com/moying/agenthub/internal/modelrouter"
 	"github.com/moying/agenthub/internal/scheduler"
 	"github.com/moying/agenthub/internal/store"
 )
@@ -56,10 +58,14 @@ type Options struct {
 	AuditRecord func(actor, action, target, detail string)
 	// AuditList 读取最近审计。
 	AuditList func(ctx context.Context, limit int) ([]store.AuditEntry, error)
-	// ModelSettings 返回当前模型配置（含明文 Key，仅内部使用）。
-	ModelSettings func() agent.ModelSettings
-	// SetModelSettings 更新模型配置；为空表示不支持在线修改。
-	SetModelSettings func(agent.ModelSettings) error
+	// ModelConfig 返回当前模型路由配置（含明文 Key，仅内部使用）。
+	ModelConfig func() modelcfg.Config
+	// SetModelConfig 保存模型路由配置并热更新。
+	SetModelConfig func(modelcfg.Config) error
+	// ModelHealth 返回候选健康状态。
+	ModelHealth func() []modelrouter.CandidateHealth
+	// TestModel 测试某条线路。
+	TestModel func(ctx context.Context, route string) error
 	// Journal 用于定时任务读写；为空表示不启用定时任务管理。
 	Journal *store.Journal
 	// Scheduler 用于立即执行定时任务。
@@ -133,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/settings", s.handleSettings)
 	mux.HandleFunc("GET /admin/api/v1/model", s.handleModel)
 	mux.HandleFunc("PUT /admin/api/v1/model", s.handleModel)
+	mux.HandleFunc("POST /admin/api/v1/model/test", s.handleModelTest)
 	mux.HandleFunc("GET /admin/api/v1/profiles", s.handleProfiles)
 	mux.HandleFunc("PUT /admin/api/v1/profiles/{name}", s.handleProfile)
 	mux.HandleFunc("DELETE /admin/api/v1/profiles/{name}", s.handleProfile)
@@ -983,61 +990,89 @@ func (s *Server) handleTest(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleModel(rw http.ResponseWriter, r *http.Request) {
-	if s.opts.ModelSettings == nil {
+	if s.opts.ModelConfig == nil {
 		writeError(rw, http.StatusServiceUnavailable, "模型配置未接入")
 		return
 	}
-	current := s.opts.ModelSettings()
 	if r.Method == http.MethodGet {
 		writeJSON(rw, http.StatusOK, map[string]any{
-			"base_url":       current.BaseURL,
-			"model":          current.Model,
-			"fallback_model": current.FallbackModel,
-			"vision_model":   current.VisionModel,
-			"has_key":        current.APIKey != "",
-			"key_hint":       maskKey(current.APIKey),
+			"config": maskModelConfig(s.opts.ModelConfig()),
+			"health": healthOrEmpty(s.opts.ModelHealth),
 		})
 		return
 	}
-	if s.opts.SetModelSettings == nil {
+	if s.opts.SetModelConfig == nil {
 		writeError(rw, http.StatusServiceUnavailable, "不支持在线修改模型配置")
 		return
 	}
+	var body modelcfg.Config
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	current := s.opts.ModelConfig()
+	keys := map[string]string{}
+	for _, provider := range current.Providers {
+		keys[provider.Name] = provider.APIKey
+	}
+	for i := range body.Providers {
+		if key := strings.TrimSpace(body.Providers[i].APIKey); key != "" {
+			keys[body.Providers[i].Name] = key
+		} else {
+			body.Providers[i].APIKey = keys[body.Providers[i].Name]
+		}
+	}
+	if err := body.Validate(); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.opts.SetModelConfig(body); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.audit(r, "model.update", "routes", "")
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "config": maskModelConfig(body)})
+}
+
+func (s *Server) handleModelTest(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.TestModel == nil {
+		writeError(rw, http.StatusServiceUnavailable, "模型测试未接入")
+		return
+	}
 	var body struct {
-		BaseURL       string `json:"base_url"`
-		APIKey        string `json:"api_key"`
-		Model         string `json:"model"`
-		FallbackModel string `json:"fallback_model"`
-		VisionModel   string `json:"vision_model"`
-		ClearKey      bool   `json:"clear_key"`
+		Route string `json:"route"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(rw, http.StatusBadRequest, err.Error())
 		return
 	}
-	next := agent.ModelSettings{
-		BaseURL:       strings.TrimSpace(body.BaseURL),
-		APIKey:        current.APIKey,
-		Model:         strings.TrimSpace(body.Model),
-		FallbackModel: strings.TrimSpace(body.FallbackModel),
-		VisionModel:   strings.TrimSpace(body.VisionModel),
+	if body.Route == "" {
+		body.Route = "main"
 	}
-	if next.BaseURL == "" || next.Model == "" {
-		writeError(rw, http.StatusBadRequest, "base_url 与 model 不能为空")
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	if err := s.opts.TestModel(ctx, body.Route); err != nil {
+		writeError(rw, http.StatusBadGateway, err.Error())
 		return
 	}
-	switch {
-	case body.ClearKey:
-		next.APIKey = ""
-	case strings.TrimSpace(body.APIKey) != "":
-		next.APIKey = strings.TrimSpace(body.APIKey)
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "route": body.Route})
+}
+
+func healthOrEmpty(fn func() []modelrouter.CandidateHealth) []modelrouter.CandidateHealth {
+	if fn == nil {
+		return nil
 	}
-	if err := s.opts.SetModelSettings(next); err != nil {
-		writeError(rw, http.StatusInternalServerError, err.Error())
-		return
+	return fn()
+}
+
+func maskModelConfig(cfg modelcfg.Config) modelcfg.Config {
+	out := cfg
+	out.Providers = make([]modelcfg.Provider, len(cfg.Providers))
+	for i, provider := range cfg.Providers {
+		provider.APIKey = ""
+		out.Providers[i] = provider
 	}
-	s.audit(r, "model.update", next.Model, "")
-	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "has_key": next.APIKey != ""})
+	return out
 }
 
 func priorityResponse(e *core.Engine, id string) any {

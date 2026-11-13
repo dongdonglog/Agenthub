@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,6 +24,8 @@ import (
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/httpapi"
+	"github.com/moying/agenthub/internal/modelcfg"
+	"github.com/moying/agenthub/internal/modelrouter"
 	"github.com/moying/agenthub/internal/obs"
 	"github.com/moying/agenthub/internal/platform/dingtalk"
 	"github.com/moying/agenthub/internal/platform/feishu"
@@ -135,27 +139,46 @@ func run() int {
 	}
 
 	profiles := store.NewProfileStore(cfg.Storage.Dir)
-	settingsStore := store.NewModelSettingsStore(cfg.Storage.Dir)
-	if saved, exists, err := settingsStore.Load(); err == nil && exists {
-		if saved.BaseURL != "" {
-			cfg.Agent.BaseURL = saved.BaseURL
-		}
-		if saved.Model != "" {
-			cfg.Agent.Model = saved.Model
-		}
-		if saved.APIKey != "" {
-			cfg.Agent.APIKey = saved.APIKey
-		}
-		cfg.Agent.FallbackModel = saved.FallbackModel
-		cfg.Agent.VisionModel = saved.VisionModel
+
+	modelStore := modelcfg.NewStore(filepath.Join(cfg.Storage.Dir, "settings.yaml"))
+	modelConfig, err := modelStore.Load()
+	if err != nil {
+		logger.Error("load model config failed", "error", err)
+		return 1
 	}
-	modelHolder := agent.NewSettingsHolder(agent.ModelSettings{
-		BaseURL:       cfg.Agent.BaseURL,
-		APIKey:        cfg.Agent.APIKey,
-		Model:         cfg.Agent.Model,
-		FallbackModel: cfg.Agent.FallbackModel,
-		VisionModel:   cfg.Agent.VisionModel,
-	})
+	if len(modelConfig.Providers) == 0 {
+		legacyStore := store.NewModelSettingsStore(cfg.Storage.Dir)
+		if saved, exists, err := legacyStore.Load(); err == nil && exists {
+			if saved.BaseURL != "" {
+				cfg.Agent.BaseURL = saved.BaseURL
+			}
+			if saved.Model != "" {
+				cfg.Agent.Model = saved.Model
+			}
+			if saved.APIKey != "" {
+				cfg.Agent.APIKey = saved.APIKey
+			}
+			cfg.Agent.FallbackModel = saved.FallbackModel
+			cfg.Agent.VisionModel = saved.VisionModel
+		}
+		modelConfig = modelcfg.Legacy(cfg.Agent.BaseURL, cfg.Agent.APIKey, cfg.Agent.Model, cfg.Agent.FallbackModel, cfg.Agent.VisionModel)
+		if err := modelStore.Save(modelConfig); err != nil {
+			logger.Warn("persist migrated model config failed", "error", err)
+		}
+	}
+
+	metrics := obs.NewMetrics()
+	routerToken := randomToken()
+	router := modelrouter.New(modelConfig, routerToken, metrics, logger)
+	if err := router.Start(); err != nil {
+		logger.Error("model router start failed", "error", err)
+		return 1
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = router.Close(ctx)
+	}()
 
 	piRoot := filepath.Join(cfg.Storage.Dir, "pi")
 	piAgentDir := cfg.Pi.AgentDir
@@ -170,20 +193,42 @@ func run() int {
 	if piWorkspaceDir == "" {
 		piWorkspaceDir = filepath.Join(piRoot, "workspaces")
 	}
-	preparePi := func(current agent.ModelSettings) error {
+	preparePi := func(current modelcfg.Config) error {
+		route, ok := current.Route("main")
+		if !ok {
+			return fmt.Errorf("模型配置缺少 main 线路")
+		}
+		window, maxTokens := 0, 0
+		images := false
+		for _, id := range route.Candidates {
+			model, ok := current.Model(id)
+			if !ok {
+				continue
+			}
+			if window == 0 || (model.ContextWindow > 0 && model.ContextWindow < window) {
+				window = model.ContextWindow
+			}
+			if maxTokens == 0 || (model.MaxTokens > 0 && model.MaxTokens < maxTokens) {
+				maxTokens = model.MaxTokens
+			}
+			if model.Supports("vision") {
+				images = true
+			}
+		}
 		return pi.PrepareAgentDir(pi.AgentConfig{
-			Dir:          piAgentDir,
-			BaseURL:      current.BaseURL,
-			APIKey:       current.APIKey,
-			Model:        current.Model,
-			Fallback:     current.FallbackModel,
-			Vision:       current.VisionModel,
-			SystemPrompt: pi.SystemPrompt(),
-			SkillsSrc:    skillsDir,
-			MCPFile:      filepath.Join(cfg.Storage.Dir, "mcp.yaml"),
+			Dir:            piAgentDir,
+			RouterURL:      router.URL(),
+			RouterToken:    router.Token(),
+			RouteName:      route.Name,
+			ContextWindow:  window,
+			MaxTokens:      maxTokens,
+			SupportsImages: images,
+			SystemPrompt:   pi.SystemPrompt(),
+			SkillsSrc:      skillsDir,
+			MCPFile:        filepath.Join(cfg.Storage.Dir, "mcp.yaml"),
 		})
 	}
-	if err := preparePi(modelHolder.Get()); err != nil {
+	if err := preparePi(modelConfig); err != nil {
 		logger.Error("pi agent dir 初始化失败", "error", err)
 		return 1
 	}
@@ -201,7 +246,8 @@ func run() int {
 		Isolation:    cfg.Pi.Isolation,
 		Timeout:      time.Duration(cfg.Pi.TimeoutSeconds) * time.Second,
 		Logger:       logger,
-		ModelFunc:    func() string { return modelHolder.Get().Model },
+		Provider:     "agenthub",
+		Model:        "main",
 	})
 	engine := core.New(runner, ch, logger)
 	engine.SetGenerationCleaner(func(conv string, generation int) {
@@ -244,7 +290,6 @@ func run() int {
 		go taskScheduler.Run(workCtx)
 	}
 
-	metrics := obs.NewMetrics()
 	engine.SetMetrics(metrics)
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 	if db != nil {
@@ -330,24 +375,41 @@ func run() int {
 		Journal:   journal,
 		Scheduler: taskScheduler,
 		ReloadAgentConfig: func() error {
-			if err := preparePi(modelHolder.Get()); err != nil {
+			if err := preparePi(router.Config()); err != nil {
 				return err
 			}
 			return pi.SyncAgentConfig(piWorkspaceDir, piAgentDir)
 		},
-		ModelSettings: func() agent.ModelSettings { return modelHolder.Get() },
-		SetModelSettings: func(v agent.ModelSettings) error {
-			modelHolder.Set(v)
-			if err := preparePi(v); err != nil {
-				logger.Warn("regenerate pi config failed", "error", err)
+		ModelConfig: func() modelcfg.Config { return router.Config() },
+		SetModelConfig: func(v modelcfg.Config) error {
+			if err := modelStore.Save(v); err != nil {
+				return err
 			}
-			return settingsStore.Save(store.ModelSettings{
-				BaseURL:       v.BaseURL,
-				APIKey:        v.APIKey,
-				Model:         v.Model,
-				FallbackModel: v.FallbackModel,
-				VisionModel:   v.VisionModel,
-			})
+			router.Update(v)
+			if err := preparePi(v); err != nil {
+				return err
+			}
+			return pi.SyncAgentConfig(piWorkspaceDir, piAgentDir)
+		},
+		ModelHealth: router.Health,
+		TestModel: func(ctx context.Context, route string) error {
+			payload := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"ping"}],"max_tokens":8}`, route)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, router.URL()+"/chat/completions", strings.NewReader(payload))
+			if err != nil {
+				return err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+router.Token())
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+				return fmt.Errorf("线路测试失败（%d）：%s", resp.StatusCode, string(raw))
+			}
+			return nil
 		},
 	}, logger)
 
@@ -548,6 +610,15 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 }
 
 // purgeLoop 定期清理过期历史数据。
+// randomToken 生成内部路由的随机 token。
+func randomToken() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
+}
+
 // detectPiVersion 读取 pi 版本，失败返回空。
 func detectPiVersion(bin string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
