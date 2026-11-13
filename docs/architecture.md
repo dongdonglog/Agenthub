@@ -22,7 +22,7 @@ flowchart TB
         DE["core/delivery<br/>outbox·幂等·重试"]
         PR["core/projection<br/>卡片·表情"]
         AG["agent/loop<br/>模型·工具·压缩"]
-        TL["agent/tools<br/>内置·MCP·沙箱"]
+        TL["pi 运行时<br/>工作区·工具"]
         AD["admin<br/>templ 页面 + API"]
         OB["obs<br/>日志·指标·trace"]
     end
@@ -95,12 +95,18 @@ queued ──▶ running ──▶ completed
 - `interrupted` 与 `failed` 都必须产生一条"中断/失败说明"投递；
 - 终态不可逆；迟到事件按 `run_id` 丢弃。
 
-## 4.1 与 AA / pi 的差异
+## 4.1 pi 运行时
 
-AA 把一次运行交给外部 `pi` CLI（Node、按会话工作区、批输入/JSON 输出）；AgentHub 用进程内
-Go agent loop（OpenAI 兼容接口 + 工具调用），不依赖 Node。两者在“批次冻结、单会话单运行、
-投递幂等”这些不变量上一致，差异在运行时与隔离方式：AgentHub 目前没有 pi 的 bash 沙箱与
-扩展机制，工具以 MCP stdio 为主。
+一次运行由 `pi --mode rpc` 子进程执行：
+
+- 会话代工作区：`.agenthub-agent/`（部署配置副本）、`AGENTS.md`、`attachments/`（只读）、`outbox/`；
+- 批次消息预写 pi 会话文件（v3 JSONL），最后一条通过 `prompt` 触发；
+- 事件：`agent_start`、`message_update`、`tool_execution_start/end`、`message_end`、`agent_settled`；
+- 收敛以 `agent_settled` 为准；超时/取消先 `clear_queue` 再 `abort`，宽限后杀进程组；
+- 部署配置 `models.json`/`SYSTEM.md`/`skills`/`mcp.json` 在启动时生成，工作区创建时复制。
+
+与 AA 的一致点：批次冻结、单会话单运行、预写会话文件、按会话工作区；差异在通道（飞书+钉钉）、
+技能目录（`SKILL.md`）与投递实现（飞书卡片、钉钉文本）。
 
 ## 5. 数据模型
 

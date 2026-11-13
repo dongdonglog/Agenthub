@@ -296,7 +296,7 @@ AgentHub 与 AA 一样，把一次运行交给 **pi**（`@earendil-works/pi-codi
 | 进程隔离 | Linux unshare | `PI_ISOLATION`（namespace / process_group） |
 | 投递 | 卡片 + 表情 | 飞书卡片、钉钉文本 |
 
-镜像内置 Node 22 + pi 1.4.0，`pi --version` 不匹配会在启动时告警。
+镜像内置 Node 22 + pi 1.4.0；启动日志与管理台概览会显示检测到的 pi 版本。
 
 ## 边界
 

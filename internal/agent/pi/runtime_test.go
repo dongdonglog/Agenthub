@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/moying/agenthub/internal/agent"
+	"github.com/moying/agenthub/internal/channel"
 )
 
 func buildFakePi(t *testing.T) string {
@@ -90,6 +91,28 @@ func TestRuntimeCompleted(t *testing.T) {
 	agentsMD, _ := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(wsMatches[0])), "AGENTS.md"))
 	if !strings.Contains(string(agentsMD), "---SPLIT---") {
 		t.Fatalf("AGENTS.md 缺少输出约定")
+	}
+}
+
+func TestRuntimeLinksAttachments(t *testing.T) {
+	rt, _, workspaces := newTestRuntime(t, "completed", 5*time.Second)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "现场日志.txt")
+	if err := os.WriteFile(file, []byte("日志内容"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := input("feishu:chat:attach")
+	in.Messages[0].Attachments = []channel.Attachment{{Kind: "file", Name: "现场日志.txt", Path: file}}
+
+	if _, err := rt.Run(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(workspaces, "*", "attachments", "*"))
+	if len(matches) != 1 {
+		t.Fatalf("附件未链接: %v", matches)
+	}
+	if raw, err := os.ReadFile(matches[0]); err != nil || string(raw) != "日志内容" {
+		t.Fatalf("附件内容不一致: %s %v", raw, err)
 	}
 }
 

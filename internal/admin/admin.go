@@ -33,6 +33,10 @@ type Options struct {
 	Agent agent.Agent
 	// Tools 是当前可用工具，用于概览展示。
 	Tools []agent.Tool
+	// Runtime 是 agent 运行时名称（当前固定 pi）。
+	Runtime string
+	// PiVersion 是检测到的 pi 版本。
+	PiVersion string
 	// Profiles 是资源配置档案存储。
 	Profiles *store.ProfileStore
 	// History 返回历史会话代。
@@ -379,6 +383,8 @@ func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"active_profile": activeProfile,
+		"runtime":        s.opts.Runtime,
+		"pi_version":     s.opts.PiVersion,
 		"version":        s.opts.Version,
 		"channel":        string(s.cfg.Channel),
 		"transport":      s.cfg.Feishu.Transport,

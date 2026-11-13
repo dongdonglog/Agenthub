@@ -158,6 +158,7 @@ async function renderOverview(data) {
     el('div', { className: 'panel' }, [
       el('div', { className: 'head' }, [el('b', {}, ['模型']), el('span', { className: 'muted' }, [`Profile：${data.active_profile || '未指定'} · `, el('a', { href: '#/settings' }, ['去配置'])])]),
       el('div', { className: 'muted' }, data.model.echo ? '未配置 API Key，当前为回显模式' : `${data.model.model} · ${data.model.base_url}`),
+      el('div', { className: 'muted small' }, [`运行时 ${data.runtime || '—'} ${data.pi_version || ''}`]),
     ]),
     queue.items.length ? el('div', { className: 'panel' }, [
       el('div', { className: 'head' }, [el('b', {}, ['调度队列']), el('span', { className: 'muted' }, ['按有效优先级排序（含等待老化）'])]),

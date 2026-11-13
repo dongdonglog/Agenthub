@@ -93,14 +93,8 @@ func New(cfg Config) *Runtime {
 // Run 执行一个批次：预写会话文件、启动 pi、等待收敛。
 func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error) {
 	texts := make([]string, 0, len(in.Messages))
-	attachments := make([]string, 0)
 	for _, m := range in.Messages {
 		texts = append(texts, m.Text)
-		for _, a := range m.Attachments {
-			if a.Name != "" {
-				attachments = append(attachments, a.Name)
-			}
-		}
 	}
 	if len(texts) == 0 {
 		return agent.Output{}, errors.New("pi 运行缺少输入")
@@ -110,8 +104,12 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	ws := filepath.Join(r.cfg.WorkspaceDir, base)
 	session := filepath.Join(r.cfg.SessionDir, base+".jsonl")
 
+	if err := ensureWorkspace(ws, r.cfg.AgentDir, ""); err != nil {
+		return agent.Output{}, err
+	}
+	attachments := linkAttachments(ws, in.Messages)
 	agentsMD := buildAgentsMD(in.ConversationID, in.Generation, attachments)
-	if err := ensureWorkspace(ws, r.cfg.AgentDir, agentsMD); err != nil {
+	if err := ensureAgentsFile(ws, agentsMD); err != nil {
 		return agent.Output{}, err
 	}
 	_, statErr := os.Stat(session)

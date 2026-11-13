@@ -2,10 +2,13 @@ package pi
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/moying/agenthub/internal/agent"
 )
 
 // ensureWorkspace 创建工作区并复制只读部署配置。
@@ -96,4 +99,57 @@ func buildAgentsMD(conv string, generation int, attachments []string) string {
 		}
 	}
 	return b.String()
+}
+
+// linkAttachments 把入站附件链接到工作区只读目录，返回文件名列表。
+func linkAttachments(ws string, messages []agent.Message) []string {
+	dir := filepath.Join(ws, "attachments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, m := range messages {
+		for _, a := range m.Attachments {
+			if a.Path == "" {
+				continue
+			}
+			name := filepath.Base(a.Name)
+			if name == "" || name == "." || name == string(filepath.Separator) {
+				name = filepath.Base(a.Path)
+			}
+			name = sanitizeName(name)
+			if name == "" {
+				continue
+			}
+			base := name
+			for i := 2; seen[name]; i++ {
+				ext := filepath.Ext(base)
+				name = strings.TrimSuffix(base, ext) + fmt.Sprintf("-%d", i) + ext
+			}
+			seen[name] = true
+			dest := filepath.Join(dir, name)
+			if _, err := os.Stat(dest); err == nil {
+				names = append(names, name)
+				continue
+			}
+			if err := os.Link(a.Path, dest); err != nil {
+				if err := copyFile(a.Path, dest); err != nil {
+					continue
+				}
+			}
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func sanitizeName(name string) string {
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "\\", "_")
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return ""
+	}
+	return name
 }

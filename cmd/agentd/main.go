@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,6 @@ import (
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/httpapi"
-	"github.com/moying/agenthub/internal/mcp"
 	"github.com/moying/agenthub/internal/obs"
 	"github.com/moying/agenthub/internal/platform/dingtalk"
 	"github.com/moying/agenthub/internal/platform/feishu"
@@ -187,6 +187,8 @@ func run() int {
 		logger.Error("pi agent dir 初始化失败", "error", err)
 		return 1
 	}
+	piVersion := detectPiVersion(cfg.Pi.Bin)
+	logger.Info("pi runtime", "bin", cfg.Pi.Bin, "version", piVersion)
 	runner := pi.New(pi.Config{
 		Bin:          cfg.Pi.Bin,
 		Tools:        cfg.Pi.Tools,
@@ -286,6 +288,8 @@ func run() int {
 		FeishuStatus: feishuStatus,
 		Agent:        runner,
 		Tools:        nil,
+		Runtime:      "pi",
+		PiVersion:    piVersion,
 		Profiles:     profiles,
 		History: func(ctx context.Context) ([]store.Generation, error) {
 			if journal == nil {
@@ -378,59 +382,6 @@ func migrationsDir() string {
 	return "migrations"
 }
 
-func newAgent(cfg *config.Config, skillsDir string, tools []agent.Tool, profiles *store.ProfileStore, modelHolder *agent.SettingsHolder, logger *slog.Logger) agent.Agent {
-	if cfg.Agent.APIKey == "" {
-		logger.Warn("model api key not configured; falling back to echo agent")
-		return agent.Echo{}
-	}
-	logger.Info("model configured", "provider", cfg.Agent.Provider, "model", cfg.Agent.Model, "base_url", cfg.Agent.BaseURL)
-	skillFilter := func(name string) bool {
-		active := profiles.Active()
-		if len(active.Skills) == 0 {
-			return true
-		}
-		for _, item := range active.Skills {
-			if item == name {
-				return true
-			}
-		}
-		return false
-	}
-	toolFilter := func(name string) bool {
-		if !strings.HasPrefix(name, "mcp_") {
-			return true
-		}
-		active := profiles.Active()
-		if len(active.MCPs) == 0 {
-			return true
-		}
-		for _, server := range active.MCPs {
-			if mcp.ToolMatchesServer(name, server) {
-				return true
-			}
-		}
-		return false
-	}
-
-	return &agent.Chat{
-		BaseURL:       cfg.Agent.BaseURL,
-		APIKey:        cfg.Agent.APIKey,
-		Model:         cfg.Agent.Model,
-		FallbackModel: cfg.Agent.FallbackModel,
-		VisionModel:   cfg.Agent.VisionModel,
-		SystemPrompt:  cfg.Agent.SystemPrompt,
-		SkillsDir:     skillsDir,
-		Tools:         tools,
-		Logger:        logger,
-		SkillFilter:   skillFilter,
-		ToolFilter:    toolFilter,
-		Settings:      modelHolder.Get,
-	}
-}
-
-// startFeishu 装配事件来源并返回通道状态查询函数。
-//
-// @remarks 长连接与 webhook 共用同一个 Dispatcher，保证受理策略一致。
 func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server, engine *core.Engine, ch channel.Channel, attachmentsDir string, journal *store.Journal) func() string {
 	var client *feishu.Client
 	if fc, ok := ch.(*feishu.Channel); ok {
@@ -582,6 +533,17 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 }
 
 // purgeLoop 定期清理过期历史数据。
+// detectPiVersion 读取 pi 版本，失败返回空。
+func detectPiVersion(bin string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func purgeLoop(ctx context.Context, db *store.DB, days int, logger *slog.Logger) {
 	if days <= 0 {
 		return
