@@ -387,7 +387,12 @@ func (s *Server) handleAudits(rw http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 	skills, _ := s.store.ListSkills()
 	mcps, _ := s.store.ListMCPs()
-	convs := s.engine.Conversations()
+	userSessions := 0
+	for _, info := range s.engine.SessionInfos() {
+		if !info.Internal {
+			userSessions++
+		}
+	}
 	runs := s.engine.Runs()
 
 	activeProfile := ""
@@ -410,7 +415,7 @@ func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 			Echo:     s.cfg.Agent.APIKey == "",
 		},
 		"counts": map[string]int{
-			"conversations": len(convs),
+			"conversations": userSessions,
 			"runs":          len(runs),
 			"skills":        len(skills),
 			"mcps":          len(mcps),
