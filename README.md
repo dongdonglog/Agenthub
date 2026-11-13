@@ -109,8 +109,8 @@ cp .env.example .env
 # 钉钉：AGENTHUB_CHANNEL=dingtalk + DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET
 # 都要：POSTGRES_PASSWORD
 
-AGENTHUB_TAG=0.3.0 docker compose pull
-AGENTHUB_TAG=0.3.0 docker compose up -d
+AGENTHUB_TAG=0.4.0 docker compose pull
+AGENTHUB_TAG=0.4.0 docker compose up -d
 ```
 
 镜像 `donglog/agenthub` 支持 `linux/amd64` 与 `linux/arm64`，打 tag 自动构建发布。
