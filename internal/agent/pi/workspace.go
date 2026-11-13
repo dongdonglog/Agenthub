@@ -59,11 +59,6 @@ func copyTree(src, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		if entry.Name() != "models.json" && entry.Name() != "SYSTEM.md" && entry.Name() != "mcp.json" {
-			if err := os.Link(path, target); err == nil {
-				return nil
-			}
-		}
 		return copyFile(path, target)
 	})
 }

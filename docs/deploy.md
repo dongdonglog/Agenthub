@@ -179,6 +179,16 @@ docker compose up -d --build
 
 告警规则在 `deploy/prometheus/alerts.yml`（服务不可达、飞书断开、运行失败、投递失败、调用量异常）。
 
+## 已知升级问题
+
+0.2.0–0.2.3 的工作区复制使用硬链接，配置同步时可能截断源文件，表现为技能文件变成 0 字节、
+pi 报 `Unknown provider`。0.2.4 起改为复制并原子替换；已经损坏的文件需要从源重新导入：
+
+```bash
+# 技能：重新放回 data/pi/agent/skills（或管理台 ZIP 导入）
+# 模型配置：重启服务会自动重建 data/pi/agent/models.json
+```
+
 ## 常见问题
 
 | 现象 | 排查 |

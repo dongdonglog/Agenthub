@@ -88,9 +88,22 @@ func (s *Scheduler) execute(ctx context.Context, task store.ScheduledTask) {
 	}
 }
 
-// RunNow 立即执行一次任务，不改变下次时间。
+// RunNow 立即执行一次任务，记录结果但不改变既定的下次时间。
 func (s *Scheduler) RunNow(ctx context.Context, task store.ScheduledTask) error {
-	return s.submit(ctx, task)
+	status := "ok"
+	if err := s.submit(ctx, task); err != nil {
+		status = "failed: " + err.Error()
+	}
+	next := time.Now()
+	if task.NextRunAt != nil {
+		next = *task.NextRunAt
+	} else if computed, err := NextRun(task.Cron, task.Timezone, time.Now()); err == nil {
+		next = computed
+	}
+	if err := s.journal.FinishTask(ctx, task.ID, next, status); err != nil {
+		s.log.Warn("task run-now status failed", "task", task.ID, "error", err)
+	}
+	return nil
 }
 
 func (s *Scheduler) submit(ctx context.Context, task store.ScheduledTask) error {

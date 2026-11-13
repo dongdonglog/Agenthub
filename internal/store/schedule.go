@@ -108,6 +108,6 @@ func (j *Journal) ClaimDue(ctx context.Context, now time.Time) ([]ScheduledTask,
 // FinishTask 记录执行结果与下次时间。
 func (j *Journal) FinishTask(ctx context.Context, id string, next time.Time, status string) error {
 	_, err := j.pool.Exec(ctx, `
-		UPDATE scheduled_task SET next_run_at = $2, last_status = $3 WHERE id = $1`, id, next, status)
+		UPDATE scheduled_task SET next_run_at = $2, last_status = $3, last_run_at = now() WHERE id = $1`, id, next, status)
 	return err
 }
