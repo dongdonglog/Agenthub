@@ -59,8 +59,10 @@ func copyTree(src, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		if err := os.Link(path, target); err == nil {
-			return nil
+		if entry.Name() != "models.json" && entry.Name() != "SYSTEM.md" && entry.Name() != "mcp.json" {
+			if err := os.Link(path, target); err == nil {
+				return nil
+			}
 		}
 		return copyFile(path, target)
 	})
@@ -72,15 +74,25 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(dst)
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".copy-*")
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+	tmpName := tmp.Name()
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
 		return err
 	}
-	return out.Close()
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // buildAgentsMD 生成会话级 AGENTS.md。

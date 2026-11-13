@@ -68,6 +68,8 @@ func PrepareAgentDir(cfg AgentConfig) error {
 		if err := os.WriteFile(filepath.Join(cfg.Dir, "models.json"), raw, 0o600); err != nil {
 			return err
 		}
+		// pi 会缓存模型目录；配置变更后清掉，避免旧缓存导致 provider 不存在。
+		_ = os.Remove(filepath.Join(cfg.Dir, "models-store.json"))
 	}
 
 	if cfg.MCPFile != "" {
@@ -189,6 +191,7 @@ func SyncAgentConfig(workspacesDir, agentDir string) error {
 				return err
 			}
 		}
+		_ = os.Remove(filepath.Join(target, "models-store.json"))
 		srcSkills := filepath.Join(agentDir, "skills")
 		if _, err := os.Stat(srcSkills); err == nil {
 			if err := copyTree(srcSkills, filepath.Join(target, "skills")); err != nil {

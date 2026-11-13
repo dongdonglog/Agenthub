@@ -66,3 +66,33 @@ func TestCleanupExpired(t *testing.T) {
 		t.Fatal("会话文件未删除")
 	}
 }
+
+func TestSyncAgentConfigHardlinkedTarget(t *testing.T) {
+	root := t.TempDir()
+	agentDir := filepath.Join(root, "agent")
+	if err := PrepareAgentDir(AgentConfig{Dir: agentDir, BaseURL: "https://gw/v1", APIKey: "k", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	ws := filepath.Join(root, "workspaces", "abc-g1")
+	agentCopy := filepath.Join(ws, ".agenthub-agent")
+	if err := os.MkdirAll(agentCopy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟备份恢复：工作区文件与 agent 文件是硬链接。
+	src := filepath.Join(agentDir, "models.json")
+	dst := filepath.Join(agentCopy, "models.json")
+	if err := os.Link(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncAgentConfig(filepath.Join(root, "workspaces"), agentDir); err != nil {
+		t.Fatal(err)
+	}
+	srcRaw, _ := os.ReadFile(src)
+	dstRaw, _ := os.ReadFile(dst)
+	if len(srcRaw) == 0 || len(dstRaw) == 0 {
+		t.Fatalf("同步后文件为空: src=%d dst=%d", len(srcRaw), len(dstRaw))
+	}
+	if string(srcRaw) != string(dstRaw) {
+		t.Fatal("同步后内容不一致")
+	}
+}
