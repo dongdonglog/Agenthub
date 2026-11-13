@@ -830,14 +830,15 @@ func TestScheduledMessageDoesNotReplyToExternalID(t *testing.T) {
 
 func TestResetCleansOldGeneration(t *testing.T) {
 	eng := newEngine(t, &captureChannel{}, agent.Echo{})
-	var cleaned []int
-	eng.SetGenerationCleaner(func(_ string, generation int) { cleaned = append(cleaned, generation) })
+	cleaned := make(chan int, 1)
+	eng.SetGenerationCleaner(func(_ string, generation int) { cleaned <- generation })
 	eng.Reset("tenant_1:oc_chat:ou_user")
-	deadline := time.Now().Add(time.Second)
-	for len(cleaned) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if len(cleaned) != 1 || cleaned[0] != 1 {
-		t.Fatalf("cleaned = %v", cleaned)
+	select {
+	case generation := <-cleaned:
+		if generation != 1 {
+			t.Fatalf("cleaned generation = %d", generation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("未调用清理回调")
 	}
 }
