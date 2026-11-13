@@ -21,6 +21,8 @@ type Message struct {
 // Input 是一次运行的输入。
 type Input struct {
 	ConversationID string
+	// Generation 是会话代，用于定位 pi 工作区与会话文件。
+	Generation int
 	// TraceID 用于日志关联。
 	TraceID string
 	// RunID 是本次运行的标识。
