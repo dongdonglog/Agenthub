@@ -50,14 +50,35 @@ type Delivery struct {
 	ChatID         string
 	ReplyTo        string
 	Text           string
-	State          string // pending | retrying | sent | failed
-	Error          string
-	ExternalID     string
-	Attempts       int
-	CreatedAt      time.Time
+	// Kind 为 text、file、image 或 zip；空值等同于 text。
+	Kind string
+	// Name 是产物文件名，仅产物投递使用。
+	Name string
+	// ArtifactID 关联 run_artifact.id。
+	ArtifactID string
+	// ArtifactPath 是产物本地路径，重启补偿时使用。
+	ArtifactPath string
+	State        string // pending | retrying | sent | failed
+	Error        string
+	ExternalID   string
+	Attempts     int
+	CreatedAt    time.Time
 	// NextAttempt 是下一次重试时间，零值表示立即。
 	NextAttempt time.Time
 	TraceID     string
+}
+
+// Artifact 是一次运行产出并已落盘的交付物。
+type Artifact struct {
+	ID             string    `json:"id"`
+	RunID          string    `json:"run_id"`
+	ConversationID string    `json:"conversation_id"`
+	Name           string    `json:"name"`
+	Kind           string    `json:"kind"`
+	Size           int64     `json:"size"`
+	SHA256         string    `json:"sha256"`
+	Path           string    `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // Metrics 是核心向指标系统上报的最小接口。
@@ -133,6 +154,9 @@ type Journal interface {
 	LoadGenerations(ctx context.Context) (map[string]int, error)
 	SaveRun(ctx context.Context, r *Run) error
 	SaveDelivery(ctx context.Context, d *Delivery) error
+	SaveArtifact(ctx context.Context, a *Artifact) error
+	LoadArtifacts(ctx context.Context, runID string) ([]*Artifact, error)
+	LoadArtifact(ctx context.Context, id string) (*Artifact, error)
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
 	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
 	SaveIdentity(ctx context.Context, conv, chatName, userName string) error

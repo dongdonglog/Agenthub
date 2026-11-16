@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/moying/agenthub/internal/channel"
@@ -16,7 +18,21 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		e.persistDelivery(ctx, d)
 		return
 	}
-	_, err := e.ch.SendText(ctx, channel.Outbound{ChatID: d.ChatID, ReplyTo: d.ReplyTo, Text: d.Text})
+	var err error
+	if d.Kind == "" || d.Kind == "text" {
+		_, err = e.ch.SendText(ctx, channel.Outbound{ChatID: d.ChatID, ReplyTo: d.ReplyTo, Text: d.Text})
+	} else if sender, ok := e.ch.(channel.ArtifactSender); ok {
+		if d.ArtifactPath == "" {
+			err = fmt.Errorf("产物路径为空")
+		} else {
+			_, err = sender.SendArtifact(ctx, channel.OutboundArtifact{
+				ChatID: d.ChatID, ReplyTo: d.ReplyTo,
+				Artifact: channel.Artifact{Name: d.Name, Path: d.ArtifactPath, Kind: d.Kind},
+			})
+		}
+	} else {
+		err = channel.ErrUnsupported
+	}
 	e.mu.Lock()
 	d.Attempts++
 	if err == nil {
@@ -29,7 +45,7 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		return
 	}
 	d.Error = err.Error()
-	retry := d.Attempts < maxDeliveryAttempts
+	retry := d.Attempts < maxDeliveryAttempts && !errors.Is(err, channel.ErrUnsupported) && ctx.Err() == nil
 	if retry {
 		d.State = "retrying"
 	} else {

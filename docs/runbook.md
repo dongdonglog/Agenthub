@@ -101,7 +101,10 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `DINGTALK_ALLOWED_CHATS` | 空 | 会话白名单，空表示不限 |
 | `DINGTALK_BOT_NAME` | 空 | 去掉文本开头的 @机器人 |
 | `AGENTHUB_DB_MAX_CONNS` | `10` | 连接池上限 |
-| `AGENTHUB_DATA_DIR` | `./data` | 附件与产物目录 |
+| `AGENTHUB_DATA_DIR` | `./data` | 附件、产物与工作区目录 |
+| `AGENTHUB_ARTIFACT_MAX_BYTES` | `20971520` | 单个交付物大小上限 |
+| `AGENTHUB_ARTIFACT_MAX_COUNT` | `10` | 单次运行交付物数量上限 |
+| `AGENTHUB_ARTIFACT_MAX_TOTAL` | `52428800` | 单次运行交付物总量上限 |
 | `FEISHU_APP_ID` | 必填（feishu 模式） | 应用 ID |
 | `FEISHU_APP_SECRET` | 必填（feishu 模式） | 应用密钥，只从环境变量读取 |
 | `FEISHU_BOT_OPEN_ID` | 空 | 机器人 open_id；为空时把任意 @ 视为 @机器人 |
@@ -130,13 +133,20 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 - 管理面没有内置登录，远端访问必须经网关或 SSH 隧道（`ssh -L 8788:127.0.0.1:8788`）；
 - 修改模型与飞书配置仍走 `.env`，重启生效。
 
-### 4.2 附件
+### 4.2 产物交付
 
-- 保存目录：`<AA_DATA_DIR>/attachments/<message_id>/`，文件名做了字符清洗；
+- 工作区 `submit/` 指向本次运行 `outbox/<run_id>/`；运行成功后导入 `data/artifacts`；
+- 文本先投递，再投递图片与文档；多个文档打 ZIP（UTF-8 文件名）；
+- 超限不调用上传接口，只投递说明；通道不支持文件时明确提示；
+- 管理台运行详情可查看并下载产物；保留期与数据库清理策略一致。
+
+### 4.3 附件
+
+- 保存目录：`<AGENTHUB_DATA_DIR>/attachments/<message_id>/`，文件名做了字符清洗；
 - 下载在事件确认之后异步进行，完成才入队；单个附件失败只影响该附件；
 - 模型侧：小文本内联，其余通过 `read_file` 读取，路径被限制在附件目录内。
 
-### 4.3 持久化
+### 4.4 持久化
 
 - 消息、运行、投递写入 `message_state` / `run_state` / `delivery_state`；
 - 启动时 `Restore` 恢复最近 1000 条消息与运行，`processing` 状态的消息重新排队；

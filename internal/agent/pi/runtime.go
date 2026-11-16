@@ -121,6 +121,10 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	if err := ensureWorkspace(ws, r.cfg.AgentDir, ""); err != nil {
 		return agent.Output{}, err
 	}
+	started := time.Now()
+	if err := prepareRunOutbox(ws, in.RunID); err != nil {
+		return agent.Output{}, err
+	}
 	attachments := linkAttachments(ws, in.Messages)
 	agentsMD := buildAgentsMD(in.ConversationID, in.Generation, attachments)
 	if err := ensureAgentsFile(ws, agentsMD); err != nil {
@@ -149,6 +153,9 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	out, err := r.runProcess(ctx, ws, session, prompt, in, agentsMD)
 	if errors.Is(err, errAborted) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		_ = appendAbortMarker(session, in.RunID, "aborted")
+	}
+	if err == nil {
+		out.Artifacts = collectRunArtifacts(ws, in.RunID, started)
 	}
 	return out, err
 }

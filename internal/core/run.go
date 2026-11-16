@@ -116,6 +116,15 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	out, err := e.agent.Run(runCtx, input)
 	cancel()
 
+	var artifacts []*Artifact
+	var artifactNotice string
+	if err == nil && len(out.Artifacts) > 0 {
+		artifacts, artifactNotice = e.stageArtifacts(run, out.Artifacts)
+		if len(artifacts) > 0 && !e.canSendArtifacts() {
+			artifactNotice = joinNotice(artifactNotice, "当前通道不支持文件交付，产物已保存，可在管理台查看。")
+		}
+	}
+
 	e.mu.Lock()
 	run.EndedAt = e.now()
 	run.InputTokens = out.Usage.InputTokens
@@ -145,6 +154,18 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		run.Output = text
 		for _, m := range batch {
 			m.Status = "done"
+		}
+	}
+	if text == "" && len(artifacts) > 0 {
+		text = "已生成交付物。"
+	}
+	if artifactNotice != "" {
+		if text != "" {
+			text += "\n\n"
+		}
+		text += artifactNotice
+		if run.State == "completed" {
+			run.Output = text
 		}
 	}
 	delete(e.active, conv)
@@ -177,12 +198,27 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	alreadySent := e.sent[delivery.IdempotencyKey]
 	e.mu.Unlock()
 
+	var artifactDeliveries []*Delivery
+	if e.canSendArtifacts() {
+		artifactDeliveries = e.buildArtifactDeliveries(run, batch[0], artifacts)
+		e.mu.Lock()
+		for _, item := range artifactDeliveries {
+			e.deliveries[item.IdempotencyKey] = item
+		}
+		e.mu.Unlock()
+	}
+
 	e.appendAssistant(conv, run.ID, text)
 	if e.metrics != nil {
 		e.metrics.Inc("agenthub_runs_total", map[string]string{"state": run.State})
 	}
 
 	if e.journal != nil {
+		for _, item := range artifactDeliveries {
+			if err := e.journal.SaveDelivery(ctx, item); err != nil {
+				e.log.Error("persist artifact delivery failed", "error", err, "delivery", item.IdempotencyKey)
+			}
+		}
 		if err := e.journal.SaveRun(ctx, run); err != nil {
 			e.log.Error("persist run failed", "error", err, "run", run.ID)
 		}
@@ -194,11 +230,23 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		}
 	}
 
-	if alreadySent || cardDone {
-		return nil
+	if !alreadySent && !cardDone {
+		e.send(ctx, delivery)
 	}
-	e.send(ctx, delivery)
+	for _, item := range artifactDeliveries {
+		e.send(ctx, item)
+	}
 	return nil
+}
+
+func joinNotice(existing, extra string) string {
+	if existing == "" {
+		return extra
+	}
+	if extra == "" {
+		return existing
+	}
+	return existing + "\n" + extra
 }
 
 // history 返回本批之前的最近对话，用于多轮上下文。

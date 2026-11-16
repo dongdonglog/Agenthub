@@ -5,6 +5,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -61,6 +62,34 @@ type Outbound struct {
 type Receipt struct {
 	ExternalID string
 }
+
+// Artifact 是运行产物在本地落盘后的描述。
+type Artifact struct {
+	// Name 是交付给用户的文件名，不含路径。
+	Name string
+	// Path 是本地可读路径；发送成功后由核心按保留策略清理。
+	Path string
+	// Kind 为 file 或 image。
+	Kind string
+	Size int64
+}
+
+// OutboundArtifact 是一次产物发送请求。
+type OutboundArtifact struct {
+	ChatID   string
+	ReplyTo  string
+	Artifact Artifact
+}
+
+// ArtifactSender 是通道的可选文件能力。
+//
+// @remarks 不支持文件的通道不要实现该接口，核心会明确提示而不是静默丢弃。
+type ArtifactSender interface {
+	SendArtifact(ctx context.Context, out OutboundArtifact) (Receipt, error)
+}
+
+// ErrUnsupported 表示当前通道不支持该发送类型。
+var ErrUnsupported = errors.New("通道不支持该发送类型")
 
 // Channel 是发送侧的最小接口。
 //

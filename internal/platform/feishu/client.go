@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -215,6 +217,129 @@ func (c *Client) UpdateCard(ctx context.Context, messageID, content string) erro
 		map[string]any{"content": content}, nil)
 }
 
+// SendArtifact 上传并发送一个文件或图片。
+func (c *Client) SendArtifact(ctx context.Context, out channel.OutboundArtifact) (channel.Receipt, error) {
+	if out.ChatID == "" {
+		return channel.Receipt{}, fmt.Errorf("chat_id 为空")
+	}
+	if out.Artifact.Path == "" {
+		return channel.Receipt{}, fmt.Errorf("产物路径为空")
+	}
+	msgType := "file"
+	contentKey := "file_key"
+	key := ""
+	var err error
+	if out.Artifact.Kind == "image" {
+		msgType = "image"
+		contentKey = "image_key"
+		key, err = c.uploadImage(ctx, out.Artifact.Path, out.Artifact.Name)
+		if err != nil {
+			// 图片接口对格式/权限更敏感，失败时退化为文件，避免整次交付丢失。
+			msgType = "file"
+			contentKey = "file_key"
+			key, err = c.uploadFile(ctx, out.Artifact.Path, out.Artifact.Name)
+		}
+	} else {
+		key, err = c.uploadFile(ctx, out.Artifact.Path, out.Artifact.Name)
+	}
+	if err != nil {
+		return channel.Receipt{}, err
+	}
+	content, _ := json.Marshal(map[string]string{contentKey: key})
+	body := map[string]any{"msg_type": msgType, "content": string(content)}
+	path := "/open-apis/im/v1/messages?receive_id_type=chat_id"
+	if out.ReplyTo != "" {
+		path = "/open-apis/im/v1/messages/" + url.PathEscape(out.ReplyTo) + "/reply"
+	} else {
+		body["receive_id"] = out.ChatID
+	}
+	var resp struct {
+		Data struct {
+			MessageID string `json:"message_id"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodPost, path, body, &resp); err != nil {
+		return channel.Receipt{}, err
+	}
+	return channel.Receipt{ExternalID: resp.Data.MessageID}, nil
+}
+
+func (c *Client) uploadFile(ctx context.Context, path, name string) (string, error) {
+	return c.uploadMultipart(ctx, "/open-apis/im/v1/files", map[string]string{
+		"file_type": "stream",
+		"file_name": name,
+	}, "file", name, path, "file_key")
+}
+
+func (c *Client) uploadImage(ctx context.Context, path, name string) (string, error) {
+	return c.uploadMultipart(ctx, "/open-apis/im/v1/images", map[string]string{
+		"image_type": "message",
+	}, "image", name, path, "image_key")
+}
+
+func (c *Client) uploadMultipart(ctx context.Context, endpoint string, fields map[string]string, field, name, path, responseKey string) (string, error) {
+	token, err := c.tenantToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range fields {
+		_ = writer.WriteField(key, value)
+	}
+	part, err := writer.CreateFormFile(field, name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpoint, &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", &APIError{StatusCode: resp.StatusCode, Msg: string(raw)}
+	}
+	var parsed struct {
+		Code int            `json:"code"`
+		Msg  string         `json:"msg"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", fmt.Errorf("解析飞书上传响应失败: %w", err)
+	}
+	if parsed.Code != 0 {
+		return "", &APIError{StatusCode: resp.StatusCode, Code: parsed.Code, Msg: parsed.Msg}
+	}
+	key, _ := parsed.Data[responseKey].(string)
+	if key == "" {
+		return "", fmt.Errorf("飞书未返回 %s", responseKey)
+	}
+	return key, nil
+}
+
 // Quoted 是被引用消息的摘要。
 type Quoted struct {
 	// Text 是消息的文本表达。
@@ -309,6 +434,12 @@ const maxTextChunk = 3500
 //
 // @remarks 超长文本按段落边界切分，首块建立回复关系，其余顺序追加，
 // 保证长答案不会被平台截断。
+var _ channel.ArtifactSender = (*Channel)(nil)
+
+func (c *Channel) SendArtifact(ctx context.Context, out channel.OutboundArtifact) (channel.Receipt, error) {
+	return c.client.SendArtifact(ctx, out)
+}
+
 func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.Receipt, error) {
 	chunks := splitText(out.Text, maxTextChunk)
 	firstID := ""

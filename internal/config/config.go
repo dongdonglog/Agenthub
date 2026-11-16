@@ -71,6 +71,12 @@ type DBConfig struct {
 // StorageConfig 是附件与产物存储配置。
 type StorageConfig struct {
 	Dir string `yaml:"dir"`
+	// ArtifactMaxBytes 是单个交付物大小上限，默认 20MB。
+	ArtifactMaxBytes int64 `yaml:"artifact_max_bytes"`
+	// ArtifactMaxCount 是单次运行最多交付的产物数量，默认 10。
+	ArtifactMaxCount int `yaml:"artifact_max_count"`
+	// ArtifactMaxTotal 是单次运行产物总量上限，默认 50MB。
+	ArtifactMaxTotal int64 `yaml:"artifact_max_total"`
 }
 
 // WebhookConfig 是飞书事件回调监听配置。
@@ -179,12 +185,17 @@ func Load(path string) (*Config, error) {
 
 func defaults() Config {
 	return Config{
-		Env:               "development",
-		Channel:           ChannelOff,
-		HTTP:              HTTPConfig{Addr: "127.0.0.1:8787"},
-		Admin:             AdminConfig{Addr: "127.0.0.1:8788"},
-		DB:                DBConfig{MaxConns: 10},
-		Storage:           StorageConfig{Dir: "./data"},
+		Env:     "development",
+		Channel: ChannelOff,
+		HTTP:    HTTPConfig{Addr: "127.0.0.1:8787"},
+		Admin:   AdminConfig{Addr: "127.0.0.1:8788"},
+		DB:      DBConfig{MaxConns: 10},
+		Storage: StorageConfig{
+			Dir:              "./data",
+			ArtifactMaxBytes: 20 << 20,
+			ArtifactMaxCount: 10,
+			ArtifactMaxTotal: 50 << 20,
+		},
 		RetentionDays:     90,
 		MaxConcurrentRuns: 4,
 		Webhook:           WebhookConfig{Addr: "127.0.0.1:8789"},
@@ -221,6 +232,9 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.DB.URL, "AGENTHUB_DB_URL")
 	setInt32(&cfg.DB.MaxConns, "AGENTHUB_DB_MAX_CONNS")
 	setStr(&cfg.Storage.Dir, "AGENTHUB_DATA_DIR")
+	setInt64(&cfg.Storage.ArtifactMaxBytes, "AGENTHUB_ARTIFACT_MAX_BYTES")
+	setInt(&cfg.Storage.ArtifactMaxCount, "AGENTHUB_ARTIFACT_MAX_COUNT")
+	setInt64(&cfg.Storage.ArtifactMaxTotal, "AGENTHUB_ARTIFACT_MAX_TOTAL")
 	setInt(&cfg.RetentionDays, "AGENTHUB_RETENTION_DAYS")
 	setInt(&cfg.MaxConcurrentRuns, "AGENTHUB_MAX_CONCURRENT_RUNS")
 	setInt(&cfg.RateLimitPerMin, "AGENTHUB_RATE_LIMIT_PER_MIN")
@@ -322,6 +336,18 @@ func (c *Config) Validate() error {
 	if c.RateLimitPerMin < 0 {
 		return errors.New("rate_limit_per_min 不能为负数")
 	}
+	if c.Storage.ArtifactMaxBytes < 0 || c.Storage.ArtifactMaxCount < 0 || c.Storage.ArtifactMaxTotal < 0 {
+		return errors.New("artifact 大小与数量上限不能为负数")
+	}
+	if c.Storage.ArtifactMaxBytes == 0 {
+		c.Storage.ArtifactMaxBytes = 20 << 20
+	}
+	if c.Storage.ArtifactMaxCount == 0 {
+		c.Storage.ArtifactMaxCount = 10
+	}
+	if c.Storage.ArtifactMaxTotal == 0 {
+		c.Storage.ArtifactMaxTotal = 50 << 20
+	}
 	if c.RetentionDays < 0 {
 		return errors.New("retention_days 不能为负数")
 	}
@@ -350,6 +376,16 @@ func setInt(dst *int, key string) {
 		if n, err := strconv.Atoi(v); err == nil {
 			*dst = n
 		}
+	}
+}
+
+func setInt64(dst *int64, key string) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return
+	}
+	if value, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		*dst = value
 	}
 }
 

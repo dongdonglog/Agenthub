@@ -94,6 +94,11 @@ func (e *Engine) prune() {
 				if _, active := e.active[runConv(e.runs[id])]; !active {
 					delete(e.runs, id)
 					delete(e.events, id)
+					for artifactID, artifact := range e.artifacts {
+						if artifact.RunID == id {
+							delete(e.artifacts, artifactID)
+						}
+					}
 					excess--
 					continue
 				}

@@ -99,11 +99,14 @@ queued ──▶ running ──▶ completed
 
 一次运行由 `pi --mode rpc` 子进程执行：
 
-- 会话代工作区：`.agenthub-agent/`（部署配置副本）、`AGENTS.md`、`attachments/`（只读）、`outbox/`；
+- 会话代工作区：`.agenthub-agent/`（部署配置副本）、`AGENTS.md`、`attachments/`（只读）、
+  `outbox/<run_id>/` 与指向本次目录的 `submit` 符号链接；
 - 批次消息预写 pi 会话文件（v3 JSONL），最后一条通过 `prompt` 触发；
 - 事件：`agent_start`、`message_update`、`tool_execution_start/end`、`message_end`、`agent_settled`；
 - 收敛以 `agent_settled` 为准；超时/取消先 `clear_queue` 再 `abort`，宽限后杀进程组；
-- 部署配置 `models.json`/`SYSTEM.md`/`skills`/`mcp.json` 在启动时生成，工作区创建时复制。
+- 部署配置 `models.json`/`SYSTEM.md`/`skills`/`mcp.json` 在启动时生成，工作区创建时复制；
+- 运行成功后收集 `submit/` 中的普通文件，复制到 `data/artifacts/<run_id>/`，按文本 → 图片 → 文档（多个打 ZIP）的顺序投递；
+  超限或通道不支持时追加可读说明，产物仍保留供管理台查看；导入后清理本次工作区原件。
 
 与 AA 的一致点：批次冻结、单会话单运行、预写会话文件、按会话工作区；差异在通道（飞书+钉钉）、
 技能目录（`SKILL.md`）与投递实现（飞书卡片、钉钉文本）。
@@ -142,7 +145,8 @@ pi 固定 1.4.0、会话文件 v3，升级要回归；调试跨 Go/Node 两段�
 | `conversation_state` | 会话键与当前代 | `id` 主键；`generation` 随 `/reset` 递增 |
 | `message_state` | 消息与助手回复 | `(conversation_id, external_id)` 唯一；`role` 区分 user/assistant |
 | `run_state` | 运行状态与 token | `id` 主键；终态写 `ended_at` |
-| `delivery_state` | 投递箱 | `idempotency_key` 唯一；`state` 状态机；`attempts` / `next_attempt_at` |
+| `delivery_state` | 投递箱 | `idempotency_key` 唯一；`state` 状态机；`kind` / `artifact_path` 支持产物；`attempts` / `next_attempt_at` |
+| `run_artifact` | 运行产物 | `id` 主键；`run_id` 索引；文件名、大小、SHA-256、持久路径 |
 | `run_trace` | 阶段与工具事件 | 追加写，按 `run_id` 查询 |
 | `schema_migrations` | 迁移版本 | 只前进，启动时加 advisory lock |
 

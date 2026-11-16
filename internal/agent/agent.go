@@ -50,6 +50,8 @@ type Usage struct {
 type Output struct {
 	Text  string
 	Usage Usage
+	// Artifacts 是本次运行写入工作区 outbox 的产物。
+	Artifacts []channel.Artifact
 }
 
 // Agent 执行一批输入并返回结果。

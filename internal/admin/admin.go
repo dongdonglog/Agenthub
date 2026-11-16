@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -120,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/v1/sessions/{id}/priority", s.handleSessionPriority)
 	mux.HandleFunc("GET /admin/api/v1/runs", s.handleRuns)
 	mux.HandleFunc("GET /admin/api/v1/runs/{id}", s.handleRunDetail)
+	mux.HandleFunc("GET /admin/api/v1/artifacts/{id}", s.handleArtifact)
 
 	mux.HandleFunc("GET /admin/api/v1/skills", s.handleSkills)
 	mux.HandleFunc("GET /admin/api/v1/skills/{name}", s.handleSkill)
@@ -731,11 +734,43 @@ func (s *Server) handleRunDetail(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusNotFound, "运行不存在或已过期")
 		return
 	}
+	artifacts := s.engine.Artifacts(r.Context(), id)
+	if artifacts == nil {
+		artifacts = []*core.Artifact{}
+	}
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"run":        run,
 		"events":     s.engine.RunEvents(id),
 		"deliveries": s.engine.DeliveriesFor(id),
+		"artifacts":  artifacts,
 	})
+}
+
+func (s *Server) handleArtifact(rw http.ResponseWriter, r *http.Request) {
+	artifact := s.engine.Artifact(r.Context(), r.PathValue("id"))
+	if artifact == nil {
+		writeError(rw, http.StatusNotFound, "产物不存在")
+		return
+	}
+	file, err := os.Open(artifact.Path)
+	if err != nil {
+		writeError(rw, http.StatusNotFound, "产物文件不存在")
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		writeError(rw, http.StatusNotFound, "产物文件不存在")
+		return
+	}
+	rw.Header().Set("Content-Type", "application/octet-stream")
+	rw.Header().Set("Content-Disposition", contentDisposition(artifact.Name))
+	http.ServeContent(rw, r, artifact.Name, info.ModTime(), file)
+}
+
+func contentDisposition(name string) string {
+	name = strings.ReplaceAll(name, `"`, "")
+	return "attachment; filename*=UTF-8''" + url.PathEscape(name)
 }
 
 func (s *Server) handleSkills(rw http.ResponseWriter, r *http.Request) {

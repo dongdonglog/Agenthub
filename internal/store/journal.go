@@ -67,16 +67,59 @@ func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 // SaveDelivery 新建或更新投递记录。
 func (j *Journal) SaveDelivery(ctx context.Context, d *core.Delivery) error {
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, state, error, attempts, next_attempt_at, trace_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, error, attempts, next_attempt_at, trace_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		ON CONFLICT (idempotency_key) DO UPDATE SET
 			state = EXCLUDED.state,
 			error = EXCLUDED.error,
 			attempts = EXCLUDED.attempts,
 			next_attempt_at = EXCLUDED.next_attempt_at,
 			trace_id = EXCLUDED.trace_id`,
-		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt), d.TraceID)
+		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.Kind, d.Name, d.ArtifactID, d.ArtifactPath, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt), d.TraceID)
 	return err
+}
+
+// SaveArtifact 登记运行产物；同一 ID 重复写入保持幂等。
+func (j *Journal) SaveArtifact(ctx context.Context, a *core.Artifact) error {
+	_, err := j.pool.Exec(ctx, `
+		INSERT INTO run_artifact (id, run_id, conversation_id, name, kind, size, sha256, path, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (id) DO NOTHING`,
+		a.ID, a.RunID, a.ConversationID, a.Name, a.Kind, a.Size, a.SHA256, a.Path, a.CreatedAt)
+	return err
+}
+
+// LoadArtifacts 返回一次运行的全部产物。
+func (j *Journal) LoadArtifacts(ctx context.Context, runID string) ([]*core.Artifact, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT id, run_id, conversation_id, name, kind, size, sha256, path, created_at
+		FROM run_artifact WHERE run_id = $1 ORDER BY id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*core.Artifact
+	for rows.Next() {
+		a := &core.Artifact{}
+		if err := rows.Scan(&a.ID, &a.RunID, &a.ConversationID, &a.Name, &a.Kind, &a.Size, &a.SHA256, &a.Path, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// LoadArtifact 按 ID 读取产物。
+func (j *Journal) LoadArtifact(ctx context.Context, id string) (*core.Artifact, error) {
+	a := &core.Artifact{}
+	err := j.pool.QueryRow(ctx, `
+		SELECT id, run_id, conversation_id, name, kind, size, sha256, path, created_at
+		FROM run_artifact WHERE id = $1`, id).
+		Scan(&a.ID, &a.RunID, &a.ConversationID, &a.Name, &a.Kind, &a.Size, &a.SHA256, &a.Path, &a.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func nullTime(t time.Time) *time.Time {
@@ -273,6 +316,7 @@ func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, err
 	statements := []string{
 		`DELETE FROM delivery_state WHERE created_at < $1 AND state NOT IN ('pending','retrying')`,
 		`DELETE FROM run_trace WHERE created_at < $1`,
+		`DELETE FROM run_artifact WHERE created_at < $1`,
 		`DELETE FROM run_state WHERE ended_at IS NOT NULL AND ended_at < $1`,
 		`DELETE FROM message_state WHERE created_at < $1 AND status NOT IN ('queued','processing')`,
 	}
@@ -289,7 +333,7 @@ func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, err
 // LoadPendingDeliveries 返回未完成投递，用于启动补偿。
 func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT idempotency_key, run_id, chat_id, reply_to, text, state, attempts, next_attempt_at, trace_id
+		SELECT idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, attempts, next_attempt_at, trace_id
 		FROM delivery_state WHERE state IN ('pending','retrying') LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -299,7 +343,7 @@ func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core
 	for rows.Next() {
 		d := &core.Delivery{}
 		var next *time.Time
-		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.State, &d.Attempts, &next, &d.TraceID); err != nil {
+		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.Kind, &d.Name, &d.ArtifactID, &d.ArtifactPath, &d.State, &d.Attempts, &next, &d.TraceID); err != nil {
 			return nil, err
 		}
 		if next != nil {

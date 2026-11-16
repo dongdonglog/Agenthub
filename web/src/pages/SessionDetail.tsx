@@ -6,12 +6,16 @@ import { Badge, Breadcrumbs, Button, Card, CopyButton, Field, Input, PageHeader,
 type Message = { ID: string; Role: string; Text: string; CreatedAt: string; Status: string; MsgType: string };
 type Run = { ID: string; State: string; Output: string; Error: string; StartedAt: string; InputTokens: number; OutputTokens: number };
 type Detail = { id: string; profile?: string; priority?: number | null; messages: Message[]; runs: Run[] };
+type RunEvent = { kind: string; name?: string; detail?: string; duration_ms?: number; created_at: string };
+type Artifact = { id: string; name: string; kind: string; size: number; created_at: string };
+type RunDetail = { run: Run; events: RunEvent[]; artifacts: Artifact[] };
 
 export function SessionDetail() {
   const { id = "" } = useParams();
   const conv = decodeURIComponent(id);
   const { data, loading, error, reload } = useAsync<Detail>(() => api(`/sessions/${encodeURIComponent(conv)}`), [conv]);
   const [priority, setPriority] = useState("");
+  const [selectedRun, setSelectedRun] = useState("");
   const { show } = useToast();
 
   const savePriority = async () => {
@@ -78,7 +82,7 @@ export function SessionDetail() {
       <Card title={`运行 · ${data.runs.length}`}>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>运行</th><th>状态</th><th>Token</th><th>开始</th><th>输出</th></tr></thead>
+            <thead><tr><th>运行</th><th>状态</th><th>Token</th><th>开始</th><th>输出</th><th /></tr></thead>
             <tbody>
               {data.runs.map((run) => (
                 <tr key={run.ID}>
@@ -87,12 +91,69 @@ export function SessionDetail() {
                   <td className="nowrap">{run.InputTokens}/{run.OutputTokens}</td>
                   <td className="nowrap muted">{run.StartedAt ? new Date(run.StartedAt).toLocaleString() : "—"}</td>
                   <td className="muted" style={{ maxWidth: 420 }}>{(run.Output || run.Error || "—").slice(0, 160)}</td>
+                  <td><Button className="link" onClick={() => setSelectedRun(run.ID)}>详情</Button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Card>
+
+      {selectedRun ? <RunDetailPanel runId={selectedRun} onClose={() => setSelectedRun("")} /> : null}
     </div>
   );
+}
+
+function RunDetailPanel({ runId, onClose }: { runId: string; onClose: () => void }) {
+  const { data, loading, error } = useAsync<RunDetail>(() => api(`/runs/${encodeURIComponent(runId)}`), [runId]);
+  return (
+    <Card title="运行详情" actions={<Button className="link" onClick={onClose}>关闭</Button>}>
+      {loading && !data ? <Skeleton height={120} /> : null}
+      {error ? <div className="danger-text">{error}</div> : null}
+      {data ? (
+        <div className="stack">
+          <div className="muted small mono">{runId} · {data.run.State}</div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 6 }}>执行轨迹</div>
+            {data.events.length === 0 ? <div className="muted">没有轨迹事件</div> : (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>类型</th><th>名称</th><th>耗时</th><th>详情</th></tr></thead>
+                  <tbody>
+                    {data.events.map((event, index) => (
+                      <tr key={`${event.created_at}-${index}`}>
+                        <td>{event.kind}</td>
+                        <td className="mono">{event.name || "—"}</td>
+                        <td>{event.duration_ms ? `${event.duration_ms} ms` : "—"}</td>
+                        <td className="muted" style={{ maxWidth: 420, wordBreak: "break-all" }}>{event.detail || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 6 }}>交付物</div>
+            {data.artifacts?.length ? (
+              <div className="stack" style={{ gap: 6 }}>
+                {data.artifacts.map((artifact) => (
+                  <div className="row" key={artifact.id} style={{ justifyContent: "space-between" }}>
+                    <span className="mono">{artifact.name} · {formatSize(artifact.size)}</span>
+                    <a className="btn link" href={`/admin/api/v1/artifacts/${encodeURIComponent(artifact.id)}`}>下载</a>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="muted">本次运行没有交付物</div>}
+          </div>
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function formatSize(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }

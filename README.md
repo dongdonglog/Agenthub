@@ -33,6 +33,7 @@ AgentHub 把入口放进日常 IM，把执行放进可清理的工作区，把�
 
 - **IM 原生**：飞书长连接 / Webhook、钉钉 Stream；支持 @、引用消息、附件；
 - **真执行**：pi 在会话代工作区里读写文件、跑 `bash`、搜索、调 MCP；
+- **交付物回传**：产物写入 `submit/`，文件/图片回到群；多文档自动打包 ZIP，超限有说明；
 - **技能可运营**：`SKILL.md` + `references/`，管理台在线编辑、ZIP 导入、停用归档；
 - **模型主备**：多供应商、有序候选、超时/429/5xx 自动切换、熔断，图片走 vision 线路；
 - **调度**：跨会话并发上限、公平队列 + 等待老化、每会话限流、cron 定时任务；
@@ -181,6 +182,9 @@ routes:
 | `AGENTHUB_AGENT_MODEL` | `gpt-4.1-mini` | 默认主模型 |
 | `AGENTHUB_ADMIN_TOKEN` | 空 | 管理台访问令牌 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发上限 |
+| `AGENTHUB_ARTIFACT_MAX_BYTES` | `20MB` | 单个交付物上限 |
+| `AGENTHUB_ARTIFACT_MAX_COUNT` | `10` | 单次运行交付物数量上限 |
+| `AGENTHUB_ARTIFACT_MAX_TOTAL` | `50MB` | 单次运行交付物总量上限 |
 | `PI_ISOLATION` | `namespace` | 容器受限时用 `process_group` |
 
 > 安全提示：管理台默认只监听回环。暴露到公网前必须设置 `AGENTHUB_ADMIN_TOKEN`，
@@ -236,7 +240,7 @@ AGENTHUB_TEST_DATABASE_URL='postgres://postgres:agenthub@127.0.0.1:55433/agenthu
 AgentHub 目前是 **v0.4.x**，适合内网或受控环境的小团队使用。
 
 - **单实例**：飞书/钉钉长连接目前一个应用只跑一个实例；
-- **钉钉**：回复依赖 `sessionWebhook`（约 1.5 小时），卡片和附件下载未接入；
+- **钉钉**：回复依赖 `sessionWebhook`（约 1.5 小时），卡片和附件下载未接入；文件交付会明确提示当前通道不支持；
 - **资源**：镜像约 430MB；每个并发 pi 进程约 100MB，按 `AGENTHUB_MAX_CONCURRENT_RUNS` 估算；
 - **成本**：已记录 token，尚未按单价换算金额；
 - **pi**：镜像固定 1.4.0、会话文件 v3，升级需要回归；

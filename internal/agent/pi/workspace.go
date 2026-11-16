@@ -6,9 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/moying/agenthub/internal/agent"
+	"github.com/moying/agenthub/internal/channel"
 )
 
 // ensureWorkspace 创建工作区并复制只读部署配置。
@@ -98,7 +101,9 @@ func buildAgentsMD(conv string, generation int, attachments []string) string {
 	b.WriteString("## 输出约定\n\n")
 	b.WriteString("- 直接给出结论，不要输出内部运行编号或工具细节；\n")
 	b.WriteString("- 需要多条回复时用单独一行 `---SPLIT---` 分隔；\n")
-	b.WriteString("- 附件位于 `attachments/`，只读；产物写入 `outbox/`。\n")
+	b.WriteString("- 附件位于 `attachments/`，只读；\n")
+	b.WriteString("- 需要交付给用户的文件写入 `submit/`（本次运行的产物目录），文件名直接可读；\n")
+	b.WriteString("- 不要使用历史运行产生的 outbox 绝对路径。\n")
 	if len(attachments) > 0 {
 		b.WriteString("\n## 附件\n\n")
 		for _, name := range attachments {
@@ -149,6 +154,116 @@ func linkAttachments(ws string, messages []agent.Message) []string {
 		}
 	}
 	return names
+}
+
+// prepareRunOutbox 为本次运行创建独立产物目录，并把 submit 原子指向它。
+func prepareRunOutbox(ws, runID string) error {
+	safe := sanitizeName(runID)
+	if safe == "" {
+		safe = "run"
+	}
+	dir := filepath.Join(ws, "outbox", safe)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	link := filepath.Join(ws, "submit")
+	if info, err := os.Lstat(link); err == nil && info.IsDir() {
+		return errors.New("工作区存在同名 submit 目录，无法建立交付链接")
+	}
+	tmp := filepath.Join(ws, ".submit-"+safe)
+	_ = os.Remove(tmp)
+	if err := os.Symlink(filepath.Join("outbox", safe), tmp); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, link); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// collectRunArtifacts 读取本次运行目录中的产物。
+//
+// @remarks 只接受普通文件；本次目录为空时，按修改时间回收旧目录中本次写入的文件，
+// 兼容 agent 复用历史 submit 绝对路径的情况。
+func collectRunArtifacts(ws, runID string, started time.Time) []channel.Artifact {
+	safe := sanitizeName(runID)
+	if safe == "" {
+		safe = "run"
+	}
+	current := filepath.Join(ws, "outbox", safe)
+	arts := readArtifactDir(current)
+	if len(arts) == 0 {
+		arts = recoverArtifacts(filepath.Join(ws, "outbox"), safe, started)
+	}
+	sort.Slice(arts, func(i, j int) bool { return arts[i].Name < arts[j].Name })
+	return arts
+}
+
+func readArtifactDir(dir string) []channel.Artifact {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []channel.Artifact
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		out = append(out, channel.Artifact{
+			Name: sanitizeName(entry.Name()),
+			Path: filepath.Join(dir, entry.Name()),
+			Kind: artifactKind(entry.Name()),
+			Size: info.Size(),
+		})
+	}
+	return out
+}
+
+func recoverArtifacts(root, current string, started time.Time) []channel.Artifact {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []channel.Artifact
+	for _, dir := range entries {
+		if !dir.IsDir() || dir.Name() == current || strings.HasPrefix(dir.Name(), ".") {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(root, dir.Name()))
+		if err != nil {
+			continue
+		}
+		for _, entry := range files {
+			if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil || !info.Mode().IsRegular() || info.ModTime().Before(started) {
+				continue
+			}
+			out = append(out, channel.Artifact{
+				Name: sanitizeName(entry.Name()),
+				Path: filepath.Join(root, dir.Name(), entry.Name()),
+				Kind: artifactKind(entry.Name()),
+				Size: info.Size(),
+			})
+		}
+	}
+	return out
+}
+
+func artifactKind(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
+		return "image"
+	default:
+		return "file"
+	}
 }
 
 func sanitizeName(name string) string {

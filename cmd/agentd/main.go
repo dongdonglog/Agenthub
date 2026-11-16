@@ -258,6 +258,8 @@ func run() int {
 			logger.Warn("cleanup generation failed", "conversation", conv, "generation", generation, "error", err)
 		}
 	})
+	engine.SetArtifactDir(filepath.Join(cfg.Storage.Dir, "artifacts"))
+	engine.SetArtifactLimits(cfg.Storage.ArtifactMaxBytes, cfg.Storage.ArtifactMaxCount, cfg.Storage.ArtifactMaxTotal)
 	engine.SetConcurrency(cfg.MaxConcurrentRuns)
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
 	engine.SetProfileSource(func() core.ProfileSelection {
@@ -430,7 +432,7 @@ func run() int {
 	}()
 	go flushLoop(workCtx, engine, logger)
 	if db != nil {
-		go purgeLoop(ctx, db, cfg.RetentionDays, logger)
+		go purgeLoop(ctx, db, filepath.Join(cfg.Storage.Dir, "artifacts"), cfg.RetentionDays, logger)
 	}
 	go workspaceCleanupLoop(workCtx, piWorkspaceDir, piSessionDir, cfg.RetentionDays, logger)
 
@@ -656,7 +658,7 @@ func workspaceCleanupLoop(ctx context.Context, workspaces, sessions string, days
 	}
 }
 
-func purgeLoop(ctx context.Context, db *store.DB, days int, logger *slog.Logger) {
+func purgeLoop(ctx context.Context, db *store.DB, artifactDir string, days int, logger *slog.Logger) {
 	if days <= 0 {
 		return
 	}
@@ -671,6 +673,7 @@ func purgeLoop(ctx context.Context, db *store.DB, days int, logger *slog.Logger)
 		if deleted > 0 {
 			logger.Info("retention purge", "rows", deleted, "cutoff", cutoff.Format(time.RFC3339))
 		}
+		cleanupArtifactDirs(artifactDir, cutoff, logger)
 	}
 	run()
 	ticker := time.NewTicker(6 * time.Hour)
@@ -681,6 +684,25 @@ func purgeLoop(ctx context.Context, db *store.DB, days int, logger *slog.Logger)
 			return
 		case <-ticker.C:
 			run()
+		}
+	}
+}
+
+func cleanupArtifactDirs(dir string, cutoff time.Time, logger *slog.Logger) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			logger.Warn("artifact cleanup failed", "name", entry.Name(), "error", err)
 		}
 	}
 }

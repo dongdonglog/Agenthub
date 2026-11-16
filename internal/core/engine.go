@@ -49,6 +49,12 @@ type Engine struct {
 	priority    map[string]int
 	genCleaner  func(conv string, generation int)
 	events      map[string][]RunEvent
+	artifacts   map[string]*Artifact
+	artifactDir string
+	// artifactMaxBytes / artifactMaxCount / artifactMaxTotal 限制单次产物交付。
+	artifactMaxBytes int64
+	artifactMaxCount int
+	artifactMaxTotal int64
 	// runSem 限制跨会话并发运行数；nil 表示不限制。
 	runSem chan struct{}
 	// rateLimit 是每会话每窗口允许的消息数；0 表示不限制。
@@ -96,6 +102,10 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		hits:               make(map[string][]time.Time),
 		rateWindow:         time.Minute,
 		events:             make(map[string][]RunEvent),
+		artifacts:          make(map[string]*Artifact),
+		artifactMaxBytes:   20 << 20,
+		artifactMaxCount:   10,
+		artifactMaxTotal:   50 << 20,
 		maxMessagesPerConv: 100,
 		maxConversations:   200,
 		maxRuns:            200,
