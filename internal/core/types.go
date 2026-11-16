@@ -58,11 +58,13 @@ type Delivery struct {
 	ArtifactID string
 	// ArtifactPath 是产物本地路径，重启补偿时使用。
 	ArtifactPath string
-	State        string // pending | retrying | sent | failed
+	State        string // pending | sending | retrying | sent | failed | ambiguous
 	Error        string
 	ExternalID   string
 	Attempts     int
 	CreatedAt    time.Time
+	// SendStartedAt 是最近一次调用通道前的时间；重启时用于识别结果不确定的投递。
+	SendStartedAt time.Time
 	// NextAttempt 是下一次重试时间，零值表示立即。
 	NextAttempt time.Time
 	TraceID     string
@@ -154,6 +156,7 @@ type Journal interface {
 	LoadGenerations(ctx context.Context) (map[string]int, error)
 	SaveRun(ctx context.Context, r *Run) error
 	SaveDelivery(ctx context.Context, d *Delivery) error
+	LoadSendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
 	SaveArtifact(ctx context.Context, a *Artifact) error
 	LoadArtifacts(ctx context.Context, runID string) ([]*Artifact, error)
 	LoadArtifact(ctx context.Context, id string) (*Artifact, error)

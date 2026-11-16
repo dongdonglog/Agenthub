@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, qs, type Paged, type SessionInfo } from "../api/client";
-import { Badge, Button, Card, CopyButton, Input, PageHeader, Pagination, Skeleton, Tabs, useAsync } from "../components/ui";
+import { Badge, Button, Card, CopyButton, Input, PageHeader, Pagination, Skeleton, Tabs, useAsync, useConfirm, useToast } from "../components/ui";
 
 type Kind = "user" | "group" | "p2p" | "scheduled" | "all";
 
@@ -17,6 +17,8 @@ export function Sessions() {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const size = 20;
+  const confirm = useConfirm();
+  const { show } = useToast();
 
   const { data, loading, error } = useAsync<Paged<SessionInfo>>(
     () => api(`/sessions${qs({ kind, q: query, page, size })}`),
@@ -34,9 +36,27 @@ export function Sessions() {
     [],
   );
 
+  const applyAll = async () => {
+    if (!(await confirm({
+      title: "应用当前配置到所有已有会话？",
+      description: "会同步模型、MCP、技能到现有工作区，并把 Profile 绑定更新到当前代；下一批运行生效。",
+      confirmText: "应用",
+    }))) return;
+    try {
+      const result = await api<{ sessions: number }>("/sessions/apply-config", { method: "POST" });
+      show(`已应用到 ${result.sessions} 个会话`);
+    } catch (err) {
+      show((err as Error).message, true);
+    }
+  };
+
   return (
     <div className="stack">
-      <PageHeader title="在线会话" description="按「人 × 群」隔离；定时任务默认单独归档，不混入用户会话。" />
+      <PageHeader
+        title="在线会话"
+        description="按「人 × 群」隔离；定时任务默认单独归档，不混入用户会话。"
+        actions={<Button onClick={applyAll}>应用当前配置</Button>}
+      />
       <Card>
         <Tabs value={kind} onChange={(value) => { setKind(value); setPage(1); }} items={tabs} />
         <div className="toolbar">

@@ -28,8 +28,34 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		e.mu.Unlock()
 		return nil
 	}
+	ttl := e.queueTTL
+	var expired []*Message
+	if ttl > 0 {
+		cutoff := e.now().Add(-ttl)
+		active := batch[:0]
+		for _, m := range batch {
+			if m.CreatedAt.Before(cutoff) {
+				m.Status = "expired"
+				expired = append(expired, m)
+				continue
+			}
+			active = append(active, m)
+		}
+		batch = active
+	}
+	queueNotice := ""
+	if len(expired) > 0 {
+		queueNotice = fmt.Sprintf("有 %d 条消息在队列中等待超过 %s，未执行。请重新发送。", len(expired), formatQueueTTL(ttl))
+	}
 	// 批次快照：清空队列并冻结输入（不变量 I2）。
 	e.order[conv] = nil
+	if len(batch) == 0 {
+		delete(e.active, conv)
+		e.mu.Unlock()
+		e.persistExpired(ctx, expired)
+		e.notifyExpired(ctx, expired, ttl)
+		return nil
+	}
 	e.runSeq++
 	run := &Run{
 		TraceID:        batch[0].TraceID,
@@ -50,6 +76,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	e.cancels[conv] = cancel
 	e.mu.Unlock()
 
+	e.persistExpired(ctx, expired)
 	if e.journal != nil {
 		if err := e.journal.SaveRun(ctx, run); err != nil {
 			e.log.Error("persist run failed", "error", err, "run", run.ID)
@@ -159,14 +186,20 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	if text == "" && len(artifacts) > 0 {
 		text = "已生成交付物。"
 	}
+	if queueNotice != "" {
+		if text != "" {
+			text += "\n\n"
+		}
+		text += queueNotice
+	}
 	if artifactNotice != "" {
 		if text != "" {
 			text += "\n\n"
 		}
 		text += artifactNotice
-		if run.State == "completed" {
-			run.Output = text
-		}
+	}
+	if run.State == "completed" {
+		run.Output = text
 	}
 	delete(e.active, conv)
 	delete(e.cancels, conv)
@@ -237,6 +270,54 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		e.send(ctx, item)
 	}
 	return nil
+}
+
+func (e *Engine) persistExpired(ctx context.Context, expired []*Message) {
+	if len(expired) == 0 || e.journal == nil {
+		return
+	}
+	ids := make([]string, 0, len(expired))
+	for _, m := range expired {
+		ids = append(ids, m.ID)
+	}
+	if err := e.journal.SetMessageStatus(ctx, ids, "expired"); err != nil {
+		e.log.Warn("persist expired messages failed", "error", err, "count", len(ids))
+	}
+}
+
+func (e *Engine) notifyExpired(ctx context.Context, expired []*Message, ttl time.Duration) {
+	if len(expired) == 0 {
+		return
+	}
+	m := expired[0]
+	delivery := &Delivery{
+		TraceID:        m.TraceID,
+		CreatedAt:      e.now(),
+		IdempotencyKey: "expired:" + m.ID,
+		ChatID:         m.ChatID,
+		ReplyTo:        replyTarget(m),
+		Text:           fmt.Sprintf("有 %d 条消息在队列中等待超过 %s，未执行。请重新发送。", len(expired), formatQueueTTL(ttl)),
+		State:          "pending",
+	}
+	e.mu.Lock()
+	e.deliveries[delivery.IdempotencyKey] = delivery
+	e.mu.Unlock()
+	if e.journal != nil {
+		if err := e.journal.SaveDelivery(ctx, delivery); err != nil {
+			e.log.Warn("persist expired notice failed", "error", err)
+		}
+	}
+	e.send(ctx, delivery)
+}
+
+func formatQueueTTL(ttl time.Duration) string {
+	if ttl >= time.Hour {
+		return fmt.Sprintf("%.0f 小时", ttl.Hours())
+	}
+	if ttl >= time.Minute {
+		return fmt.Sprintf("%.0f 分钟", ttl.Minutes())
+	}
+	return fmt.Sprintf("%.0f 秒", ttl.Seconds())
 }
 
 func joinNotice(existing, extra string) string {

@@ -18,6 +18,16 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		e.persistDelivery(ctx, d)
 		return
 	}
+	e.mu.Lock()
+	d.Attempts++
+	d.State = "sending"
+	d.SendStartedAt = e.now()
+	attempt := d.Attempts
+	e.mu.Unlock()
+	// 先落“发送中”再调用通道：进程在请求中途退出时，重启后只能标记歧义，
+	// 不能安全地自动重发。
+	e.persistDelivery(ctx, d)
+
 	var err error
 	if d.Kind == "" || d.Kind == "text" {
 		_, err = e.ch.SendText(ctx, channel.Outbound{ChatID: d.ChatID, ReplyTo: d.ReplyTo, Text: d.Text})
@@ -34,10 +44,10 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		err = channel.ErrUnsupported
 	}
 	e.mu.Lock()
-	d.Attempts++
 	if err == nil {
 		d.State = "sent"
 		d.Error = ""
+		d.NextAttempt = time.Time{}
 		e.sent[d.IdempotencyKey] = true
 		e.mu.Unlock()
 		e.persistDelivery(ctx, d)
@@ -45,13 +55,12 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		return
 	}
 	d.Error = err.Error()
-	retry := d.Attempts < maxDeliveryAttempts && !errors.Is(err, channel.ErrUnsupported) && ctx.Err() == nil
+	retry := attempt < maxDeliveryAttempts && !errors.Is(err, channel.ErrUnsupported) && ctx.Err() == nil
 	if retry {
 		d.State = "retrying"
 	} else {
 		d.State = "failed"
 	}
-	attempt := d.Attempts
 	e.mu.Unlock()
 	if e.metrics != nil {
 		e.metrics.Inc("agenthub_deliveries_total", map[string]string{"result": d.State})

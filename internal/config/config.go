@@ -39,7 +39,9 @@ type Config struct {
 	// MaxConcurrentRuns 是跨会话并发运行上限。
 	MaxConcurrentRuns int `yaml:"max_concurrent_runs"`
 	// RateLimitPerMin 是每会话每分钟消息上限；0 表示不限。
-	RateLimitPerMin int            `yaml:"rate_limit_per_min"`
+	RateLimitPerMin int `yaml:"rate_limit_per_min"`
+	// QueueTTLSeconds 是消息在队列中的最长等待秒数；0 表示不限制。
+	QueueTTLSeconds int            `yaml:"queue_ttl_seconds"`
 	Webhook         WebhookConfig  `yaml:"webhook"`
 	Feishu          FeishuConfig   `yaml:"feishu"`
 	Dingtalk        DingtalkConfig `yaml:"dingtalk"`
@@ -198,6 +200,7 @@ func defaults() Config {
 		},
 		RetentionDays:     90,
 		MaxConcurrentRuns: 4,
+		QueueTTLSeconds:   6 * 3600,
 		Webhook:           WebhookConfig{Addr: "127.0.0.1:8789"},
 		Feishu: FeishuConfig{
 			Transport:      "websocket",
@@ -238,6 +241,7 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.RetentionDays, "AGENTHUB_RETENTION_DAYS")
 	setInt(&cfg.MaxConcurrentRuns, "AGENTHUB_MAX_CONCURRENT_RUNS")
 	setInt(&cfg.RateLimitPerMin, "AGENTHUB_RATE_LIMIT_PER_MIN")
+	setInt(&cfg.QueueTTLSeconds, "AGENTHUB_QUEUE_TTL_SECONDS")
 	setStr(&cfg.Webhook.Addr, "AGENTHUB_WEBHOOK_ADDR")
 	setStr(&cfg.Feishu.Transport, "FEISHU_TRANSPORT")
 	setStr(&cfg.Feishu.Domain, "FEISHU_DOMAIN")
@@ -335,6 +339,9 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimitPerMin < 0 {
 		return errors.New("rate_limit_per_min 不能为负数")
+	}
+	if c.QueueTTLSeconds < 0 {
+		return errors.New("queue_ttl_seconds 不能为负数")
 	}
 	if c.Storage.ArtifactMaxBytes < 0 || c.Storage.ArtifactMaxCount < 0 || c.Storage.ArtifactMaxTotal < 0 {
 		return errors.New("artifact 大小与数量上限不能为负数")

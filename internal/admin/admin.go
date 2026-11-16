@@ -112,6 +112,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/sessions", s.handleSessions)
 	mux.HandleFunc("GET /admin/api/v1/sessions/{id}", s.handleSession)
 	mux.HandleFunc("PUT /admin/api/v1/sessions/{id}/profile", s.handleSessionProfile)
+	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/apply-config", s.handleSessionApplyConfig)
+	mux.HandleFunc("POST /admin/api/v1/sessions/apply-config", s.handleSessionsApplyConfig)
 	mux.HandleFunc("GET /admin/api/v1/queue", s.handleQueue)
 	mux.HandleFunc("GET /admin/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("POST /admin/api/v1/tasks", s.handleTasks)
@@ -720,6 +722,52 @@ func (s *Server) handleSessionProfile(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeError(rw, http.StatusNotFound, "Profile 不存在")
+}
+
+// handleSessionApplyConfig 把当前生效 Profile 和部署配置应用到单个会话当前代。
+func (s *Server) handleSessionApplyConfig(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Profiles == nil {
+		writeError(rw, http.StatusServiceUnavailable, "Profile 存储未接入")
+		return
+	}
+	id := r.PathValue("id")
+	active := s.opts.Profiles.Active()
+	selection := core.ProfileSelection{Name: active.Name, Skills: active.Skills, MCPs: active.MCPs}
+	if s.opts.ReloadAgentConfig != nil {
+		if err := s.opts.ReloadAgentConfig(); err != nil {
+			writeError(rw, http.StatusInternalServerError, "同步工作区配置失败: "+err.Error())
+			return
+		}
+	}
+	if err := s.engine.RebindProfile(r.Context(), id, selection); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.audit(r, "session.apply_config", id, selection.Name)
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "profile": selection.Name})
+}
+
+// handleSessionsApplyConfig 把当前生效 Profile 应用到所有已有会话的当前代。
+func (s *Server) handleSessionsApplyConfig(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Profiles == nil {
+		writeError(rw, http.StatusServiceUnavailable, "Profile 存储未接入")
+		return
+	}
+	active := s.opts.Profiles.Active()
+	selection := core.ProfileSelection{Name: active.Name, Skills: active.Skills, MCPs: active.MCPs}
+	if s.opts.ReloadAgentConfig != nil {
+		if err := s.opts.ReloadAgentConfig(); err != nil {
+			writeError(rw, http.StatusInternalServerError, "同步工作区配置失败: "+err.Error())
+			return
+		}
+	}
+	count, err := s.engine.ApplyProfileToCurrentGenerations(r.Context(), selection)
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.audit(r, "sessions.apply_config", "all", fmt.Sprintf("profile=%s sessions=%d", selection.Name, count))
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "profile": selection.Name, "sessions": count})
 }
 
 func (s *Server) handleRuns(rw http.ResponseWriter, _ *http.Request) {

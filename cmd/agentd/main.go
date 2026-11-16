@@ -262,6 +262,7 @@ func run() int {
 	engine.SetArtifactLimits(cfg.Storage.ArtifactMaxBytes, cfg.Storage.ArtifactMaxCount, cfg.Storage.ArtifactMaxTotal)
 	engine.SetConcurrency(cfg.MaxConcurrentRuns)
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
+	engine.SetQueueTTL(time.Duration(cfg.QueueTTLSeconds) * time.Second)
 	engine.SetProfileSource(func() core.ProfileSelection {
 		active := profiles.Active()
 		return core.ProfileSelection{Name: active.Name, Skills: active.Skills, MCPs: active.MCPs}

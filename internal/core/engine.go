@@ -60,6 +60,7 @@ type Engine struct {
 	// rateLimit 是每会话每窗口允许的消息数；0 表示不限制。
 	rateLimit  int
 	rateWindow time.Duration
+	queueTTL   time.Duration
 	hits       map[string][]time.Time
 	// retryDelay 计算投递重试间隔，默认指数退避。
 	retryDelay func(attempt int) time.Duration
@@ -212,6 +213,13 @@ func (e *Engine) SetRateLimit(n int, window time.Duration) {
 	}
 }
 
+// SetQueueTTL 设置消息在队列中的最长等待时间；0 表示不限制。
+func (e *Engine) SetQueueTTL(ttl time.Duration) {
+	e.mu.Lock()
+	e.queueTTL = ttl
+	e.mu.Unlock()
+}
+
 // SetProfileSource 设置新会话代绑定配置的来源（通常是当前生效 Profile）。
 func (e *Engine) SetProfileSource(fn func() ProfileSelection) {
 	e.profileSrc = fn
@@ -260,6 +268,35 @@ func (e *Engine) RebindProfile(ctx context.Context, conv string, p ProfileSelect
 		return e.journal.SaveProfileBinding(ctx, conv, gen, p)
 	}
 	return nil
+}
+
+// ApplyProfileToCurrentGenerations 把一份 Profile 选择绑定到所有已有会话的当前代。
+//
+// @returns 受影响的会话数；单个持久化失败不阻止其他会话，返回首个错误。
+func (e *Engine) ApplyProfileToCurrentGenerations(ctx context.Context, p ProfileSelection) (int, error) {
+	infos := e.SessionInfos()
+	e.mu.Lock()
+	gens := make(map[string]int)
+	for _, info := range infos {
+		if info.Internal {
+			continue
+		}
+		gens[info.ID] = e.generationLocked(info.ID)
+	}
+	for conv, gen := range gens {
+		e.profiles[conv+"#"+strconv.Itoa(gen)] = p
+	}
+	e.mu.Unlock()
+
+	var firstErr error
+	if e.journal != nil {
+		for conv, gen := range gens {
+			if err := e.journal.SaveProfileBinding(ctx, conv, gen, p); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return len(gens), firstErr
 }
 
 // ProfileOf 返回会话当前代绑定的 Profile 名称。

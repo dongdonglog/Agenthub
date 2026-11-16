@@ -87,6 +87,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数；0 关闭清理 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
 | `AGENTHUB_RATE_LIMIT_PER_MIN` | `0` | 每会话每分钟消息上限；0 关闭 |
+| `AGENTHUB_QUEUE_TTL_SECONDS` | `21600` | 排队消息最长等待秒数；0 关闭 |
 | `PI_BIN` | `pi` | pi 可执行文件 |
 | `PI_TOOLS` | `read,bash,grep,find,ls,tool_search` | 暴露给 pi 的工具 |
 | `PI_AGENT_DIR` | `<data>/pi/agent` | 部署配置目录 |
@@ -140,13 +141,19 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 - 超限不调用上传接口，只投递说明；通道不支持文件时明确提示；
 - 管理台运行详情可查看并下载产物；保留期与数据库清理策略一致。
 
-### 4.3 附件
+### 4.3 投递与队列
+
+- 发送前把投递标记为 `sending`；进程在请求中途退出时，重启后标记为 `ambiguous`，不自动重发，管理台运行详情可见；
+- 队列中的消息超过 `AGENTHUB_QUEUE_TTL_SECONDS` 后不再执行，并投递“请重新发送”的说明；
+- 发送失败仍按退避重试，最多 3 次；通道不支持文件时不重试。
+
+### 4.4 附件
 
 - 保存目录：`<AGENTHUB_DATA_DIR>/attachments/<message_id>/`，文件名做了字符清洗；
 - 下载在事件确认之后异步进行，完成才入队；单个附件失败只影响该附件；
 - 模型侧：小文本内联，其余通过 `read_file` 读取，路径被限制在附件目录内。
 
-### 4.4 持久化
+### 4.5 持久化
 
 - 消息、运行、投递写入 `message_state` / `run_state` / `delivery_state`；
 - 启动时 `Restore` 恢复最近 1000 条消息与运行，`processing` 状态的消息重新排队；

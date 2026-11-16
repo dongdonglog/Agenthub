@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import { Badge, Breadcrumbs, Button, Card, CopyButton, Field, Input, PageHeader, Skeleton, useAsync, useToast } from "../components/ui";
+import { Badge, Breadcrumbs, Button, Card, CopyButton, Field, Input, PageHeader, Skeleton, useAsync, useConfirm, useToast } from "../components/ui";
 
 type Message = { ID: string; Role: string; Text: string; CreatedAt: string; Status: string; MsgType: string };
 type Run = { ID: string; State: string; Output: string; Error: string; StartedAt: string; InputTokens: number; OutputTokens: number };
 type Detail = { id: string; profile?: string; priority?: number | null; messages: Message[]; runs: Run[] };
 type RunEvent = { kind: string; name?: string; detail?: string; duration_ms?: number; created_at: string };
 type Artifact = { id: string; name: string; kind: string; size: number; created_at: string };
-type RunDetail = { run: Run; events: RunEvent[]; artifacts: Artifact[] };
+type Delivery = { IdempotencyKey: string; Kind: string; Name: string; State: string; Error: string; Attempts: number; SendStartedAt?: string };
+type RunDetail = { run: Run; events: RunEvent[]; artifacts: Artifact[]; deliveries: Delivery[] };
 
 export function SessionDetail() {
   const { id = "" } = useParams();
@@ -17,6 +18,22 @@ export function SessionDetail() {
   const [priority, setPriority] = useState("");
   const [selectedRun, setSelectedRun] = useState("");
   const { show } = useToast();
+  const confirm = useConfirm();
+
+  const applyConfig = async () => {
+    if (!(await confirm({
+      title: "把当前配置应用到本会话？",
+      description: "会同步模型、MCP、技能到工作区，并更新当前代的 Profile 绑定；下一批运行生效。",
+      confirmText: "应用",
+    }))) return;
+    try {
+      const result = await api<{ profile: string }>(`/sessions/${encodeURIComponent(conv)}/apply-config`, { method: "POST" });
+      show(`已应用配置：${result.profile}`);
+      reload();
+    } catch (err) {
+      show((err as Error).message, true);
+    }
+  };
 
   const savePriority = async () => {
     try {
@@ -47,7 +64,12 @@ export function SessionDetail() {
               <CopyButton value={conv} />
             </span>
           }
-          actions={<Link className="btn" to="/sessions">返回列表</Link>}
+          actions={
+            <div className="row" style={{ gap: 8 }}>
+              <Button onClick={applyConfig}>应用当前配置</Button>
+              <Link className="btn" to="/sessions">返回列表</Link>
+            </div>
+          }
         />
       </div>
 
@@ -145,6 +167,26 @@ function RunDetailPanel({ runId, onClose }: { runId: string; onClose: () => void
                 ))}
               </div>
             ) : <div className="muted">本次运行没有交付物</div>}
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 6 }}>投递状态</div>
+            {data.deliveries?.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>类型</th><th>状态</th><th>尝试</th><th>错误</th></tr></thead>
+                  <tbody>
+                    {data.deliveries.map((delivery) => (
+                      <tr key={delivery.IdempotencyKey}>
+                        <td>{delivery.Kind || "text"}{delivery.Name ? ` · ${delivery.Name}` : ""}</td>
+                        <td><Badge kind={delivery.State === "ambiguous" || delivery.State === "failed" ? "danger" : delivery.State === "sent" ? "ok" : "warn"}>{delivery.State}</Badge></td>
+                        <td>{delivery.Attempts}</td>
+                        <td className="muted" style={{ maxWidth: 420, wordBreak: "break-all" }}>{delivery.Error || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : <div className="muted">没有投递记录</div>}
           </div>
         </div>
       ) : null}

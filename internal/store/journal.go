@@ -67,16 +67,44 @@ func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 // SaveDelivery 新建或更新投递记录。
 func (j *Journal) SaveDelivery(ctx context.Context, d *core.Delivery) error {
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, error, attempts, next_attempt_at, trace_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, error, attempts, next_attempt_at, trace_id, send_started_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT (idempotency_key) DO UPDATE SET
 			state = EXCLUDED.state,
 			error = EXCLUDED.error,
 			attempts = EXCLUDED.attempts,
 			next_attempt_at = EXCLUDED.next_attempt_at,
-			trace_id = EXCLUDED.trace_id`,
-		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.Kind, d.Name, d.ArtifactID, d.ArtifactPath, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt), d.TraceID)
+			trace_id = EXCLUDED.trace_id,
+			send_started_at = EXCLUDED.send_started_at`,
+		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.Kind, d.Name, d.ArtifactID, d.ArtifactPath, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt), d.TraceID, nullTime(d.SendStartedAt))
 	return err
+}
+
+// LoadSendingDeliveries 返回重启前处于发送中的投递，用于标记歧义。
+func (j *Journal) LoadSendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, attempts, next_attempt_at, trace_id, send_started_at
+		FROM delivery_state WHERE state = 'sending' ORDER BY created_at LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*core.Delivery
+	for rows.Next() {
+		d := &core.Delivery{}
+		var next, started *time.Time
+		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.Kind, &d.Name, &d.ArtifactID, &d.ArtifactPath, &d.State, &d.Attempts, &next, &d.TraceID, &started); err != nil {
+			return nil, err
+		}
+		if next != nil {
+			d.NextAttempt = *next
+		}
+		if started != nil {
+			d.SendStartedAt = *started
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // SaveArtifact 登记运行产物；同一 ID 重复写入保持幂等。
@@ -333,7 +361,7 @@ func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, err
 // LoadPendingDeliveries 返回未完成投递，用于启动补偿。
 func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, attempts, next_attempt_at, trace_id
+		SELECT idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, attempts, next_attempt_at, trace_id, send_started_at
 		FROM delivery_state WHERE state IN ('pending','retrying') LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -343,11 +371,15 @@ func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core
 	for rows.Next() {
 		d := &core.Delivery{}
 		var next *time.Time
-		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.Kind, &d.Name, &d.ArtifactID, &d.ArtifactPath, &d.State, &d.Attempts, &next, &d.TraceID); err != nil {
+		var started *time.Time
+		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.Kind, &d.Name, &d.ArtifactID, &d.ArtifactPath, &d.State, &d.Attempts, &next, &d.TraceID, &started); err != nil {
 			return nil, err
 		}
 		if next != nil {
 			d.NextAttempt = *next
+		}
+		if started != nil {
+			d.SendStartedAt = *started
 		}
 		out = append(out, d)
 	}
