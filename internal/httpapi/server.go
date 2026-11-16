@@ -25,8 +25,9 @@ type Server struct {
 	db      *store.DB
 	version string
 
-	mu     sync.RWMutex
-	checks map[string]func() (bool, string)
+	mu           sync.RWMutex
+	checks       map[string]func() (bool, string)
+	alertHandler http.Handler
 }
 
 // New 构造 HTTP 服务。
@@ -39,6 +40,11 @@ func New(cfg *config.Config, log *slog.Logger, metrics *obs.Metrics, db *store.D
 		version: version,
 		checks:  make(map[string]func() (bool, string)),
 	}
+}
+
+// SetAlertHandler 注册 Alertmanager webhook；nil 表示不启用。
+func (s *Server) SetAlertHandler(handler http.Handler) {
+	s.alertHandler = handler
 }
 
 // RegisterCheck 注册一个运行期健康检查。
@@ -58,6 +64,9 @@ func (s *Server) Handler() http.Handler {
 		s.recordHealthGauges()
 		s.metrics.Handler().ServeHTTP(rw, r)
 	})
+	if s.alertHandler != nil {
+		mux.Handle("POST /api/v1/alerts/alertmanager", s.alertHandler)
+	}
 	mux.HandleFunc("GET /", s.handleIndex)
 	return s.withAccessLog(mux)
 }

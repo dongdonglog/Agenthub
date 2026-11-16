@@ -74,6 +74,8 @@ type Options struct {
 	Scheduler *scheduler.Scheduler
 	// ReloadAgentConfig 在 MCP/模型配置变更后重新生成 pi 配置。
 	ReloadAgentConfig func() error
+	// Incidents 是 AIOps 事故存储；为空表示未启用。
+	Incidents *store.IncidentStore
 }
 
 // Server 提供管理页面与管理 API。
@@ -117,6 +119,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/reset", s.handleSessionReset)
 	mux.HandleFunc("POST /admin/api/v1/sessions/reset", s.handleSessionsReset)
 	mux.HandleFunc("POST /admin/api/v1/deliveries/{key}/retry", s.handleDeliveryRetry)
+	mux.HandleFunc("GET /admin/api/v1/incidents", s.handleIncidents)
+	mux.HandleFunc("GET /admin/api/v1/incidents/{id}", s.handleIncident)
+	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/ack", s.handleIncidentAck)
 	mux.HandleFunc("GET /admin/api/v1/queue", s.handleQueue)
 	mux.HandleFunc("GET /admin/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("POST /admin/api/v1/tasks", s.handleTasks)
@@ -823,6 +828,63 @@ func (s *Server) handleDeliveryRetry(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "delivery.retry", key, "")
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleIncidents(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Incidents == nil {
+		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := s.opts.Incidents.ListIncidents(r.Context(), 100)
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleIncident(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Incidents == nil {
+		writeError(rw, http.StatusServiceUnavailable, "AIOps 未接入")
+		return
+	}
+	inc, err := s.opts.Incidents.GetIncident(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if inc == nil {
+		writeError(rw, http.StatusNotFound, "事故不存在")
+		return
+	}
+	events, err := s.opts.Incidents.ListEvents(r.Context(), inc.ID, 200)
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"incident": inc, "events": events})
+}
+
+func (s *Server) handleIncidentAck(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Incidents == nil {
+		writeError(rw, http.StatusServiceUnavailable, "AIOps 未接入")
+		return
+	}
+	var body struct {
+		Actor string `json:"actor"`
+	}
+	_ = decode(r, &body)
+	if body.Actor == "" {
+		body.Actor = "admin"
+	}
+	id := r.PathValue("id")
+	if err := s.opts.Incidents.Acknowledge(r.Context(), id, body.Actor, time.Now()); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.opts.Incidents.AddEvent(r.Context(), id, "acknowledged", body.Actor, "管理台认领", time.Now())
+	s.audit(r, "incident.ack", id, body.Actor)
 	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/moying/agenthub/internal/admin"
 	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/agent/pi"
+	"github.com/moying/agenthub/internal/aiops"
 	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
@@ -305,6 +306,25 @@ func run() int {
 
 	engine.SetMetrics(metrics)
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
+	var incidentStore *store.IncidentStore
+	if db != nil {
+		incidentStore = store.NewIncidentStore(db)
+	}
+	if cfg.AIOps.Enabled {
+		if incidentStore == nil {
+			logger.Error("aiops enabled without database; webhook disabled")
+		} else {
+			if cfg.AIOps.RunbookDir == "" {
+				cfg.AIOps.RunbookDir = filepath.Join(cfg.Storage.Dir, "runbooks")
+			}
+			_ = os.MkdirAll(cfg.AIOps.RunbookDir, 0o755)
+			ingestor := aiops.NewIngestor(incidentStore, engine, aiops.Config{
+				ChatID: cfg.AIOps.ChatID, RunbookDir: cfg.AIOps.RunbookDir, MaxAlerts: cfg.AIOps.MaxAlerts,
+			}, logger, metrics)
+			srv.SetAlertHandler(aiops.NewHandler(ingestor, cfg.AIOps.Token))
+			logger.Info("aiops alert webhook enabled", "chat", cfg.AIOps.ChatID, "runbook_dir", cfg.AIOps.RunbookDir)
+		}
+	}
 	if db != nil {
 		srv.RegisterCheck("db", func() (bool, string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -357,6 +377,7 @@ func run() int {
 		Runtime:      "pi",
 		PiVersion:    piVersion,
 		Profiles:     profiles,
+		Incidents:    incidentStore,
 		History: func(ctx context.Context) ([]store.Generation, error) {
 			if journal == nil {
 				return nil, nil

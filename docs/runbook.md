@@ -90,6 +90,11 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_QUEUE_TTL_SECONDS` | `21600` | 排队消息最长等待秒数；0 关闭 |
 | `AGENTHUB_DELIVERY_LEASE_SECONDS` | `120` | 投递领取租约，应大于单次通道调用耗时 |
 | `AGENTHUB_OUTBOUND_QPS` | `0` | 跨会话共享出站消息速率；0 不限 |
+| `AGENTHUB_AIOPS_ENABLED` | `false` | 启用 Alertmanager 告警入口 |
+| `AGENTHUB_AIOPS_TOKEN` | 空 | 告警 webhook Bearer token |
+| `AGENTHUB_AIOPS_CHAT_ID` | 空 | 事故诊断投递的飞书群 ID |
+| `AGENTHUB_AIOPS_RUNBOOK_DIR` | `<data>/runbooks` | 告警运行手册目录 |
+| `AGENTHUB_AIOPS_MAX_ALERTS` | `20` | 单次 webhook 最多处理告警数 |
 | `DINGTALK_GROUP_OPEN` | `false` | 钉钉群内免用户白名单；仍受群白名单限制 |
 | `FEISHU_ADMIN_OPEN_IDS` | 空 | 允许引用机器人消息干预他人会话的管理员 open_id |
 | `PI_BIN` | `pi` | pi 可执行文件 |

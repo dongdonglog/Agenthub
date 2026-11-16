@@ -51,7 +51,17 @@ type Config struct {
 	Dingtalk    DingtalkConfig `yaml:"dingtalk"`
 	Pi          PiConfig       `yaml:"pi"`
 	Agent       AgentConfig    `yaml:"agent"`
+	AIOps       AIOpsConfig    `yaml:"aiops"`
 	Log         LogConfig      `yaml:"log"`
+}
+
+// AIOpsConfig 是 Prometheus Alertmanager 告警接入配置。
+type AIOpsConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Token      string `yaml:"token"`
+	ChatID     string `yaml:"chat_id"`
+	RunbookDir string `yaml:"runbook_dir"`
+	MaxAlerts  int    `yaml:"max_alerts"`
 }
 
 // HTTPConfig 是健康检查与指标监听配置。
@@ -206,6 +216,7 @@ func defaults() Config {
 			ArtifactMaxCount: 10,
 			ArtifactMaxTotal: 50 << 20,
 		},
+		AIOps:                AIOpsConfig{MaxAlerts: 20},
 		RetentionDays:        90,
 		MaxConcurrentRuns:    4,
 		QueueTTLSeconds:      6 * 3600,
@@ -284,6 +295,11 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Dingtalk.BotName, "DINGTALK_BOT_NAME")
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
+	setBool(&cfg.AIOps.Enabled, "AGENTHUB_AIOPS_ENABLED")
+	setStr(&cfg.AIOps.Token, "AGENTHUB_AIOPS_TOKEN")
+	setStr(&cfg.AIOps.ChatID, "AGENTHUB_AIOPS_CHAT_ID")
+	setStr(&cfg.AIOps.RunbookDir, "AGENTHUB_AIOPS_RUNBOOK_DIR")
+	setInt(&cfg.AIOps.MaxAlerts, "AGENTHUB_AIOPS_MAX_ALERTS")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
 	setStr(&cfg.Agent.FallbackModel, "AGENTHUB_AGENT_FALLBACK_MODEL")
 	setStr(&cfg.Agent.VisionModel, "AGENTHUB_AGENT_VISION_MODEL")
@@ -383,6 +399,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Agent.MaxRunSeconds <= 0 {
 		return errors.New("agent.max_run_seconds 必须为正整数")
+	}
+	if c.AIOps.MaxAlerts <= 0 {
+		c.AIOps.MaxAlerts = 20
+	}
+	if c.AIOps.Enabled {
+		if c.AIOps.Token == "" {
+			return errors.New("aiops.token 不能为空")
+		}
+		if c.AIOps.ChatID == "" {
+			return errors.New("aiops.chat_id 不能为空")
+		}
 	}
 	return nil
 }
