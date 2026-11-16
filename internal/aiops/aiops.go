@@ -194,6 +194,7 @@ func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident
 		Chat:       channel.Chat{ID: i.cfg.ChatID, Kind: "group", Name: "运维告警"},
 		Text:       prompt,
 		MsgType:    "text",
+		ReadOnly:   true,
 	})
 	return err
 }

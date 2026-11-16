@@ -22,6 +22,7 @@ type Message struct {
 	NoReply        bool
 	// SentByAdmin 表示这条消息来自管理员跨会话干预。
 	SentByAdmin  bool
+	ReadOnly     bool
 	SenderOpenID string
 	SenderName   string
 	Text         string

@@ -410,6 +410,7 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 		ExternalID:     in.ExternalID,
 		NoReply:        in.NoReply,
 		SentByAdmin:    in.AdminIntervention,
+		ReadOnly:       in.ReadOnly,
 		SenderOpenID:   in.Sender.OpenID,
 		SenderName:     in.Sender.Name,
 		Text:           in.Text,

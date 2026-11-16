@@ -52,6 +52,7 @@ WORKDIR /app
 COPY --from=build /out/agentd /app/agentd
 COPY --from=build /out/agenthub-ops-mcp /app/agenthub-ops-mcp
 COPY migrations /app/migrations
+COPY pi-package /app/pi-package
 COPY examples/mcp /app/examples/mcp
 COPY --from=build --chown=node:node /out/data /data
 RUN mkdir -p /data/home /data/glab /data/gh && chown -R node:node /data

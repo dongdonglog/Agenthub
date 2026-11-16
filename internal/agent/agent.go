@@ -32,6 +32,8 @@ type Input struct {
 	TraceID string
 	// RunID 是本次运行的标识。
 	RunID string
+	// ReadOnly 表示本次运行禁止写操作。
+	ReadOnly bool
 	// SkillAllow 是本次运行允许的技能；为空表示不限制。
 	SkillAllow []string
 	// MCPAllow 是本次运行允许的 MCP 服务；为空表示不限制。

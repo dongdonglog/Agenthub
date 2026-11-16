@@ -259,9 +259,40 @@ func run() int {
 	}
 	piVersion := detectPiVersion(cfg.Pi.Bin)
 	logger.Info("pi runtime", "bin", cfg.Pi.Bin, "version", piVersion)
+	piPackageDir := os.Getenv("AGENTHUB_PI_PACKAGE")
+	if piPackageDir == "" {
+		if exe, err := os.Executable(); err == nil {
+			candidate := filepath.Join(filepath.Dir(exe), "pi-package")
+			if _, err := os.Stat(candidate); err == nil {
+				piPackageDir = candidate
+			}
+		}
+	}
+	if piPackageDir == "" {
+		if _, err := os.Stat("pi-package"); err == nil {
+			piPackageDir = "pi-package"
+		}
+	}
+	extensions := []string{}
+	skillDirs := []string{}
+	promptDirs := []string{}
+	if piPackageDir != "" {
+		if _, err := os.Stat(filepath.Join(piPackageDir, "extensions", "agenthub-guard.ts")); err == nil {
+			extensions = append(extensions, filepath.Join(piPackageDir, "extensions", "agenthub-guard.ts"))
+		}
+		if _, err := os.Stat(filepath.Join(piPackageDir, "skills")); err == nil {
+			skillDirs = append(skillDirs, filepath.Join(piPackageDir, "skills"))
+		}
+		if _, err := os.Stat(filepath.Join(piPackageDir, "prompts")); err == nil {
+			promptDirs = append(promptDirs, filepath.Join(piPackageDir, "prompts"))
+		}
+	}
 	runner := pi.New(pi.Config{
 		Bin:          cfg.Pi.Bin,
 		Tools:        cfg.Pi.Tools,
+		Extensions:   extensions,
+		Skills:       skillDirs,
+		Prompts:      promptDirs,
 		AgentDir:     piAgentDir,
 		SessionDir:   piSessionDir,
 		WorkspaceDir: piWorkspaceDir,

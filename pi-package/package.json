@@ -1,0 +1,11 @@
+{
+  "name": "@agenthub/pi-sre",
+  "version": "0.1.0",
+  "private": true,
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions/agenthub-guard.ts"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"]
+  }
+}

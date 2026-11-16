@@ -124,7 +124,18 @@ services:
 - 管理台「工作台」：员工、案件、时间线、生成交接、关闭案件、生成复盘草稿；
 - 服务目录 `services.yaml`：owner/team/runbook/dashboard/repo/namespace，自动注入诊断 prompt。
 
-### 2.7 只读观测 MCP
+### 2.7 pi 原生能力和只读约束
+
+`pi-package/` 随镜像加载：
+
+- `extensions/agenthub-guard.ts`：`tool_call` 拦截 `edit/write` 和高风险 bash；`before_agent_start` 注入只读诊断约束；
+- `skills/sre-oncall`：SRE 诊断流程；
+- `skills/tech-support`：技术支持流程；
+- `prompts/diagnose.md`、`handoff.md`、`postmortem.md`。
+
+AIOps 诊断消息带 `ReadOnly=true`，pi 进程收到 `AGENTHUB_READONLY=1`，从工具层阻断写操作。
+
+### 2.8 只读观测 MCP
 
 `agenthub-ops-mcp` 随镜像构建，配置 Prometheus/Loki 地址后自动注册给 pi：
 

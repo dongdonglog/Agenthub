@@ -101,6 +101,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_LOKI_URL` | 空 | Loki 只读地址 |
 | `AGENTHUB_LOKI_TOKEN/USER/PASSWORD` | 空 | Loki 认证 |
 | `AGENTHUB_OPS_MCP_BIN` | 同目录 | agenthub-ops-mcp 路径 |
+| `AGENTHUB_PI_PACKAGE` | 同目录/当前目录 | pi-package 资源目录 |
 | `DINGTALK_GROUP_OPEN` | `false` | 钉钉群内免用户白名单；仍受群白名单限制 |
 | `FEISHU_ADMIN_OPEN_IDS` | 空 | 允许引用机器人消息干预他人会话的管理员 open_id |
 | `PI_BIN` | `pi` | pi 可执行文件 |

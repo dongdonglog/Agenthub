@@ -129,6 +129,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	input := agent.Input{
 		TraceID:        run.TraceID,
 		RunID:          run.ID,
+		ReadOnly:       batch[0].ReadOnly,
 		ConversationID: conv,
 		Generation:     batch[0].Generation,
 		Progress:       progress,

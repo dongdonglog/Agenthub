@@ -49,6 +49,8 @@ type Inbound struct {
 	AdminIntervention bool
 	// TargetConversation 是管理员干预的目标会话。
 	TargetConversation string
+	// ReadOnly 表示本次运行只读（运维诊断等场景）。
+	ReadOnly bool
 	// NoReply 为 true 时投递不回挂消息（用于定时任务等没有平台消息 ID 的来源）。
 	NoReply      bool
 	Attachments  []Attachment

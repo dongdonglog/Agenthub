@@ -39,6 +39,10 @@ type Config struct {
 	Logger     *slog.Logger
 	// ModelFunc 返回当前主模型；为空时使用 Model。
 	ModelFunc func() string
+	// Extensions / Skills / Prompts 是随运行时加载的 pi 资源。
+	Extensions []string
+	Skills     []string
+	Prompts    []string
 }
 
 // Runtime 用 pi RPC 执行一次运行。
@@ -243,12 +247,26 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 	}
 	args = append(args, "--mode", "rpc", "--session", session, "--tools", r.cfg.Tools,
 		"--no-context-files", "--append-system-prompt", agentsMD)
+	for _, extension := range r.cfg.Extensions {
+		args = append(args, "--extension", extension)
+	}
+	for _, skill := range r.cfg.Skills {
+		args = append(args, "--skill", skill)
+	}
+	for _, prompt := range r.cfg.Prompts {
+		args = append(args, "--prompt-template", prompt)
+	}
 	if !r.cfg.Approve {
 		args = append(args, "--no-approve")
 	}
 
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = ws
+	env := []string{}
+	if in.ReadOnly {
+		env = append(env, "AGENTHUB_READONLY=1")
+	}
+	cmd.Env = append(cmd.Env, env...)
 	pathValue := filepath.Join(ws, ".agenthub-bin")
 	if current := os.Getenv("PATH"); current != "" {
 		pathValue += string(os.PathListSeparator) + current
