@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -163,5 +164,44 @@ func TestChatRecordContentBecomesReadableText(t *testing.T) {
 	msgs := eng.Messages("dingtalk:conv-record:staff-r")
 	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "第一条") || msgs[0].MsgType != "chatRecord" {
 		t.Fatalf("msgs = %+v", msgs)
+	}
+}
+
+func TestFileAttachmentDownload(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_ = json.NewEncoder(w).Encode(map[string]any{"accessToken": "token", "expireIn": 7200})
+		case "/v1.0/robot/messageFiles/download":
+			_ = json.NewEncoder(w).Encode(map[string]any{"downloadUrl": srv.URL + "/file"})
+		case "/file":
+			_, _ = w.Write([]byte("attachment-body"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	eng := core.New(agent.Echo{}, nil, logger)
+	dir := t.TempDir()
+	c := New(Config{
+		ClientID: "id", ClientSecret: "secret", AttachmentsDir: dir, APIBase: srv.URL,
+		ModelName: "test", ModelBaseURL: "https://gw/v1",
+	}, eng, logger)
+	data := callback("conv-file", "staff-f", "")
+	data.MsgId = "msg-file"
+	data.Msgtype = "file"
+	data.Content = map[string]any{"downloadCode": "code", "fileName": "报告.txt"}
+	if _, err := c.onMessage(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	msgs := eng.Messages("dingtalk:conv-file:staff-f")
+	if len(msgs) != 1 || len(msgs[0].Attachments) != 1 {
+		t.Fatalf("msgs = %+v", msgs)
+	}
+	body, err := os.ReadFile(msgs[0].Attachments[0].Path)
+	if err != nil || string(body) != "attachment-body" {
+		t.Fatalf("body=%q err=%v", body, err)
 	}
 }

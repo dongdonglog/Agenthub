@@ -157,6 +157,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 ### 4.4 附件
 
 - 保存目录：`<AGENTHUB_DATA_DIR>/attachments/<message_id>/`，文件名做了字符清洗；
+- 飞书与钉钉入站文件/图片都会下载；钉钉通过 `downloadCode` 换签名地址后流式落盘；
 - 下载在事件确认之后异步进行，完成才入队；单个附件失败只影响该附件；
 - 模型侧：小文本内联，其余通过 `read_file` 读取，路径被限制在附件目录内。
 

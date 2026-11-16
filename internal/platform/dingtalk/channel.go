@@ -29,6 +29,9 @@ type Config struct {
 	BotName        string
 	ModelName      string
 	ModelBaseURL   string
+	AttachmentsDir string
+	// APIBase 用于附件下载，测试可覆盖。
+	APIBase string
 }
 
 // Channel 同时承担 Stream 连接与发送。
@@ -38,8 +41,10 @@ type Channel struct {
 	log    *slog.Logger
 	cli    *client.StreamClient
 
-	mu    sync.Mutex
-	hooks map[string]webhook // conversationID -> session webhook
+	mu          sync.Mutex
+	hooks       map[string]webhook // conversationID -> session webhook
+	token       string
+	tokenExpiry time.Time
 }
 
 type webhook struct {
@@ -52,6 +57,9 @@ type webhook struct {
 func New(cfg Config, engine *core.Engine, log *slog.Logger) *Channel {
 	if log == nil {
 		log = slog.Default()
+	}
+	if cfg.APIBase == "" {
+		cfg.APIBase = defaultDingtalkAPIBase
 	}
 	return &Channel{cfg: cfg, engine: engine, log: log, hooks: make(map[string]webhook)}
 }
@@ -88,7 +96,8 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 	if text == "" {
 		text = dingtalkContentText(data.Content)
 	}
-	if text == "" {
+	refs := parseAttachmentRefs(data.Content)
+	if text == "" && len(refs) == 0 {
 		return nil, nil
 	}
 	if c.cfg.BotName != "" {
@@ -116,7 +125,12 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 	c.rememberHook(data.ConversationId, data.SessionWebhook, data.SessionWebhookExpiredTime, data.SenderNick)
 	c.engine.SetIdentity(conv, data.ConversationTitle, data.SenderNick)
 
-	if c.handleCommand(ctx, conv, data.ConversationId, text) {
+	if text != "" && c.handleCommand(ctx, conv, data.ConversationId, text) {
+		return nil, nil
+	}
+
+	attachments := c.downloadAttachments(ctx, data.MsgId, refs)
+	if text == "" && len(attachments) == 0 {
 		return nil, nil
 	}
 
@@ -130,6 +144,7 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 		Text:        text,
 		MsgType:     dingtalkMsgType(data.Msgtype),
 		MentionsBot: data.IsInAtList,
+		Attachments: attachments,
 	}); err != nil {
 		if errors.Is(err, core.ErrRateLimited) {
 			_, _ = c.SendText(ctx, channel.Outbound{ChatID: data.ConversationId, Text: "请求太频繁，请稍后再试。"})

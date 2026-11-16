@@ -136,6 +136,7 @@ func run() int {
 			AllowedChats:   cfg.Dingtalk.AllowedChats,
 			GroupOpen:      cfg.Dingtalk.GroupOpen,
 			BotName:        cfg.Dingtalk.BotName,
+			AttachmentsDir: attachmentsDir,
 			ModelName:      cfg.Agent.Model,
 			ModelBaseURL:   cfg.Agent.BaseURL,
 		}, nil, logger)

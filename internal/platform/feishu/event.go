@@ -172,6 +172,25 @@ func extractContent(msg Message) (string, []channel.Attachment) {
 		_ = json.Unmarshal([]byte(msg.Content), &c)
 		return "[视频]", []channel.Attachment{{Kind: "media", FileKey: c.FileKey, Name: c.FileName}}
 
+	case "merge_forward":
+		var c struct {
+			Title   string `json:"title"`
+			Summary string `json:"summary"`
+		}
+		_ = json.Unmarshal([]byte(msg.Content), &c)
+		text := strings.TrimSpace(c.Title)
+		if summary := strings.TrimSpace(c.Summary); summary != "" {
+			if text != "" {
+				text += "\n" + summary
+			} else {
+				text = summary
+			}
+		}
+		if text == "" {
+			text = "[合并转发]"
+		}
+		return text, nil
+
 	case "sticker":
 		var c struct {
 			FileKey string `json:"file_key"`

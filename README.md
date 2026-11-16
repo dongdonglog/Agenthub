@@ -246,7 +246,7 @@ AGENTHUB_TEST_DATABASE_URL='postgres://postgres:agenthub@127.0.0.1:55433/agenthu
 AgentHub 目前是 **v0.4.x**，适合内网或受控环境的小团队使用。
 
 - **单实例**：飞书/钉钉长连接目前一个应用只跑一个实例；
-- **钉钉**：回复依赖 `sessionWebhook`（约 1.5 小时），卡片和附件下载未接入；文件交付会明确提示当前通道不支持；
+- **钉钉**：回复依赖 `sessionWebhook`（约 1.5 小时），卡片未接入；入站文件/图片已下载，出站文件会明确提示当前通道不支持；
 - **资源**：镜像约 430MB；每个并发 pi 进程约 100MB，按 `AGENTHUB_MAX_CONCURRENT_RUNS` 估算；
 - **成本**：已记录 token，尚未按单价换算金额；
 - **pi**：镜像固定 1.4.0、会话文件 v3，升级需要回归；
