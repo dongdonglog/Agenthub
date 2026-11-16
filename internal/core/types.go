@@ -20,27 +20,33 @@ type Message struct {
 	ChatKind       string
 	ExternalID     string
 	NoReply        bool
-	SenderOpenID   string
-	Text           string
-	MsgType        string
-	Status         string // queued | processing | done | failed | stopped
-	Attachments    []channel.Attachment
-	CreatedAt      time.Time
+	// SentByAdmin 表示这条消息来自管理员跨会话干预。
+	SentByAdmin  bool
+	SenderOpenID string
+	SenderName   string
+	Text         string
+	MsgType      string
+	Status       string // queued | processing | done | failed | stopped
+	Attachments  []channel.Attachment
+	CreatedAt    time.Time
 }
 
 // Run 是一次执行。
 type Run struct {
 	ID             string
 	ConversationID string
-	State          string // running | completed | failed | interrupted
-	InputIDs       []string
-	Output         string
-	Error          string
-	StartedAt      time.Time
-	EndedAt        time.Time
-	InputTokens    int
-	OutputTokens   int
-	TraceID        string
+	ChatID         string
+	// Round 是同一群（或私聊）内按运行递增的轮次编号。
+	Round        int
+	State        string // running | completed | failed | interrupted
+	InputIDs     []string
+	Output       string
+	Error        string
+	StartedAt    time.Time
+	EndedAt      time.Time
+	InputTokens  int
+	OutputTokens int
+	TraceID      string
 }
 
 // Delivery 是一次结果投递。
@@ -173,6 +179,7 @@ type Journal interface {
 	LoadArtifact(ctx context.Context, id string) (*Artifact, error)
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
 	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	ResolveDeliveryConversation(ctx context.Context, externalID string) (conversationID, chatID string, ok bool, err error)
 	SaveIdentity(ctx context.Context, conv, chatName, userName string) error
 	SavePriority(ctx context.Context, conv string, priority int) error
 	LoadPriorities(ctx context.Context, limit int) (map[string]int, error)

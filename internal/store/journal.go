@@ -29,10 +29,10 @@ func NewJournal(db *DB) *Journal {
 // SaveMessage 写入消息；重复（同会话同外部 ID）返回 false。
 func (j *Journal) SaveMessage(ctx context.Context, m *core.Message) (bool, error) {
 	tag, err := j.pool.Exec(ctx, `
-		INSERT INTO message_state (id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		INSERT INTO message_state (id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, sender_name, text, msg_type, status, created_at, sent_by_admin)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		ON CONFLICT (conversation_id, external_id) DO NOTHING`,
-		m.ID, defaultRole(m.Role), defaultGeneration(m.Generation), m.TraceID, m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.Text, m.MsgType, m.Status, m.CreatedAt)
+		m.ID, defaultRole(m.Role), defaultGeneration(m.Generation), m.TraceID, m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.SenderName, m.Text, m.MsgType, m.Status, m.CreatedAt, m.SentByAdmin)
 	if err != nil {
 		return false, err
 	}
@@ -52,8 +52,8 @@ func (j *Journal) SetMessageStatus(ctx context.Context, ids []string, status str
 func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 	inputs, _ := json.Marshal(r.InputIDs)
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO run_state (id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		INSERT INTO run_state (id, conversation_id, chat_id, round_no, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (id) DO UPDATE SET
 			state = EXCLUDED.state,
 			output = EXCLUDED.output,
@@ -62,7 +62,7 @@ func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 			input_tokens = EXCLUDED.input_tokens,
 			output_tokens = EXCLUDED.output_tokens,
 			trace_id = EXCLUDED.trace_id`,
-		r.ID, r.ConversationID, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt, r.InputTokens, r.OutputTokens, r.TraceID)
+		r.ID, r.ConversationID, r.ChatID, r.Round, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt, r.InputTokens, r.OutputTokens, r.TraceID)
 	return err
 }
 
@@ -217,7 +217,7 @@ func (j *Journal) RecoverDeliveries(ctx context.Context, limit int) ([]*core.Del
 		if d.SendPhase == "claimed" {
 			d.State = "retrying"
 			d.Error = "发送认领租约过期，重新投递"
-			d.NextAttempt = time.Now()
+			d.NextAttempt = time.Time{}
 		} else {
 			d.State = "ambiguous"
 			d.Error = "发送结果不确定；已停止自动重试，请人工核对"
@@ -491,6 +491,24 @@ func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, err
 	return total, nil
 }
 
+// ResolveDeliveryConversation 通过已发送消息 ID 反查目标会话。
+func (j *Journal) ResolveDeliveryConversation(ctx context.Context, externalID string) (string, string, bool, error) {
+	var conv, chat string
+	err := j.pool.QueryRow(ctx, `
+		SELECT COALESCE(r.conversation_id, ''), d.chat_id
+		FROM delivery_state d
+		LEFT JOIN run_state r ON r.id = d.run_id
+		WHERE d.external_id = $1 AND d.external_id <> ''
+		ORDER BY d.created_at DESC LIMIT 1`, externalID).Scan(&conv, &chat)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return conv, chat, conv != "", nil
+}
+
 // LoadPendingDeliveries 返回未完成投递，用于启动补偿。
 func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
 	rows, err := j.pool.Query(ctx, `
@@ -514,7 +532,7 @@ func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。
 func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, []*core.Run, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, text, msg_type, status, created_at
+		SELECT id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, sender_name, text, msg_type, status, created_at, sent_by_admin
 		FROM message_state ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
@@ -523,7 +541,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	for rows.Next() {
 		m := &core.Message{}
 		if err := rows.Scan(&m.ID, &m.Role, &m.Generation, &m.TraceID, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
-			&m.Text, &m.MsgType, &m.Status, &m.CreatedAt); err != nil {
+			&m.SenderName, &m.Text, &m.MsgType, &m.Status, &m.CreatedAt, &m.SentByAdmin); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}

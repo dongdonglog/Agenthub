@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import { Badge, Breadcrumbs, Button, Card, CopyButton, Field, Input, PageHeader, Skeleton, useAsync, useConfirm, useToast } from "../components/ui";
 
 type Message = { ID: string; Role: string; Text: string; CreatedAt: string; Status: string; MsgType: string };
-type Run = { ID: string; State: string; Output: string; Error: string; StartedAt: string; InputTokens: number; OutputTokens: number };
+type Run = { ID: string; ChatID: string; Round: number; State: string; Output: string; Error: string; StartedAt: string; InputTokens: number; OutputTokens: number };
 type Detail = { id: string; profile?: string; priority?: number | null; messages: Message[]; runs: Run[] };
 type RunEvent = { kind: string; name?: string; detail?: string; duration_ms?: number; created_at: string };
 type Artifact = { id: string; name: string; kind: string; size: number; created_at: string };
@@ -19,6 +19,22 @@ export function SessionDetail() {
   const [selectedRun, setSelectedRun] = useState("");
   const { show } = useToast();
   const confirm = useConfirm();
+
+  const resetSession = async () => {
+    if (!(await confirm({
+      title: "重置本会话？",
+      description: "会停止活动运行、清空排队并开启新代；历史消息保留。",
+      confirmText: "重置",
+      danger: true,
+    }))) return;
+    try {
+      await api(`/sessions/${encodeURIComponent(conv)}/reset`, { method: "POST" });
+      show("会话已重置");
+      reload();
+    } catch (err) {
+      show((err as Error).message, true);
+    }
+  };
 
   const applyConfig = async () => {
     if (!(await confirm({
@@ -67,6 +83,7 @@ export function SessionDetail() {
           actions={
             <div className="row" style={{ gap: 8 }}>
               <Button onClick={applyConfig}>应用当前配置</Button>
+              <Button className="danger" onClick={resetSession}>重置会话</Button>
               <Link className="btn" to="/sessions">返回列表</Link>
             </div>
           }
@@ -104,10 +121,11 @@ export function SessionDetail() {
       <Card title={`运行 · ${data.runs.length}`}>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>运行</th><th>状态</th><th>Token</th><th>开始</th><th>输出</th><th /></tr></thead>
+            <thead><tr><th>轮次</th><th>运行</th><th>状态</th><th>Token</th><th>开始</th><th>输出</th><th /></tr></thead>
             <tbody>
               {data.runs.map((run) => (
                 <tr key={run.ID}>
+                  <td className="mono">{run.Round ? `#${run.Round}` : "—"}</td>
                   <td className="mono">{run.ID}</td>
                   <td><Badge kind={run.State === "completed" ? "ok" : run.State === "failed" ? "danger" : "warn"}>{run.State}</Badge></td>
                   <td className="nowrap">{run.InputTokens}/{run.OutputTokens}</td>

@@ -16,6 +16,11 @@ type Message struct {
 	Role        string
 	Text        string
 	Attachments []channel.Attachment
+	// Sender / SenderName 是批次内发送者身份，供多人群聊区分。
+	Sender     string
+	SenderName string
+	// SentByAdmin 表示管理员跨会话干预。
+	SentByAdmin bool
 }
 
 // Input 是一次运行的输入。

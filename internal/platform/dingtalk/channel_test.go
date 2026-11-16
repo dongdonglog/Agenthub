@@ -126,3 +126,42 @@ func TestSendTextRejectsMissingHook(t *testing.T) {
 		t.Fatal("没有 webhook 时应报错")
 	}
 }
+
+func TestGroupOpenBypassesUserAllowlist(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	eng := core.New(agent.Echo{}, nil, logger)
+	c := New(Config{
+		ClientID: "id", ClientSecret: "secret",
+		AllowedUsers: []string{"staff-ok"}, GroupOpen: true,
+		BotName: "助手", ModelName: "test-model", ModelBaseURL: "https://gw/v1",
+	}, eng, logger)
+	if _, err := c.onMessage(context.Background(), callback("conv-open", "staff-other", "@助手 你好")); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(eng.Messages("dingtalk:conv-open:staff-other")); got != 1 {
+		t.Fatalf("群内免白名单应受理，得到 %d 条", got)
+	}
+
+	dm := callback("conv-dm", "staff-other", "@助手 你好")
+	dm.ConversationType = "1"
+	if _, err := c.onMessage(context.Background(), dm); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(eng.Messages("dingtalk:conv-dm:staff-other")); got != 0 {
+		t.Fatalf("私聊仍应拒绝，得到 %d 条", got)
+	}
+}
+
+func TestChatRecordContentBecomesReadableText(t *testing.T) {
+	c, eng := newTestChannel(t, false)
+	data := callback("conv-record", "staff-r", "")
+	data.Msgtype = "chatRecord"
+	data.Content = map[string]any{"title": "合并转发的聊天记录", "summary": "张三: 第一条\n李四: 第二条"}
+	if _, err := c.onMessage(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	msgs := eng.Messages("dingtalk:conv-record:staff-r")
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "第一条") || msgs[0].MsgType != "chatRecord" {
+		t.Fatalf("msgs = %+v", msgs)
+	}
+}

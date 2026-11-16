@@ -38,6 +38,10 @@ echo 'POSTGRES_PASSWORD=强密码' >> .env
 docker compose up -d --build
 ```
 
+## 管理员干预
+
+配置 `FEISHU_ADMIN_OPEN_IDS` 后，管理员在群里引用机器人消息并发送内容，消息会进入被引用运行所在的会话，而不是管理员自己的会话；需同时满足群白名单。用于客服/运维接手他人会话。
+
 ## 产物交付
 
 - Agent 把要交付的文件写到工作区的 `submit/`（每次运行独立目录）；

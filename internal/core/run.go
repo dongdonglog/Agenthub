@@ -57,10 +57,13 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		return nil
 	}
 	e.runSeq++
+	e.rounds[batch[0].ChatID]++
 	run := &Run{
 		TraceID:        batch[0].TraceID,
 		ID:             fmt.Sprintf("run_%d", e.runSeq),
 		ConversationID: conv,
+		ChatID:         batch[0].ChatID,
+		Round:          e.rounds[batch[0].ChatID],
 		State:          "running",
 		StartedAt:      e.now(),
 	}
@@ -137,7 +140,10 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		},
 	}
 	for _, m := range batch {
-		input.Messages = append(input.Messages, agent.Message{ID: m.ID, Text: m.Text, Attachments: m.Attachments})
+		input.Messages = append(input.Messages, agent.Message{
+			ID: m.ID, Text: m.Text, Attachments: m.Attachments,
+			Sender: m.SenderOpenID, SenderName: m.SenderName, SentByAdmin: m.SentByAdmin,
+		})
 	}
 
 	out, err := e.agent.Run(runCtx, input)

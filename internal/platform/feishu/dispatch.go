@@ -28,6 +28,8 @@ type Options struct {
 	AllowedUsers []string
 	// AllowedChats 非空时只接受列表内的 chat_id。
 	AllowedChats []string
+	// AdminOpenIDs 是允许引用机器人消息干预他人会话的管理员。
+	AdminOpenIDs []string
 	// MentionFreeChats 中的群聊不要求 @机器人。
 	MentionFreeChats []string
 	// ModelName 用于 /model 命令展示。
@@ -52,6 +54,7 @@ type Dispatcher struct {
 	log          *slog.Logger
 	allowedUsers map[string]struct{}
 	allowedChats map[string]struct{}
+	adminUsers   map[string]struct{}
 	mentionFree  map[string]struct{}
 }
 
@@ -66,6 +69,7 @@ func NewDispatcher(engine *core.Engine, opts Options, log *slog.Logger) *Dispatc
 		log:          log,
 		allowedUsers: toSet(opts.AllowedUsers),
 		allowedChats: toSet(opts.AllowedChats),
+		adminUsers:   toSet(opts.AdminOpenIDs),
 		mentionFree:  toSet(opts.MentionFreeChats),
 	}
 }
@@ -100,6 +104,14 @@ func (d *Dispatcher) HandleEvent(ctx context.Context, p *Payload) error {
 			}
 		}
 		cancel()
+	}
+
+	if d.isAdmin(msg.Sender.OpenID) && msg.ParentID != "" {
+		if target, chat, ok := d.engine.ResolveConversationForMessage(ctx, msg.ParentID); ok && chat == msg.Chat.ID {
+			msg.AdminIntervention = true
+			msg.TargetConversation = target
+			d.log.Info("feishu admin intervention accepted", "sender", msg.Sender.OpenID, "target", target, "chat", chat)
+		}
 	}
 
 	if ok, reason := d.allowed(msg); !ok {
@@ -231,18 +243,23 @@ func (d *Dispatcher) fetchAttachments(ctx context.Context, msg *channel.Inbound)
 	}
 }
 
+func (d *Dispatcher) isAdmin(openID string) bool {
+	_, ok := d.adminUsers[openID]
+	return ok
+}
+
 func (d *Dispatcher) allowed(msg channel.Inbound) (bool, string) {
 	if len(d.allowedChats) > 0 {
 		if _, ok := d.allowedChats[msg.Chat.ID]; !ok {
 			return false, "chat_not_allowed"
 		}
 	}
-	if len(d.allowedUsers) > 0 {
+	if len(d.allowedUsers) > 0 && !msg.AdminIntervention {
 		if _, ok := d.allowedUsers[msg.Sender.OpenID]; !ok {
 			return false, "sender_not_allowed"
 		}
 	}
-	if d.opts.RequireMention && msg.Chat.Kind != "p2p" && !msg.MentionsBot {
+	if !msg.AdminIntervention && d.opts.RequireMention && msg.Chat.Kind != "p2p" && !msg.MentionsBot {
 		if _, ok := d.mentionFree[msg.Chat.ID]; !ok {
 			return false, "group_message_without_mention"
 		}

@@ -114,6 +114,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/v1/sessions/{id}/profile", s.handleSessionProfile)
 	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/apply-config", s.handleSessionApplyConfig)
 	mux.HandleFunc("POST /admin/api/v1/sessions/apply-config", s.handleSessionsApplyConfig)
+	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/reset", s.handleSessionReset)
+	mux.HandleFunc("POST /admin/api/v1/sessions/reset", s.handleSessionsReset)
 	mux.HandleFunc("GET /admin/api/v1/queue", s.handleQueue)
 	mux.HandleFunc("GET /admin/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("POST /admin/api/v1/tasks", s.handleTasks)
@@ -378,7 +380,30 @@ func (s *Server) handleHistoryDetail(rw http.ResponseWriter, r *http.Request) {
 	}
 	page, size := pageParams(r, 20)
 	pageItems, total := slicePage(items, page, size)
-	writeJSON(rw, http.StatusOK, map[string]any{"items": pageItems, "total": total, "page": page, "size": size})
+	messageIDs := make(map[string]bool, len(items))
+	for _, m := range items {
+		messageIDs[m.ID] = true
+	}
+	runs := make([]map[string]any, 0)
+	for _, run := range s.engine.Runs() {
+		if run.ConversationID != conv {
+			continue
+		}
+		matched := false
+		for _, id := range run.InputIDs {
+			if messageIDs[id] {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		runs = append(runs, map[string]any{"run": run, "events": s.engine.RunEvents(run.ID)})
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{
+		"items": pageItems, "total": total, "page": page, "size": size, "runs": runs,
+	})
 }
 
 func (s *Server) handleAudits(rw http.ResponseWriter, r *http.Request) {
@@ -768,6 +793,26 @@ func (s *Server) handleSessionsApplyConfig(rw http.ResponseWriter, r *http.Reque
 	}
 	s.audit(r, "sessions.apply_config", "all", fmt.Sprintf("profile=%s sessions=%d", selection.Name, count))
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "profile": selection.Name, "sessions": count})
+}
+
+func (s *Server) handleSessionReset(rw http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	stopped := s.engine.Reset(id)
+	s.audit(r, "session.reset", id, "")
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "stopped": stopped, "generation": s.engine.Generation(id)})
+}
+
+func (s *Server) handleSessionsReset(rw http.ResponseWriter, r *http.Request) {
+	count := 0
+	for _, info := range s.engine.SessionInfos() {
+		if info.Internal {
+			continue
+		}
+		s.engine.Reset(info.ID)
+		count++
+	}
+	s.audit(r, "sessions.reset", "all", fmt.Sprintf("sessions=%d", count))
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "sessions": count})
 }
 
 func (s *Server) handleRuns(rw http.ResponseWriter, _ *http.Request) {

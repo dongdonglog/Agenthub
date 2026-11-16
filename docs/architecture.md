@@ -103,11 +103,12 @@ queued ──▶ running ──▶ completed
 一次运行由 `pi --mode rpc` 子进程执行：
 
 - 会话代工作区：`.agenthub-agent/`（部署配置副本）、`AGENTS.md`、`attachments/`（只读）、
-  `outbox/<run_id>/` 与指向本次目录的 `submit` 符号链接；
+  `outbox/<run_id>/` 与指向本次目录的 `submit` 符号链接；技能/MCP 按 Profile 选择裁剪；
 - 批次消息预写 pi 会话文件（v3 JSONL），最后一条通过 `prompt` 触发；
 - 事件：`agent_start`、`message_update`、`tool_execution_start/end`、`message_end`、`agent_settled`；
 - 收敛以 `agent_settled` 为准；超时/取消先 `clear_queue` 再 `abort`，宽限后杀进程组；
 - 部署配置 `models.json`/`SYSTEM.md`/`skills`/`mcp.json` 在启动时生成，工作区创建时复制；
+- 每次运行前按当前代 Profile 重新裁剪 `skills/` 与 `mcp.json`，Skill 根目录可执行文件链接到会话 `.agenthub-bin/` 并加入 `PATH`；
 - 运行成功后收集 `submit/` 中的普通文件，复制到 `data/artifacts/<run_id>/`，按文本 → 图片 → 文档（多个打 ZIP）的顺序投递；
   超限或通道不支持时追加可读说明，产物仍保留供管理台查看；导入后清理本次工作区原件。
 

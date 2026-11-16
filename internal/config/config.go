@@ -43,13 +43,15 @@ type Config struct {
 	// QueueTTLSeconds 是消息在队列中的最长等待秒数；0 表示不限制。
 	QueueTTLSeconds int `yaml:"queue_ttl_seconds"`
 	// DeliveryLeaseSeconds 是投递领取租约，应大于单次通道调用可能耗时。
-	DeliveryLeaseSeconds int            `yaml:"delivery_lease_seconds"`
-	Webhook              WebhookConfig  `yaml:"webhook"`
-	Feishu               FeishuConfig   `yaml:"feishu"`
-	Dingtalk             DingtalkConfig `yaml:"dingtalk"`
-	Pi                   PiConfig       `yaml:"pi"`
-	Agent                AgentConfig    `yaml:"agent"`
-	Log                  LogConfig      `yaml:"log"`
+	DeliveryLeaseSeconds int `yaml:"delivery_lease_seconds"`
+	// OutboundQPS 是跨会话共享的出站消息速率；0 表示不限。
+	OutboundQPS int            `yaml:"outbound_qps"`
+	Webhook     WebhookConfig  `yaml:"webhook"`
+	Feishu      FeishuConfig   `yaml:"feishu"`
+	Dingtalk    DingtalkConfig `yaml:"dingtalk"`
+	Pi          PiConfig       `yaml:"pi"`
+	Agent       AgentConfig    `yaml:"agent"`
+	Log         LogConfig      `yaml:"log"`
 }
 
 // HTTPConfig 是健康检查与指标监听配置。
@@ -104,6 +106,8 @@ type FeishuConfig struct {
 	BotOpenID         string   `yaml:"bot_open_id"`
 	AllowedUsers      []string `yaml:"allowed_users"`
 	AllowedChats      []string `yaml:"allowed_chats"`
+	// AdminUsers 是允许跨会话干预的管理员 open_id。
+	AdminUsers []string `yaml:"admin_users"`
 	// RequireMention 为 true 时群聊必须 @机器人 才触发。
 	RequireMention bool `yaml:"require_mention"`
 	// MentionFreeChats 中的群聊不要求 @机器人（用于测试群）。
@@ -120,6 +124,8 @@ type DingtalkConfig struct {
 	RequireMention bool     `yaml:"require_mention"`
 	AllowedUsers   []string `yaml:"allowed_users"`
 	AllowedChats   []string `yaml:"allowed_chats"`
+	// GroupOpen 为 true 时群聊消息不再按用户白名单过滤。
+	GroupOpen bool `yaml:"group_open"`
 	// BotName 用于去掉文本开头的 @机器人。
 	BotName string `yaml:"bot_name"`
 }
@@ -204,6 +210,7 @@ func defaults() Config {
 		MaxConcurrentRuns:    4,
 		QueueTTLSeconds:      6 * 3600,
 		DeliveryLeaseSeconds: 120,
+		OutboundQPS:          0,
 		Webhook:              WebhookConfig{Addr: "127.0.0.1:8789"},
 		Feishu: FeishuConfig{
 			Transport:      "websocket",
@@ -246,6 +253,7 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.RateLimitPerMin, "AGENTHUB_RATE_LIMIT_PER_MIN")
 	setInt(&cfg.QueueTTLSeconds, "AGENTHUB_QUEUE_TTL_SECONDS")
 	setInt(&cfg.DeliveryLeaseSeconds, "AGENTHUB_DELIVERY_LEASE_SECONDS")
+	setInt(&cfg.OutboundQPS, "AGENTHUB_OUTBOUND_QPS")
 	setStr(&cfg.Webhook.Addr, "AGENTHUB_WEBHOOK_ADDR")
 	setStr(&cfg.Feishu.Transport, "FEISHU_TRANSPORT")
 	setStr(&cfg.Feishu.Domain, "FEISHU_DOMAIN")
@@ -256,6 +264,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Feishu.EncryptKey, "FEISHU_ENCRYPT_KEY")
 	setList(&cfg.Feishu.AllowedUsers, "FEISHU_ALLOWED_USERS")
 	setList(&cfg.Feishu.AllowedChats, "FEISHU_ALLOWED_CHATS")
+	setList(&cfg.Feishu.AdminUsers, "FEISHU_ADMIN_OPEN_IDS")
 	setBool(&cfg.Feishu.RequireMention, "FEISHU_REQUIRE_MENTION")
 	setList(&cfg.Feishu.MentionFreeChats, "FEISHU_MENTION_FREE_CHATS")
 	setBool(&cfg.Feishu.CardActionEnabled, "FEISHU_CARD_ACTION")
@@ -271,6 +280,7 @@ func applyEnv(cfg *Config) {
 	setBool(&cfg.Dingtalk.RequireMention, "DINGTALK_REQUIRE_MENTION")
 	setList(&cfg.Dingtalk.AllowedUsers, "DINGTALK_ALLOWED_USERS")
 	setList(&cfg.Dingtalk.AllowedChats, "DINGTALK_ALLOWED_CHATS")
+	setBool(&cfg.Dingtalk.GroupOpen, "DINGTALK_GROUP_OPEN")
 	setStr(&cfg.Dingtalk.BotName, "DINGTALK_BOT_NAME")
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
@@ -352,6 +362,9 @@ func (c *Config) Validate() error {
 	}
 	if c.DeliveryLeaseSeconds == 0 {
 		c.DeliveryLeaseSeconds = 120
+	}
+	if c.OutboundQPS < 0 {
+		return errors.New("outbound_qps 不能为负数")
 	}
 	if c.Storage.ArtifactMaxBytes < 0 || c.Storage.ArtifactMaxCount < 0 || c.Storage.ArtifactMaxTotal < 0 {
 		return errors.New("artifact 大小与数量上限不能为负数")

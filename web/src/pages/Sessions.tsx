@@ -36,6 +36,21 @@ export function Sessions() {
     [],
   );
 
+  const resetAll = async () => {
+    if (!(await confirm({
+      title: "重置所有在线会话？",
+      description: "会停止活动运行、清空排队，并为每个会话开启新代；历史消息保留。",
+      confirmText: "重置",
+      danger: true,
+    }))) return;
+    try {
+      const result = await api<{ sessions: number }>("/sessions/reset", { method: "POST" });
+      show(`已重置 ${result.sessions} 个会话`);
+    } catch (err) {
+      show((err as Error).message, true);
+    }
+  };
+
   const applyAll = async () => {
     if (!(await confirm({
       title: "应用当前配置到所有已有会话？",
@@ -55,7 +70,12 @@ export function Sessions() {
       <PageHeader
         title="在线会话"
         description="按「人 × 群」隔离；定时任务默认单独归档，不混入用户会话。"
-        actions={<Button onClick={applyAll}>应用当前配置</Button>}
+        actions={
+          <div className="row" style={{ gap: 8 }}>
+            <Button onClick={applyAll}>应用当前配置</Button>
+            <Button className="danger" onClick={resetAll}>批量重置</Button>
+          </div>
+        }
       />
       <Card>
         <Tabs value={kind} onChange={(value) => { setKind(value); setPage(1); }} items={tabs} />

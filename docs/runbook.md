@@ -89,6 +89,9 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_RATE_LIMIT_PER_MIN` | `0` | 每会话每分钟消息上限；0 关闭 |
 | `AGENTHUB_QUEUE_TTL_SECONDS` | `21600` | 排队消息最长等待秒数；0 关闭 |
 | `AGENTHUB_DELIVERY_LEASE_SECONDS` | `120` | 投递领取租约，应大于单次通道调用耗时 |
+| `AGENTHUB_OUTBOUND_QPS` | `0` | 跨会话共享出站消息速率；0 不限 |
+| `DINGTALK_GROUP_OPEN` | `false` | 钉钉群内免用户白名单；仍受群白名单限制 |
+| `FEISHU_ADMIN_OPEN_IDS` | 空 | 允许引用机器人消息干预他人会话的管理员 open_id |
 | `PI_BIN` | `pi` | pi 可执行文件 |
 | `PI_TOOLS` | `read,bash,grep,find,ls,tool_search` | 暴露给 pi 的工具 |
 | `PI_AGENT_DIR` | `<data>/pi/agent` | 部署配置目录 |

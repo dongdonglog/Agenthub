@@ -47,6 +47,7 @@ type Engine struct {
 	profileSrc  func() ProfileSelection
 	identities  map[string]Identity
 	priority    map[string]int
+	rounds      map[string]int
 	genCleaner  func(conv string, generation int)
 	events      map[string][]RunEvent
 	artifacts   map[string]*Artifact
@@ -65,6 +66,10 @@ type Engine struct {
 	// deliveryOwner 标识当前进程；deliveryLease 是单次发送领取的租约。
 	deliveryOwner string
 	deliveryLease time.Duration
+	// outboundQPS 是跨会话共享的发送令牌桶；0 表示不限。
+	outboundQPS    int
+	outboundTokens float64
+	outboundLast   time.Time
 	// retryDelay 计算投递重试间隔，默认指数退避。
 	retryDelay func(attempt int) time.Duration
 
@@ -103,6 +108,7 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		profiles:           make(map[string]ProfileSelection),
 		identities:         make(map[string]Identity),
 		priority:           make(map[string]int),
+		rounds:             make(map[string]int),
 		hits:               make(map[string][]time.Time),
 		rateWindow:         time.Minute,
 		events:             make(map[string][]RunEvent),
@@ -216,6 +222,19 @@ func (e *Engine) SetRateLimit(n int, window time.Duration) {
 	if window > 0 {
 		e.rateWindow = window
 	}
+}
+
+// SetOutboundQPS 设置跨会话共享的出站消息速率；0 表示不限制。
+func (e *Engine) SetOutboundQPS(qps int) {
+	e.mu.Lock()
+	if qps <= 0 {
+		e.outboundQPS = 0
+	} else {
+		e.outboundQPS = qps
+		e.outboundTokens = 1
+		e.outboundLast = time.Now()
+	}
+	e.mu.Unlock()
 }
 
 // SetDeliveryLease 设置投递领取租约；应大于单次通道调用可能耗时。
@@ -346,6 +365,9 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 		return false, errors.New("缺少 chat_id")
 	}
 	conv := conversationKey(in)
+	if in.AdminIntervention && in.TargetConversation != "" {
+		conv = in.TargetConversation
+	}
 	dedupeKey := conv + "|" + in.ExternalID
 
 	e.mu.Lock()
@@ -376,7 +398,9 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 		TraceID:        newTraceID(),
 		ExternalID:     in.ExternalID,
 		NoReply:        in.NoReply,
+		SentByAdmin:    in.AdminIntervention,
 		SenderOpenID:   in.Sender.OpenID,
+		SenderName:     in.Sender.Name,
 		Text:           in.Text,
 		MsgType:        in.MsgType,
 		Status:         "queued",

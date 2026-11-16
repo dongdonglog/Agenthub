@@ -22,6 +22,9 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 		return
 	}
 
+	if err := e.waitOutbound(ctx); err != nil {
+		return
+	}
 	claimed, err := e.claimDelivery(ctx, d)
 	if err != nil {
 		e.log.Error("claim delivery failed", "delivery", d.IdempotencyKey, "error", err)
@@ -99,6 +102,43 @@ func (e *Engine) send(ctx context.Context, d *Delivery) {
 	time.AfterFunc(delay, func() {
 		e.send(context.Background(), d)
 	})
+}
+
+// waitOutbound 在跨会话共享令牌桶中等待一个发送名额。
+func (e *Engine) waitOutbound(ctx context.Context) error {
+	for {
+		e.mu.Lock()
+		if e.outboundQPS <= 0 {
+			e.mu.Unlock()
+			return nil
+		}
+		now := time.Now()
+		if e.outboundLast.IsZero() {
+			e.outboundLast = now
+		}
+		e.outboundTokens += now.Sub(e.outboundLast).Seconds() * float64(e.outboundQPS)
+		if e.outboundTokens > 1 {
+			e.outboundTokens = 1
+		}
+		e.outboundLast = now
+		if e.outboundTokens >= 1 {
+			e.outboundTokens--
+			e.mu.Unlock()
+			return nil
+		}
+		wait := time.Duration((1 - e.outboundTokens) / float64(e.outboundQPS) * float64(time.Second))
+		e.mu.Unlock()
+		if wait <= 0 {
+			wait = time.Millisecond
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // claimDelivery 领取投递。数据库模式使用条件更新；无库模式用内存状态模拟同一语义。

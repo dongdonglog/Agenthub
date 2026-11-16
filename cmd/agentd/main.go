@@ -134,6 +134,7 @@ func run() int {
 			RequireMention: cfg.Dingtalk.RequireMention,
 			AllowedUsers:   cfg.Dingtalk.AllowedUsers,
 			AllowedChats:   cfg.Dingtalk.AllowedChats,
+			GroupOpen:      cfg.Dingtalk.GroupOpen,
 			BotName:        cfg.Dingtalk.BotName,
 			ModelName:      cfg.Agent.Model,
 			ModelBaseURL:   cfg.Agent.BaseURL,
@@ -264,6 +265,7 @@ func run() int {
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
 	engine.SetQueueTTL(time.Duration(cfg.QueueTTLSeconds) * time.Second)
 	engine.SetDeliveryLease(time.Duration(cfg.DeliveryLeaseSeconds) * time.Second)
+	engine.SetOutboundQPS(cfg.OutboundQPS)
 	engine.SetProfileSource(func() core.ProfileSelection {
 		active := profiles.Active()
 		return core.ProfileSelection{Name: active.Name, Skills: active.Skills, MCPs: active.MCPs}
@@ -477,6 +479,7 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 		RequireMention:   cfg.Feishu.RequireMention,
 		AllowedUsers:     cfg.Feishu.AllowedUsers,
 		AllowedChats:     cfg.Feishu.AllowedChats,
+		AdminOpenIDs:     cfg.Feishu.AdminUsers,
 		Client:           client,
 		AttachmentsDir:   attachmentsDir,
 		MentionFreeChats: cfg.Feishu.MentionFreeChats,

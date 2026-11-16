@@ -40,11 +40,15 @@ export function History() {
 }
 
 type Message = { ID: string; Role: string; Text: string; CreatedAt: string };
+type RunEvent = { kind: string; name?: string; detail?: string; duration_ms?: number };
+type Run = { ID: string; State: string; Round: number; StartedAt: string; InputTokens: number; OutputTokens: number };
+type HistoryRun = { run: Run; events: RunEvent[] };
+type HistoryDetailData = Paged<Message> & { runs?: HistoryRun[] };
 
 export function HistoryDetail() {
   const { conversation = "", generation = "1" } = useParams();
   const conv = decodeURIComponent(conversation);
-  const { data, loading, error } = useAsync<Paged<Message>>(
+  const { data, loading, error } = useAsync<HistoryDetailData>(
     () => api(`/history/${encodeURIComponent(conv)}/${generation}`),
     [conv, generation],
   );
@@ -68,6 +72,34 @@ export function HistoryDetail() {
             </div>
           ))}
         </div>
+      </Card>
+      <Card title="执行轨迹">
+        {data?.runs?.length ? (
+          <div className="stack">
+            {data.runs.map(({ run, events }) => (
+              <div key={run.ID} className="stack" style={{ gap: 6 }}>
+                <div className="mono small">#{run.Round || "—"} · {run.ID} · {run.State}</div>
+                {events.length === 0 ? <div className="muted small">没有轨迹事件</div> : (
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>类型</th><th>名称</th><th>耗时</th><th>详情</th></tr></thead>
+                      <tbody>
+                        {events.map((event, index) => (
+                          <tr key={`${run.ID}-${index}`}>
+                            <td>{event.kind}</td>
+                            <td className="mono">{event.name || "—"}</td>
+                            <td>{event.duration_ms ? `${event.duration_ms} ms` : "—"}</td>
+                            <td className="muted" style={{ maxWidth: 420, wordBreak: "break-all" }}>{event.detail || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : <div className="muted">没有可查看的运行</div>}
       </Card>
     </div>
   );

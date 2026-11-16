@@ -41,6 +41,9 @@ func (e *Engine) Restore(ctx context.Context) error {
 	for _, r := range runs {
 		e.runs[r.ID] = r
 		e.runOrder = append(e.runOrder, r.ID)
+		if r.ChatID != "" && r.Round > e.rounds[r.ChatID] {
+			e.rounds[r.ChatID] = r.Round
+		}
 		if n := seqSuffix(r.ID); n > e.runSeq {
 			e.runSeq = n
 		}

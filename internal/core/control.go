@@ -138,6 +138,35 @@ func (e *Engine) Reset(conv string) bool {
 
 // Messages 返回某个会话的消息快照（按创建时间排序）。
 
+// ResolveConversationForMessage 通过机器人已发送消息 ID 反查目标会话。
+func (e *Engine) ResolveConversationForMessage(ctx context.Context, externalID string) (string, string, bool) {
+	if externalID == "" {
+		return "", "", false
+	}
+	e.mu.Lock()
+	for _, d := range e.deliveries {
+		if d.ExternalID != externalID || d.RunID == "" {
+			continue
+		}
+		if run := e.runs[d.RunID]; run != nil {
+			conv, chat := run.ConversationID, d.ChatID
+			e.mu.Unlock()
+			return conv, chat, true
+		}
+	}
+	journal := e.journal
+	e.mu.Unlock()
+	if journal == nil {
+		return "", "", false
+	}
+	conv, chat, ok, err := journal.ResolveDeliveryConversation(ctx, externalID)
+	if err != nil {
+		e.log.Debug("resolve delivery conversation failed", "error", err, "external_id", externalID)
+		return "", "", false
+	}
+	return conv, chat, ok
+}
+
 // SetIdentity 更新会话展示信息（飞书群名/用户名）。
 func (e *Engine) SetIdentity(conv, chatName, userName string) {
 	e.mu.Lock()

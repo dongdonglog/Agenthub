@@ -121,12 +121,32 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	if err := ensureWorkspace(ws, r.cfg.AgentDir, ""); err != nil {
 		return agent.Output{}, err
 	}
+	if err := applyProfileSelection(r.cfg.AgentDir, ws, in.SkillAllow, in.MCPAllow); err != nil {
+		return agent.Output{}, fmt.Errorf("应用 Profile 选择失败: %w", err)
+	}
+	if err := linkSkillExecutables(ws); err != nil {
+		return agent.Output{}, fmt.Errorf("同步 Skill 可执行文件失败: %w", err)
+	}
 	started := time.Now()
 	if err := prepareRunOutbox(ws, in.RunID); err != nil {
 		return agent.Output{}, err
 	}
 	attachments := linkAttachments(ws, in.Messages)
-	agentsMD := buildAgentsMD(in.ConversationID, in.Generation, attachments)
+	senders := make([]string, 0, len(in.Messages))
+	for _, m := range in.Messages {
+		name := strings.TrimSpace(m.SenderName)
+		if name == "" {
+			name = strings.TrimSpace(m.Sender)
+		}
+		if name == "" {
+			continue
+		}
+		if m.SentByAdmin {
+			name += "（管理员干预）"
+		}
+		senders = append(senders, name)
+	}
+	agentsMD := buildAgentsMD(in.ConversationID, in.Generation, attachments, senders)
 	if err := ensureAgentsFile(ws, agentsMD); err != nil {
 		return agent.Output{}, err
 	}
@@ -229,7 +249,12 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = ws
+	pathValue := filepath.Join(ws, ".agenthub-bin")
+	if current := os.Getenv("PATH"); current != "" {
+		pathValue += string(os.PathListSeparator) + current
+	}
 	cmd.Env = append(os.Environ(),
+		"PATH="+pathValue,
 		"PI_CODING_AGENT_DIR="+filepath.Join(ws, ".agenthub-agent"),
 		"AGENTHUB_OUTBOX_DIR="+filepath.Join(ws, "outbox"),
 	)

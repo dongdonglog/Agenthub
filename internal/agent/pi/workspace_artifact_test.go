@@ -74,7 +74,7 @@ func TestCollectRecoversStaleOutbox(t *testing.T) {
 }
 
 func TestAgentsMDPointsToSubmit(t *testing.T) {
-	text := buildAgentsMD("conv", 1, nil)
+	text := buildAgentsMD("conv", 1, nil, nil)
 	if !strings.Contains(text, "submit/") || !strings.Contains(text, "不要使用历史运行") {
 		t.Fatalf("prompt = %s", text)
 	}

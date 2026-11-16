@@ -94,7 +94,7 @@ func copyFile(src, dst string) error {
 }
 
 // buildAgentsMD 生成会话级 AGENTS.md。
-func buildAgentsMD(conv string, generation int, attachments []string) string {
+func buildAgentsMD(conv string, generation int, attachments []string, senders []string) string {
 	var b strings.Builder
 	b.WriteString("# 会话上下文\n\n")
 	b.WriteString("本文件由 AgentHub 生成，描述本次会话的输入与约束。\n\n")
@@ -104,6 +104,12 @@ func buildAgentsMD(conv string, generation int, attachments []string) string {
 	b.WriteString("- 附件位于 `attachments/`，只读；\n")
 	b.WriteString("- 需要交付给用户的文件写入 `submit/`（本次运行的产物目录），文件名直接可读；\n")
 	b.WriteString("- 不要使用历史运行产生的 outbox 绝对路径。\n")
+	if len(senders) > 0 {
+		b.WriteString("\n## 本批发送者\n\n")
+		for _, name := range senders {
+			b.WriteString("- " + name + "\n")
+		}
+	}
 	if len(attachments) > 0 {
 		b.WriteString("\n## 附件\n\n")
 		for _, name := range attachments {

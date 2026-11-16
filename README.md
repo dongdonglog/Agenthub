@@ -34,7 +34,7 @@ AgentHub 把入口放进日常 IM，把执行放进可清理的工作区，把�
 - **IM 原生**：飞书长连接 / Webhook、钉钉 Stream；支持 @、引用消息、附件；
 - **真执行**：pi 在会话代工作区里读写文件、跑 `bash`、搜索、调 MCP；
 - **交付物回传**：产物写入 `submit/`，文件/图片回到群；多文档自动打包 ZIP，超限有说明；
-- **技能可运营**：`SKILL.md` + `references/`，管理台在线编辑、ZIP 导入、停用归档；
+- **技能可运营**：`SKILL.md` + `references/`，按 Profile 裁剪；可执行文件进入会话 PATH；管理台在线编辑、ZIP 导入、停用归档；
 - **模型主备**：多供应商、有序候选、超时/429/5xx 自动切换、熔断，图片走 vision 线路；
 - **调度**：跨会话并发上限、公平队列 + 等待老化、每会话限流、cron 定时任务；
 - **可治理**：管理台 Token、CSRF、审计、健康检查、Prometheus 指标、备份恢复脚本；
@@ -185,6 +185,9 @@ routes:
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发上限 |
 | `AGENTHUB_QUEUE_TTL_SECONDS` | `21600` | 排队消息最长等待；0 关闭 |
 | `AGENTHUB_DELIVERY_LEASE_SECONDS` | `120` | 投递租约；应大于单次通道调用耗时 |
+| `AGENTHUB_OUTBOUND_QPS` | `0` | 跨会话共享出站速率；0 不限 |
+| `FEISHU_ADMIN_OPEN_IDS` | 空 | 可引用机器人消息干预他人会话的管理员 |
+| `DINGTALK_GROUP_OPEN` | `false` | 钉钉群内免用户白名单 |
 | `AGENTHUB_ARTIFACT_MAX_BYTES` | `20MB` | 单个交付物上限 |
 | `AGENTHUB_ARTIFACT_MAX_COUNT` | `10` | 单次运行交付物数量上限 |
 | `AGENTHUB_ARTIFACT_MAX_TOTAL` | `50MB` | 单次运行交付物总量上限 |

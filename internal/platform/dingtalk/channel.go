@@ -3,6 +3,7 @@ package dingtalk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +25,7 @@ type Config struct {
 	RequireMention bool
 	AllowedUsers   []string
 	AllowedChats   []string
+	GroupOpen      bool
 	BotName        string
 	ModelName      string
 	ModelBaseURL   string
@@ -84,6 +86,9 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 	}
 	text := strings.TrimSpace(data.Text.Content)
 	if text == "" {
+		text = dingtalkContentText(data.Content)
+	}
+	if text == "" {
 		return nil, nil
 	}
 	if c.cfg.BotName != "" {
@@ -102,7 +107,7 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 	if sender == "" {
 		sender = data.SenderId
 	}
-	if !c.allowed(sender, data.ConversationId) {
+	if !c.allowed(sender, data.ConversationId, kind) {
 		c.log.Debug("dingtalk message rejected by allowlist", "sender", sender, "conversation", data.ConversationId)
 		return nil, nil
 	}
@@ -123,7 +128,7 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 		Sender:      channel.Sender{OpenID: sender, Name: data.SenderNick},
 		Chat:        channel.Chat{ID: data.ConversationId, Kind: kind, Name: data.ConversationTitle},
 		Text:        text,
-		MsgType:     "text",
+		MsgType:     dingtalkMsgType(data.Msgtype),
 		MentionsBot: data.IsInAtList,
 	}); err != nil {
 		if errors.Is(err, core.ErrRateLimited) {
@@ -133,6 +138,53 @@ func (c *Channel) onMessage(ctx context.Context, data *chatbot.BotCallbackDataMo
 		c.log.Error("dingtalk submit failed", "error", err)
 	}
 	return nil, nil
+}
+
+// dingtalkContentText 从 content 中还原可读文本。
+//
+// @remarks 合并转发在钉钉回调里只有 title + summary，不能展开原始聊天记录；
+// 富文本按段落拼接，图片/文件只保留占位。
+func dingtalkContentText(content any) string {
+	payload := content
+	if raw, ok := content.(string); ok {
+		var parsed any
+		if json.Unmarshal([]byte(raw), &parsed) == nil {
+			payload = parsed
+		}
+	}
+	obj, ok := payload.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if title, _ := obj["title"].(string); strings.TrimSpace(title) != "" {
+		summary, _ := obj["summary"].(string)
+		if strings.TrimSpace(summary) == "" {
+			return strings.TrimSpace(title)
+		}
+		return strings.TrimSpace(title) + "\n" + strings.TrimSpace(summary)
+	}
+	if text, _ := obj["text"].(string); strings.TrimSpace(text) != "" {
+		return strings.TrimSpace(text)
+	}
+	if rich, ok := obj["richText"].([]any); ok {
+		var lines []string
+		for _, item := range rich {
+			if part, ok := item.(map[string]any); ok {
+				if value, _ := part["text"].(string); strings.TrimSpace(value) != "" {
+					lines = append(lines, strings.TrimSpace(value))
+				}
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	return ""
+}
+
+func dingtalkMsgType(msgType string) string {
+	if msgType == "" {
+		return "text"
+	}
+	return msgType
 }
 
 // SendText 通过会话 webhook 回复。
@@ -171,8 +223,9 @@ func (c *Channel) rememberHook(convID, url string, expireAtMs int64, userName st
 	c.mu.Unlock()
 }
 
-func (c *Channel) allowed(sender, chatID string) bool {
-	if len(c.cfg.AllowedUsers) > 0 && !contains(c.cfg.AllowedUsers, sender) {
+func (c *Channel) allowed(sender, chatID, kind string) bool {
+	groupOpen := kind == "group" && c.cfg.GroupOpen
+	if len(c.cfg.AllowedUsers) > 0 && !groupOpen && !contains(c.cfg.AllowedUsers, sender) {
 		return false
 	}
 	if len(c.cfg.AllowedChats) > 0 && !contains(c.cfg.AllowedChats, chatID) {
