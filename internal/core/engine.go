@@ -66,6 +66,9 @@ type Engine struct {
 	// deliveryOwner 标识当前进程；deliveryLease 是单次发送领取的租约。
 	deliveryOwner string
 	deliveryLease time.Duration
+	reactor       channel.Reactor
+	reactions     map[string]string
+	reactionMu    sync.Mutex
 	// outboundQPS 是跨会话共享的发送令牌桶；0 表示不限。
 	outboundQPS    int
 	outboundTokens float64
@@ -120,6 +123,7 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		maxConversations:   200,
 		maxRuns:            200,
 		maxDeliveries:      500,
+		reactions:          make(map[string]string),
 		deliveryOwner:      newLeaseToken(),
 		deliveryLease:      2 * time.Minute,
 		retryDelay: func(attempt int) time.Duration {
@@ -234,6 +238,13 @@ func (e *Engine) SetOutboundQPS(qps int) {
 		e.outboundTokens = 1
 		e.outboundLast = time.Now()
 	}
+	e.mu.Unlock()
+}
+
+// SetReactor 设置可选的消息状态表情投影。
+func (e *Engine) SetReactor(reactor channel.Reactor) {
+	e.mu.Lock()
+	e.reactor = reactor
 	e.mu.Unlock()
 }
 
@@ -414,6 +425,7 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 	if e.metrics != nil {
 		e.metrics.Inc("agenthub_messages_accepted_total", nil)
 	}
+	e.projectReaction(msg, "queued")
 
 	if e.journal != nil {
 		inserted, err := e.journal.SaveMessage(ctx, msg)

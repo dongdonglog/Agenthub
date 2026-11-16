@@ -260,6 +260,9 @@ func run() int {
 			logger.Warn("cleanup generation failed", "conversation", conv, "generation", generation, "error", err)
 		}
 	})
+	if reactor, ok := ch.(channel.Reactor); ok {
+		engine.SetReactor(reactor)
+	}
 	engine.SetArtifactDir(filepath.Join(cfg.Storage.Dir, "artifacts"))
 	engine.SetArtifactLimits(cfg.Storage.ArtifactMaxBytes, cfg.Storage.ArtifactMaxCount, cfg.Storage.ArtifactMaxTotal)
 	engine.SetConcurrency(cfg.MaxConcurrentRuns)

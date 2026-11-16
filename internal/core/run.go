@@ -79,6 +79,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	e.cancels[conv] = cancel
 	e.mu.Unlock()
 
+	e.projectReaction(batch[0], "processing")
 	e.persistExpired(ctx, expired)
 	if e.journal != nil {
 		if err := e.journal.SaveRun(ctx, run); err != nil {
@@ -245,6 +246,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	alreadySent := e.sent[delivery.IdempotencyKey]
 	e.mu.Unlock()
 
+	e.projectReaction(batch[0], run.State)
 	var artifactDeliveries []*Delivery
 	if e.canSendArtifacts() {
 		artifactDeliveries = e.buildArtifactDeliveries(run, batch[0], artifacts)

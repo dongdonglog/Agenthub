@@ -92,6 +92,14 @@ type ArtifactSender interface {
 	SendArtifact(ctx context.Context, out OutboundArtifact) (Receipt, error)
 }
 
+// Reactor 是可选的入站消息状态表情能力。
+type Reactor interface {
+	// React 给消息添加状态表情并返回 reaction_id。
+	React(ctx context.Context, messageID, state string) (string, error)
+	// Unreact 移除之前添加的状态表情。
+	Unreact(ctx context.Context, messageID, reactionID string) error
+}
+
 // ErrUnsupported 表示当前通道不支持该发送类型。
 var ErrUnsupported = errors.New("通道不支持该发送类型")
 

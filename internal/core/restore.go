@@ -62,6 +62,14 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 	}
 
+	if reactions, err := e.journal.LoadReactions(ctx, 5000); err == nil {
+		e.mu.Lock()
+		for messageID, reactionID := range reactions {
+			e.reactions[messageID] = reactionID
+		}
+		e.mu.Unlock()
+	}
+
 	if priorities, err := e.journal.LoadPriorities(ctx, 5000); err == nil {
 		for conv, p := range priorities {
 			e.priority[conv] = p

@@ -557,6 +557,37 @@ func (j *Journal) LoadDelivery(ctx context.Context, key string) (*core.Delivery,
 	return d, err
 }
 
+// SaveReaction 记录消息状态表情投影。
+func (j *Journal) SaveReaction(ctx context.Context, messageID, state, reactionID string) error {
+	_, err := j.pool.Exec(ctx, `
+		INSERT INTO reaction_projection (message_id, state, reaction_id, updated_at)
+		VALUES ($1,$2,$3,now())
+		ON CONFLICT (message_id) DO UPDATE SET
+			state = EXCLUDED.state, reaction_id = EXCLUDED.reaction_id, updated_at = now()`,
+		messageID, state, reactionID)
+	return err
+}
+
+// LoadReactions 读取最近的状态表情投影。
+func (j *Journal) LoadReactions(ctx context.Context, limit int) (map[string]string, error) {
+	rows, err := j.pool.Query(ctx, `
+		SELECT message_id, reaction_id FROM reaction_projection
+		WHERE reaction_id <> '' ORDER BY updated_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var messageID, reactionID string
+		if err := rows.Scan(&messageID, &reactionID); err != nil {
+			return nil, err
+		}
+		out[messageID] = reactionID
+	}
+	return out, rows.Err()
+}
+
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。
 func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, []*core.Run, error) {
 	rows, err := j.pool.Query(ctx, `

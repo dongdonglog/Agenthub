@@ -354,6 +354,31 @@ func (c *Client) uploadMultipart(ctx context.Context, endpoint string, fields ma
 	return key, nil
 }
 
+// AddReaction 给消息添加表情，返回 reaction_id。
+func (c *Client) AddReaction(ctx context.Context, messageID, emojiType string) (string, error) {
+	if messageID == "" || emojiType == "" {
+		return "", channel.Definite(fmt.Errorf("消息 ID 或表情为空"))
+	}
+	var out struct {
+		Data struct {
+			ReactionID string `json:"reaction_id"`
+		} `json:"data"`
+	}
+	body := map[string]any{"reaction_type": map[string]string{"emoji_type": emojiType}}
+	if err := c.do(ctx, http.MethodPost, "/open-apis/im/v1/messages/"+url.PathEscape(messageID)+"/reactions", body, &out); err != nil {
+		return "", err
+	}
+	return out.Data.ReactionID, nil
+}
+
+// RemoveReaction 撤回机器人添加的表情。
+func (c *Client) RemoveReaction(ctx context.Context, messageID, reactionID string) error {
+	if messageID == "" || reactionID == "" {
+		return nil
+	}
+	return c.do(ctx, http.MethodDelete, "/open-apis/im/v1/messages/"+url.PathEscape(messageID)+"/reactions/"+url.PathEscape(reactionID), nil, nil)
+}
+
 // Quoted 是被引用消息的摘要。
 type Quoted struct {
 	// Text 是消息的文本表达。
@@ -452,6 +477,25 @@ var _ channel.ArtifactSender = (*Channel)(nil)
 
 func (c *Channel) SendArtifact(ctx context.Context, out channel.OutboundArtifact) (channel.Receipt, error) {
 	return c.client.SendArtifact(ctx, out)
+}
+
+var _ channel.Reactor = (*Channel)(nil)
+
+// React 把运行状态映射为飞书表情。
+func (c *Channel) React(ctx context.Context, messageID, state string) (string, error) {
+	emoji := map[string]string{
+		"queued": "THINKING", "processing": "THINKING",
+		"completed": "DONE", "failed": "BROKEN_HEART", "interrupted": "CRY", "cancelled": "CRY",
+	}[state]
+	if emoji == "" {
+		return "", nil
+	}
+	return c.client.AddReaction(ctx, messageID, emoji)
+}
+
+// Unreact 撤回之前的状态表情。
+func (c *Channel) Unreact(ctx context.Context, messageID, reactionID string) error {
+	return c.client.RemoveReaction(ctx, messageID, reactionID)
 }
 
 func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.Receipt, error) {
