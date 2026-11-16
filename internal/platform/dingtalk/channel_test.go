@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -203,5 +204,46 @@ func TestFileAttachmentDownload(t *testing.T) {
 	body, err := os.ReadFile(msgs[0].Attachments[0].Path)
 	if err != nil || string(body) != "attachment-body" {
 		t.Fatalf("body=%q err=%v", body, err)
+	}
+}
+
+func TestSendArtifactUploadsToWebhook(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "报告.txt")
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var msgType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/gettoken":
+			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "access_token": "t", "expires_in": 7200})
+		case r.URL.Path == "/media/upload":
+			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "media_id": "media-1"})
+		case r.URL.Path == "/webhook":
+			var body struct {
+				MsgType string `json:"msgtype"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			msgType = body.MsgType
+			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	eng := core.New(agent.Echo{}, nil, logger)
+	c := New(Config{ClientID: "id", ClientSecret: "secret", OAPIBase: srv.URL}, eng, logger)
+	c.rememberHook("conv-file", srv.URL+"/webhook", time.Now().Add(time.Hour).UnixMilli(), "")
+	receipt, err := c.SendArtifact(context.Background(), channel.OutboundArtifact{
+		ChatID:   "conv-file",
+		Artifact: channel.Artifact{Name: "报告.txt", Path: path, Kind: "file"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ExternalID != "" || msgType != "file" {
+		t.Fatalf("receipt=%+v msgType=%s", receipt, msgType)
 	}
 }

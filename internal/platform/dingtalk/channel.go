@@ -32,6 +32,8 @@ type Config struct {
 	AttachmentsDir string
 	// APIBase 用于附件下载，测试可覆盖。
 	APIBase string
+	// OAPIBase 用于媒体上传，测试可覆盖。
+	OAPIBase string
 }
 
 // Channel 同时承担 Stream 连接与发送。
@@ -41,10 +43,12 @@ type Channel struct {
 	log    *slog.Logger
 	cli    *client.StreamClient
 
-	mu          sync.Mutex
-	hooks       map[string]webhook // conversationID -> session webhook
-	token       string
-	tokenExpiry time.Time
+	mu              sync.Mutex
+	hooks           map[string]webhook // conversationID -> session webhook
+	token           string
+	tokenExpiry     time.Time
+	oapiAccessToken string
+	oapiTokenExpiry time.Time
 }
 
 type webhook struct {

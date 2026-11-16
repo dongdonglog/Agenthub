@@ -47,7 +47,7 @@ docker compose up -d --build
 - Agent 把要交付的文件写到工作区的 `submit/`（每次运行独立目录）；
 - 运行结束后文件/图片回到原会话；多个文档自动打包 ZIP；
 - 单文件 20MB、单次 10 个、总量 50MB，可用 `AGENTHUB_ARTIFACT_*` 调整；
-- 飞书需要文件上传权限；钉钉当前文本通道不支持文件，会明确提示，产物保留在管理台；
+- 飞书需要文件上传权限；钉钉通过 sessionWebhook 上传并发送文件/图片，webhook 过期后交付会失败；
 - 产物保存在 `/data/artifacts`，备份时与数据库、`/data` 卷一起处理。
 
 ## 钉钉接入
