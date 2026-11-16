@@ -35,6 +35,7 @@ AgentHub 把入口放进日常 IM，把执行放进可清理的工作区，把�
 - **真执行**：pi 在会话代工作区里读写文件、跑 `bash`、搜索、调 MCP；镜像内置 git/gh/glab/ssh/jq/yq/rg/fd 等常用 CLI；
 - **交付物回传**：产物写入 `submit/`，文件/图片回到群；多文档自动打包 ZIP，超限有说明；
 - **技能可运营**：`SKILL.md` + `references/`，按 Profile 裁剪；可执行文件进入会话 PATH；管理台在线编辑、ZIP 导入、停用归档；
+- **pi 原生**：扩展（只读 guard）、skills、prompt templates、MCP 原生接入；SRE/技术支持岗位包见 [AIOps 方案](docs/aiops.md)；
 - **工具链**：常用 CLI + `edit/write` 原生工具 + MCP 配方；见 [工具链](docs/tools.md)；
 - **模型主备**：多供应商、有序候选、超时/429/5xx 自动切换、熔断，图片走 vision 线路；
 - **调度**：跨会话并发上限、公平队列 + 等待老化、每会话限流、cron 定时任务；
