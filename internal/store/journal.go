@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/moying/agenthub/internal/core"
@@ -64,47 +66,178 @@ func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 	return err
 }
 
+// deliveryColumns 是投递箱的完整列，保持读取与写入顺序一致。
+const deliveryColumns = `idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path,
+	state, error, attempts, next_attempt_at, trace_id, send_started_at,
+	lease_owner, lease_token, lease_expires_at, send_phase, external_id, created_at`
+
+type deliveryScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanDelivery(row deliveryScanner) (*core.Delivery, error) {
+	d := &core.Delivery{}
+	var next, started, leaseExpires, created *time.Time
+	err := row.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text,
+		&d.Kind, &d.Name, &d.ArtifactID, &d.ArtifactPath,
+		&d.State, &d.Error, &d.Attempts, &next, &d.TraceID, &started,
+		&d.LeaseOwner, &d.LeaseToken, &leaseExpires, &d.SendPhase, &d.ExternalID, &created)
+	if err != nil {
+		return nil, err
+	}
+	if next != nil {
+		d.NextAttempt = *next
+	}
+	if started != nil {
+		d.SendStartedAt = *started
+	}
+	if leaseExpires != nil {
+		d.LeaseExpiresAt = *leaseExpires
+	}
+	if created != nil {
+		d.CreatedAt = *created
+	}
+	return d, nil
+}
+
 // SaveDelivery 新建或更新投递记录。
 func (j *Journal) SaveDelivery(ctx context.Context, d *core.Delivery) error {
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, error, attempts, next_attempt_at, trace_id, send_started_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		INSERT INTO delivery_state (idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, error, attempts, next_attempt_at, trace_id, send_started_at, lease_owner, lease_token, lease_expires_at, send_phase, external_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		ON CONFLICT (idempotency_key) DO UPDATE SET
 			state = EXCLUDED.state,
 			error = EXCLUDED.error,
 			attempts = EXCLUDED.attempts,
 			next_attempt_at = EXCLUDED.next_attempt_at,
 			trace_id = EXCLUDED.trace_id,
-			send_started_at = EXCLUDED.send_started_at`,
-		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.Kind, d.Name, d.ArtifactID, d.ArtifactPath, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt), d.TraceID, nullTime(d.SendStartedAt))
+			send_started_at = EXCLUDED.send_started_at,
+			lease_owner = EXCLUDED.lease_owner,
+			lease_token = EXCLUDED.lease_token,
+			lease_expires_at = EXCLUDED.lease_expires_at,
+			send_phase = EXCLUDED.send_phase,
+			external_id = EXCLUDED.external_id`,
+		d.IdempotencyKey, d.RunID, d.ChatID, d.ReplyTo, d.Text, d.Kind, d.Name, d.ArtifactID, d.ArtifactPath, d.State, d.Error, d.Attempts, nullTime(d.NextAttempt), d.TraceID, nullTime(d.SendStartedAt), d.LeaseOwner, d.LeaseToken, nullTime(d.LeaseExpiresAt), d.SendPhase, d.ExternalID)
 	return err
 }
 
-// LoadSendingDeliveries 返回重启前处于发送中的投递，用于标记歧义。
-func (j *Journal) LoadSendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
-	rows, err := j.pool.Query(ctx, `
-		SELECT idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, attempts, next_attempt_at, trace_id, send_started_at
-		FROM delivery_state WHERE state = 'sending' ORDER BY created_at LIMIT $1`, limit)
+// ClaimDelivery 原子领取一条到期投递；同一投递只能被一个发送者领取。
+func (j *Journal) ClaimDelivery(ctx context.Context, key, owner, token string, lease time.Duration) (*core.Delivery, bool, error) {
+	row := j.pool.QueryRow(ctx, `
+		UPDATE delivery_state SET
+			state = 'sending',
+			attempts = attempts + 1,
+			lease_owner = $2,
+			lease_token = $3,
+			lease_expires_at = now() + make_interval(secs => $4),
+			send_started_at = now(),
+			send_phase = 'claimed',
+			error = ''
+		WHERE idempotency_key = $1
+		  AND state IN ('pending','retrying')
+		  AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+		  AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+		RETURNING `+deliveryColumns,
+		key, owner, token, lease.Seconds())
+	d, err := scanDelivery(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return d, true, nil
+}
+
+// MarkDeliveryCalling 把已领取的投递推进到调用通道阶段。
+func (j *Journal) MarkDeliveryCalling(ctx context.Context, key, token string) (bool, error) {
+	tag, err := j.pool.Exec(ctx, `
+		UPDATE delivery_state SET send_phase = 'calling'
+		WHERE idempotency_key = $1 AND lease_token = $2 AND state = 'sending' AND send_phase = 'claimed'`, key, token)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// FinishDelivery 在租约令牌匹配时写入发送终态或重试状态。
+func (j *Journal) FinishDelivery(ctx context.Context, key, token, state, errText, externalID string, next time.Time) (bool, error) {
+	tag, err := j.pool.Exec(ctx, `
+		UPDATE delivery_state SET
+			state = $3,
+			error = $4,
+			external_id = $5,
+			next_attempt_at = $6,
+			lease_owner = '',
+			lease_token = '',
+			lease_expires_at = NULL,
+			send_phase = ''
+		WHERE idempotency_key = $1 AND lease_token = $2 AND state = 'sending'`,
+		key, token, state, errText, externalID, nullTime(next))
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RecoverDeliveries 回收过期租约：claimed 可重试，calling/旧发送中进入歧义。
+func (j *Journal) RecoverDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
+	tx, err := j.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []*core.Delivery
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `
+		SELECT `+deliveryColumns+`
+		FROM delivery_state
+		WHERE state = 'sending' AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+		ORDER BY created_at
+		LIMIT $1
+		FOR UPDATE SKIP LOCKED`, limit)
+	if err != nil {
+		return nil, err
+	}
+	var items []*core.Delivery
 	for rows.Next() {
-		d := &core.Delivery{}
-		var next, started *time.Time
-		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.Kind, &d.Name, &d.ArtifactID, &d.ArtifactPath, &d.State, &d.Attempts, &next, &d.TraceID, &started); err != nil {
+		d, err := scanDelivery(rows)
+		if err != nil {
+			rows.Close()
 			return nil, err
 		}
-		if next != nil {
-			d.NextAttempt = *next
-		}
-		if started != nil {
-			d.SendStartedAt = *started
-		}
-		out = append(out, d)
+		items = append(items, d)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	for _, d := range items {
+		if d.SendPhase == "claimed" {
+			d.State = "retrying"
+			d.Error = "发送认领租约过期，重新投递"
+			d.NextAttempt = time.Now()
+		} else {
+			d.State = "ambiguous"
+			d.Error = "发送结果不确定；已停止自动重试，请人工核对"
+		}
+		d.LeaseOwner = ""
+		d.LeaseToken = ""
+		d.LeaseExpiresAt = time.Time{}
+		d.SendPhase = ""
+		if _, err := tx.Exec(ctx, `
+			UPDATE delivery_state SET state = $2, error = $3, next_attempt_at = $4,
+				lease_owner = '', lease_token = '', lease_expires_at = NULL, send_phase = ''
+			WHERE idempotency_key = $1 AND state = 'sending'`,
+			d.IdempotencyKey, d.State, d.Error, nullTime(d.NextAttempt)); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 // SaveArtifact 登记运行产物；同一 ID 重复写入保持幂等。
@@ -361,7 +494,7 @@ func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, err
 // LoadPendingDeliveries 返回未完成投递，用于启动补偿。
 func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core.Delivery, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT idempotency_key, run_id, chat_id, reply_to, text, kind, name, artifact_id, artifact_path, state, attempts, next_attempt_at, trace_id, send_started_at
+		SELECT `+deliveryColumns+`
 		FROM delivery_state WHERE state IN ('pending','retrying') LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -369,17 +502,9 @@ func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core
 	defer rows.Close()
 	var out []*core.Delivery
 	for rows.Next() {
-		d := &core.Delivery{}
-		var next *time.Time
-		var started *time.Time
-		if err := rows.Scan(&d.IdempotencyKey, &d.RunID, &d.ChatID, &d.ReplyTo, &d.Text, &d.Kind, &d.Name, &d.ArtifactID, &d.ArtifactPath, &d.State, &d.Attempts, &next, &d.TraceID, &started); err != nil {
+		d, err := scanDelivery(rows)
+		if err != nil {
 			return nil, err
-		}
-		if next != nil {
-			d.NextAttempt = *next
-		}
-		if started != nil {
-			d.SendStartedAt = *started
 		}
 		out = append(out, d)
 	}

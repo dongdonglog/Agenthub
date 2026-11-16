@@ -2,11 +2,13 @@ package core_test
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/store"
-	"testing"
 )
 
 func TestSendingDeliveryBecomesAmbiguousOnRestart(t *testing.T) {
@@ -77,8 +79,8 @@ func TestSendPersistsSendingBeforeChannelCall(t *testing.T) {
 	if err := engine.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if ch.seen != "sending" {
-		t.Fatalf("发送前数据库状态 = %q, want sending", ch.seen)
+	if ch.seen != "sending:calling" {
+		t.Fatalf("调用通道前数据库状态 = %q, want sending:calling", ch.seen)
 	}
 }
 
@@ -88,6 +90,93 @@ type probeChannel struct {
 }
 
 func (c *probeChannel) SendText(ctx context.Context, _ channel.Outbound) (channel.Receipt, error) {
-	_ = c.db.Pool().QueryRow(ctx, `SELECT state FROM delivery_state LIMIT 1`).Scan(&c.seen)
+	_ = c.db.Pool().QueryRow(ctx, `SELECT state || ':' || send_phase FROM delivery_state LIMIT 1`).Scan(&c.seen)
 	return channel.Receipt{}, nil
+}
+
+func TestClaimedLeaseRetriesAfterExpiry(t *testing.T) {
+	url := testDatabaseURL(t)
+	ctx := context.Background()
+	db, err := store.Open(ctx, url, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE delivery_state, run_artifact, run_trace, message_state, run_state`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `
+		INSERT INTO delivery_state
+			(idempotency_key, run_id, chat_id, reply_to, text, state, attempts, created_at,
+			 send_started_at, lease_owner, lease_token, lease_expires_at, send_phase)
+		VALUES ('run_claimed:result', 'run_claimed', 'oc_1', 'om_1', '结果', 'sending', 1, now(),
+			now() - interval '2 minutes', 'dead', 'token', now() - interval '1 minute', 'claimed')`); err != nil {
+		t.Fatal(err)
+	}
+
+	ch := &captureChannel{}
+	engine := core.New(agent.Echo{}, ch, nil)
+	engine.SetJournal(store.NewJournal(db))
+	if err := engine.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && ch.count() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ch.count() != 1 {
+		t.Fatalf("claimed 过期应重试一次，实际 %d", ch.count())
+	}
+	var state string
+	if err := db.Pool().QueryRow(ctx, `SELECT state FROM delivery_state WHERE idempotency_key = 'run_claimed:result'`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "sent" {
+		t.Fatalf("state = %s, want sent", state)
+	}
+}
+
+func TestCallingLeaseBecomesAmbiguous(t *testing.T) {
+	url := testDatabaseURL(t)
+	ctx := context.Background()
+	db, err := store.Open(ctx, url, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE delivery_state, run_artifact, run_trace, message_state, run_state`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `
+		INSERT INTO delivery_state
+			(idempotency_key, run_id, chat_id, reply_to, text, state, attempts, created_at,
+			 send_started_at, lease_owner, lease_token, lease_expires_at, send_phase)
+		VALUES ('run_calling:result', 'run_calling', 'oc_1', 'om_1', '结果', 'sending', 1, now(),
+			now() - interval '2 minutes', 'dead', 'token', now() - interval '1 minute', 'calling')`); err != nil {
+		t.Fatal(err)
+	}
+
+	ch := &captureChannel{}
+	engine := core.New(agent.Echo{}, ch, nil)
+	engine.SetJournal(store.NewJournal(db))
+	if err := engine.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if ch.count() != 0 {
+		t.Fatalf("calling 过期不应自动重发，实际 %d", ch.count())
+	}
+	var state string
+	if err := db.Pool().QueryRow(ctx, `SELECT state FROM delivery_state WHERE idempotency_key = 'run_calling:result'`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "ambiguous" {
+		t.Fatalf("state = %s, want ambiguous", state)
+	}
 }

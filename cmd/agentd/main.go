@@ -263,6 +263,7 @@ func run() int {
 	engine.SetConcurrency(cfg.MaxConcurrentRuns)
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
 	engine.SetQueueTTL(time.Duration(cfg.QueueTTLSeconds) * time.Second)
+	engine.SetDeliveryLease(time.Duration(cfg.DeliveryLeaseSeconds) * time.Second)
 	engine.SetProfileSource(func() core.ProfileSelection {
 		active := profiles.Active()
 		return core.ProfileSelection{Name: active.Name, Skills: active.Skills, MCPs: active.MCPs}
@@ -432,6 +433,7 @@ func run() int {
 		}
 	}()
 	go flushLoop(workCtx, engine, logger)
+	go deliveryRecoveryLoop(workCtx, engine, logger)
 	if db != nil {
 		go purgeLoop(ctx, db, filepath.Join(cfg.Storage.Dir, "artifacts"), cfg.RetentionDays, logger)
 	}
@@ -704,6 +706,19 @@ func cleanupArtifactDirs(dir string, cutoff time.Time, logger *slog.Logger) {
 		}
 		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
 			logger.Warn("artifact cleanup failed", "name", entry.Name(), "error", err)
+		}
+	}
+}
+
+func deliveryRecoveryLoop(ctx context.Context, engine *core.Engine, logger *slog.Logger) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			engine.RecoverDeliveries(ctx)
 		}
 	}
 }

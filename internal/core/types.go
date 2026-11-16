@@ -65,6 +65,14 @@ type Delivery struct {
 	CreatedAt    time.Time
 	// SendStartedAt 是最近一次调用通道前的时间；重启时用于识别结果不确定的投递。
 	SendStartedAt time.Time
+	// LeaseOwner 是领取投递的实例标识。
+	LeaseOwner string
+	// LeaseToken 是本次领取的令牌；状态更新必须匹配，避免旧发送覆盖新领取。
+	LeaseToken string
+	// LeaseExpiresAt 是租约到期时间；到期后 claimed 可重试，calling 进入歧义。
+	LeaseExpiresAt time.Time
+	// SendPhase 是发送阶段：claimed（已领取未调用通道）| calling（已调用，结果未知）。
+	SendPhase string
 	// NextAttempt 是下一次重试时间，零值表示立即。
 	NextAttempt time.Time
 	TraceID     string
@@ -156,7 +164,10 @@ type Journal interface {
 	LoadGenerations(ctx context.Context) (map[string]int, error)
 	SaveRun(ctx context.Context, r *Run) error
 	SaveDelivery(ctx context.Context, d *Delivery) error
-	LoadSendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	ClaimDelivery(ctx context.Context, key, owner, token string, lease time.Duration) (*Delivery, bool, error)
+	MarkDeliveryCalling(ctx context.Context, key, token string) (bool, error)
+	FinishDelivery(ctx context.Context, key, token, state, errText, externalID string, next time.Time) (bool, error)
+	RecoverDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
 	SaveArtifact(ctx context.Context, a *Artifact) error
 	LoadArtifacts(ctx context.Context, runID string) ([]*Artifact, error)
 	LoadArtifact(ctx context.Context, id string) (*Artifact, error)

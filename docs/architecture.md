@@ -94,7 +94,8 @@ queued ──▶ running ──▶ completed
 - 停止请求先写 `stopping`，再中止执行，最终落 `interrupted`；
 - `interrupted` 与 `failed` 都必须产生一条"中断/失败说明"投递；
 - 终态不可逆；迟到事件按 `run_id` 丢弃；
-- 发送前落 `sending`；重启后遗留的 `sending` 标记为 `ambiguous`，不自动重发；
+- 发送前原子领取租约并进入 `claimed`；调用通道前进 `calling`；终态更新必须匹配租约令牌；
+- 恢复扫描器只回收过期租约：`claimed` 重试，`calling` 标记 `ambiguous`，不自动重发；
 - 排队消息超过 TTL 后标记 `expired`，不进入运行。
 
 ## 4.1 pi 运行时
@@ -147,7 +148,7 @@ pi 固定 1.4.0、会话文件 v3，升级要回归；调试跨 Go/Node 两段�
 | `conversation_state` | 会话键与当前代 | `id` 主键；`generation` 随 `/reset` 递增 |
 | `message_state` | 消息与助手回复 | `(conversation_id, external_id)` 唯一；`role` 区分 user/assistant |
 | `run_state` | 运行状态与 token | `id` 主键；终态写 `ended_at` |
-| `delivery_state` | 投递箱 | `idempotency_key` 唯一；`state` 状态机（含 `sending` / `ambiguous`）；`kind` / `artifact_path` 支持产物；`attempts` / `next_attempt_at` / `send_started_at` |
+| `delivery_state` | 投递箱 | `idempotency_key` 唯一；`state` 状态机（含 `sending` / `ambiguous`）；租约 `lease_owner` / `lease_token` / `lease_expires_at` 与 `send_phase`；`attempts` / `next_attempt_at` |
 | `run_artifact` | 运行产物 | `id` 主键；`run_id` 索引；文件名、大小、SHA-256、持久路径 |
 | `run_trace` | 阶段与工具事件 | 追加写，按 `run_id` 查询 |
 | `schema_migrations` | 迁移版本 | 只前进，启动时加 advisory lock |

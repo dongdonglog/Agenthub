@@ -62,6 +62,9 @@ type Engine struct {
 	rateWindow time.Duration
 	queueTTL   time.Duration
 	hits       map[string][]time.Time
+	// deliveryOwner 标识当前进程；deliveryLease 是单次发送领取的租约。
+	deliveryOwner string
+	deliveryLease time.Duration
 	// retryDelay 计算投递重试间隔，默认指数退避。
 	retryDelay func(attempt int) time.Duration
 
@@ -111,6 +114,8 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		maxConversations:   200,
 		maxRuns:            200,
 		maxDeliveries:      500,
+		deliveryOwner:      newLeaseToken(),
+		deliveryLease:      2 * time.Minute,
 		retryDelay: func(attempt int) time.Duration {
 			d := time.Duration(1<<uint(attempt)) * time.Second
 			if d > 30*time.Second {
@@ -213,6 +218,15 @@ func (e *Engine) SetRateLimit(n int, window time.Duration) {
 	}
 }
 
+// SetDeliveryLease 设置投递领取租约；应大于单次通道调用可能耗时。
+func (e *Engine) SetDeliveryLease(lease time.Duration) {
+	e.mu.Lock()
+	if lease > 0 {
+		e.deliveryLease = lease
+	}
+	e.mu.Unlock()
+}
+
 // SetQueueTTL 设置消息在队列中的最长等待时间；0 表示不限制。
 func (e *Engine) SetQueueTTL(ttl time.Duration) {
 	e.mu.Lock()
@@ -308,6 +322,14 @@ func (e *Engine) ProfileOf(conv string) string {
 }
 
 // newTraceID 生成短 trace 标识，用于贯通消息 → 运行 → 投递日志。
+func newLeaseToken() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("lease_%d", time.Now().UnixNano())
+	}
+	return "lease_" + hex.EncodeToString(b[:])
+}
+
 func newTraceID() string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {

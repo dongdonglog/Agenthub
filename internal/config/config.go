@@ -41,13 +41,15 @@ type Config struct {
 	// RateLimitPerMin 是每会话每分钟消息上限；0 表示不限。
 	RateLimitPerMin int `yaml:"rate_limit_per_min"`
 	// QueueTTLSeconds 是消息在队列中的最长等待秒数；0 表示不限制。
-	QueueTTLSeconds int            `yaml:"queue_ttl_seconds"`
-	Webhook         WebhookConfig  `yaml:"webhook"`
-	Feishu          FeishuConfig   `yaml:"feishu"`
-	Dingtalk        DingtalkConfig `yaml:"dingtalk"`
-	Pi              PiConfig       `yaml:"pi"`
-	Agent           AgentConfig    `yaml:"agent"`
-	Log             LogConfig      `yaml:"log"`
+	QueueTTLSeconds int `yaml:"queue_ttl_seconds"`
+	// DeliveryLeaseSeconds 是投递领取租约，应大于单次通道调用可能耗时。
+	DeliveryLeaseSeconds int            `yaml:"delivery_lease_seconds"`
+	Webhook              WebhookConfig  `yaml:"webhook"`
+	Feishu               FeishuConfig   `yaml:"feishu"`
+	Dingtalk             DingtalkConfig `yaml:"dingtalk"`
+	Pi                   PiConfig       `yaml:"pi"`
+	Agent                AgentConfig    `yaml:"agent"`
+	Log                  LogConfig      `yaml:"log"`
 }
 
 // HTTPConfig 是健康检查与指标监听配置。
@@ -198,10 +200,11 @@ func defaults() Config {
 			ArtifactMaxCount: 10,
 			ArtifactMaxTotal: 50 << 20,
 		},
-		RetentionDays:     90,
-		MaxConcurrentRuns: 4,
-		QueueTTLSeconds:   6 * 3600,
-		Webhook:           WebhookConfig{Addr: "127.0.0.1:8789"},
+		RetentionDays:        90,
+		MaxConcurrentRuns:    4,
+		QueueTTLSeconds:      6 * 3600,
+		DeliveryLeaseSeconds: 120,
+		Webhook:              WebhookConfig{Addr: "127.0.0.1:8789"},
 		Feishu: FeishuConfig{
 			Transport:      "websocket",
 			Domain:         "https://open.feishu.cn",
@@ -242,6 +245,7 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.MaxConcurrentRuns, "AGENTHUB_MAX_CONCURRENT_RUNS")
 	setInt(&cfg.RateLimitPerMin, "AGENTHUB_RATE_LIMIT_PER_MIN")
 	setInt(&cfg.QueueTTLSeconds, "AGENTHUB_QUEUE_TTL_SECONDS")
+	setInt(&cfg.DeliveryLeaseSeconds, "AGENTHUB_DELIVERY_LEASE_SECONDS")
 	setStr(&cfg.Webhook.Addr, "AGENTHUB_WEBHOOK_ADDR")
 	setStr(&cfg.Feishu.Transport, "FEISHU_TRANSPORT")
 	setStr(&cfg.Feishu.Domain, "FEISHU_DOMAIN")
@@ -342,6 +346,12 @@ func (c *Config) Validate() error {
 	}
 	if c.QueueTTLSeconds < 0 {
 		return errors.New("queue_ttl_seconds 不能为负数")
+	}
+	if c.DeliveryLeaseSeconds < 0 {
+		return errors.New("delivery_lease_seconds 不能为负数")
+	}
+	if c.DeliveryLeaseSeconds == 0 {
+		c.DeliveryLeaseSeconds = 120
 	}
 	if c.Storage.ArtifactMaxBytes < 0 || c.Storage.ArtifactMaxCount < 0 || c.Storage.ArtifactMaxTotal < 0 {
 		return errors.New("artifact 大小与数量上限不能为负数")

@@ -26,7 +26,7 @@ func (c *captureChannel) SendText(_ context.Context, out channel.Outbound) (chan
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.fail != nil {
-		return channel.Receipt{}, c.fail
+		return channel.Receipt{}, channel.Retryable(c.fail)
 	}
 	c.sent = append(c.sent, out)
 	return channel.Receipt{ExternalID: "om_out"}, nil
@@ -384,7 +384,7 @@ func (c *flakyChannel) SendText(context.Context, channel.Outbound) (channel.Rece
 	defer c.mu.Unlock()
 	if c.fails > 0 {
 		c.fails--
-		return channel.Receipt{}, errors.New("temporary failure")
+		return channel.Receipt{}, channel.Retryable(errors.New("temporary failure"))
 	}
 	c.sent++
 	return channel.Receipt{ExternalID: "om_ok"}, nil

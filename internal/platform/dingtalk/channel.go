@@ -141,10 +141,10 @@ func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.R
 	hook, ok := c.hooks[out.ChatID]
 	c.mu.Unlock()
 	if !ok {
-		return channel.Receipt{}, errors.New("没有可用的会话 webhook")
+		return channel.Receipt{}, channel.Definite(errors.New("没有可用的会话 webhook"))
 	}
 	if time.Now().After(hook.expireAt.Add(-30 * time.Second)) {
-		return channel.Receipt{}, errors.New("会话 webhook 已过期")
+		return channel.Receipt{}, channel.Definite(errors.New("会话 webhook 已过期"))
 	}
 	text := out.Text
 	if hook.userName != "" && !strings.HasPrefix(text, "@"+hook.userName) {
@@ -152,7 +152,8 @@ func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.R
 	}
 	replier := chatbot.NewChatbotReplier()
 	if err := replier.SimpleReplyText(ctx, hook.url, []byte(text)); err != nil {
-		return channel.Receipt{}, err
+		// SDK 只返回传输错误，无法确认消息是否已发送。
+		return channel.Receipt{}, channel.Ambiguous(err)
 	}
 	return channel.Receipt{}, nil
 }

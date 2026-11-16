@@ -75,7 +75,7 @@ func (e *APIError) Error() string {
 // @returns 飞书返回的消息 ID
 func (c *Client) SendText(ctx context.Context, chatID, replyTo, text string) (string, error) {
 	if chatID == "" {
-		return "", fmt.Errorf("chat_id 为空")
+		return "", channel.Definite(fmt.Errorf("chat_id 为空"))
 	}
 	content, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {
@@ -122,7 +122,8 @@ func (c *Client) tenantToken(ctx context.Context) (string, error) {
 	}
 	body := map[string]string{"app_id": c.appID, "app_secret": c.appSecret}
 	if err := c.doRaw(ctx, http.MethodPost, "/open-apis/auth/v3/tenant_access_token/internal", body, "", &out); err != nil {
-		return "", err
+		// 获取 token 失败时消息尚未发送，可以安全重试。
+		return "", channel.Retryable(err)
 	}
 	if out.TenantAccessToken == "" {
 		return "", fmt.Errorf("飞书未返回 tenant_access_token")
@@ -154,7 +155,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(raw))
 	if err != nil {
-		return err
+		return channel.Definite(err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	if token != "" {
@@ -163,19 +164,20 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		// 请求可能已经到达飞书，无法确认消息是否发出。
+		return channel.Ambiguous(err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return err
+		return channel.Ambiguous(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{StatusCode: resp.StatusCode, Msg: string(data)}
+		return classifyAPI(resp.StatusCode, 0, string(data))
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("解析飞书响应失败: %w", err)
+			return channel.Ambiguous(fmt.Errorf("解析飞书响应失败: %w", err))
 		}
 	}
 	var head struct {
@@ -183,9 +185,21 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, token
 		Msg  string `json:"msg"`
 	}
 	if err := json.Unmarshal(data, &head); err == nil && head.Code != 0 {
-		return &APIError{StatusCode: resp.StatusCode, Code: head.Code, Msg: head.Msg}
+		return classifyAPI(resp.StatusCode, head.Code, head.Msg)
 	}
 	return nil
+}
+
+// classifyAPI 把飞书业务错误映射为可重试性。
+func classifyAPI(status, code int, msg string) error {
+	apiErr := &APIError{StatusCode: status, Code: code, Msg: msg}
+	if status == http.StatusTooManyRequests || code == 99991400 {
+		return channel.Retryable(apiErr)
+	}
+	if status >= 500 {
+		return channel.Ambiguous(apiErr)
+	}
+	return channel.Definite(apiErr)
 }
 
 // CreateCard 发送一张交互卡片，返回消息 ID。
@@ -220,10 +234,10 @@ func (c *Client) UpdateCard(ctx context.Context, messageID, content string) erro
 // SendArtifact 上传并发送一个文件或图片。
 func (c *Client) SendArtifact(ctx context.Context, out channel.OutboundArtifact) (channel.Receipt, error) {
 	if out.ChatID == "" {
-		return channel.Receipt{}, fmt.Errorf("chat_id 为空")
+		return channel.Receipt{}, channel.Definite(fmt.Errorf("chat_id 为空"))
 	}
 	if out.Artifact.Path == "" {
-		return channel.Receipt{}, fmt.Errorf("产物路径为空")
+		return channel.Receipt{}, channel.Definite(fmt.Errorf("产物路径为空"))
 	}
 	msgType := "file"
 	contentKey := "file_key"
@@ -306,21 +320,21 @@ func (c *Client) uploadMultipart(ctx context.Context, endpoint string, fields ma
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpoint, &body)
 	if err != nil {
-		return "", err
+		return "", channel.Definite(err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", err
+		return "", channel.Ambiguous(err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", err
+		return "", channel.Ambiguous(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", &APIError{StatusCode: resp.StatusCode, Msg: string(raw)}
+		return "", classifyAPI(resp.StatusCode, 0, string(raw))
 	}
 	var parsed struct {
 		Code int            `json:"code"`
@@ -328,10 +342,10 @@ func (c *Client) uploadMultipart(ctx context.Context, endpoint string, fields ma
 		Data map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", fmt.Errorf("解析飞书上传响应失败: %w", err)
+		return "", channel.Ambiguous(fmt.Errorf("解析飞书上传响应失败: %w", err))
 	}
 	if parsed.Code != 0 {
-		return "", &APIError{StatusCode: resp.StatusCode, Code: parsed.Code, Msg: parsed.Msg}
+		return "", classifyAPI(resp.StatusCode, parsed.Code, parsed.Msg)
 	}
 	key, _ := parsed.Data[responseKey].(string)
 	if key == "" {
@@ -450,6 +464,10 @@ func (c *Channel) SendText(ctx context.Context, out channel.Outbound) (channel.R
 		}
 		id, err := c.client.SendText(ctx, out.ChatID, replyTo, chunk)
 		if err != nil {
+			if i > 0 {
+				// 前面的分段已经发出，整段重试会重复，按结果不确定处理。
+				return channel.Receipt{ExternalID: firstID}, channel.Ambiguous(fmt.Errorf("长文本第 %d 段发送失败: %w", i+1, err))
+			}
 			return channel.Receipt{ExternalID: firstID}, err
 		}
 		if i == 0 {

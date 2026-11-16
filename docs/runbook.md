@@ -88,6 +88,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
 | `AGENTHUB_RATE_LIMIT_PER_MIN` | `0` | 每会话每分钟消息上限；0 关闭 |
 | `AGENTHUB_QUEUE_TTL_SECONDS` | `21600` | 排队消息最长等待秒数；0 关闭 |
+| `AGENTHUB_DELIVERY_LEASE_SECONDS` | `120` | 投递领取租约，应大于单次通道调用耗时 |
 | `PI_BIN` | `pi` | pi 可执行文件 |
 | `PI_TOOLS` | `read,bash,grep,find,ls,tool_search` | 暴露给 pi 的工具 |
 | `PI_AGENT_DIR` | `<data>/pi/agent` | 部署配置目录 |
@@ -143,9 +144,11 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 
 ### 4.3 投递与队列
 
-- 发送前把投递标记为 `sending`；进程在请求中途退出时，重启后标记为 `ambiguous`，不自动重发，管理台运行详情可见；
-- 队列中的消息超过 `AGENTHUB_QUEUE_TTL_SECONDS` 后不再执行，并投递“请重新发送”的说明；
-- 发送失败仍按退避重试，最多 3 次；通道不支持文件时不重试。
+- 发送前原子领取投递，写入 `lease_owner` / `lease_token` / `lease_expires_at`，阶段为 `claimed`；
+- 调用通道前推进到 `calling`；只有通道明确未接受（如限流）才退避重试；
+- 网络/超时等结果不明进入 `ambiguous`，不自动重发，管理台运行详情可见；
+- 恢复扫描器回收过期租约：`claimed` 安全重试，`calling` 标歧义；租约由 `AGENTHUB_DELIVERY_LEASE_SECONDS` 控制；
+- 队列中的消息超过 `AGENTHUB_QUEUE_TTL_SECONDS` 后不再执行，并投递“请重新发送”的说明。
 
 ### 4.4 附件
 

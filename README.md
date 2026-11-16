@@ -38,7 +38,7 @@ AgentHub 把入口放进日常 IM，把执行放进可清理的工作区，把�
 - **模型主备**：多供应商、有序候选、超时/429/5xx 自动切换、熔断，图片走 vision 线路；
 - **调度**：跨会话并发上限、公平队列 + 等待老化、每会话限流、cron 定时任务；
 - **可治理**：管理台 Token、CSRF、审计、健康检查、Prometheus 指标、备份恢复脚本；
-- **可靠投递**：发送前落“发送中”，重启后结果不明只标歧义、不盲目重发；排队消息有 TTL。
+- **可靠投递**：领取租约 + `claimed/calling` 阶段；结果不明只标歧义、不盲目重发；排队消息有 TTL。
 
 ## 快速开始
 
@@ -184,6 +184,7 @@ routes:
 | `AGENTHUB_ADMIN_TOKEN` | 空 | 管理台访问令牌 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发上限 |
 | `AGENTHUB_QUEUE_TTL_SECONDS` | `21600` | 排队消息最长等待；0 关闭 |
+| `AGENTHUB_DELIVERY_LEASE_SECONDS` | `120` | 投递租约；应大于单次通道调用耗时 |
 | `AGENTHUB_ARTIFACT_MAX_BYTES` | `20MB` | 单个交付物上限 |
 | `AGENTHUB_ARTIFACT_MAX_COUNT` | `10` | 单次运行交付物数量上限 |
 | `AGENTHUB_ARTIFACT_MAX_TOTAL` | `50MB` | 单次运行交付物总量上限 |

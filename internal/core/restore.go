@@ -65,23 +65,7 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 	}
 
-	// 发送中的记录无法确认通道是否已接受，重启后只标记歧义，不自动重发。
-	if sending, err := e.journal.LoadSendingDeliveries(ctx, 100); err == nil {
-		for _, d := range sending {
-			d.State = "ambiguous"
-			d.Error = "发送过程中服务重启，结果不确定；已停止自动重试，请人工核对"
-			e.mu.Lock()
-			e.deliveries[d.IdempotencyKey] = d
-			e.mu.Unlock()
-			if err := e.journal.SaveDelivery(ctx, d); err != nil {
-				e.log.Warn("mark ambiguous delivery failed", "delivery", d.IdempotencyKey, "error", err)
-			}
-			if e.metrics != nil {
-				e.metrics.Inc("agenthub_deliveries_total", map[string]string{"result": "ambiguous"})
-			}
-			e.log.Warn("delivery marked ambiguous after restart", "run", d.RunID, "trace", d.TraceID)
-		}
-	}
+	e.recoverDeliveries(ctx, false)
 
 	// 启动补偿：上次未送达的结果继续投递。
 	if pending, err := e.journal.LoadPendingDeliveries(ctx, 100); err == nil {

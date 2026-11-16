@@ -91,6 +91,45 @@ type ArtifactSender interface {
 // ErrUnsupported 表示当前通道不支持该发送类型。
 var ErrUnsupported = errors.New("通道不支持该发送类型")
 
+// FailureKind 描述通道失败后是否可以安全重试。
+type FailureKind int
+
+const (
+	// FailureDefinite 表示通道明确拒绝或本地无法发送，重试没有意义。
+	FailureDefinite FailureKind = iota
+	// FailureRetryable 表示通道明确未接受（如限流），可以安全重试。
+	FailureRetryable
+	// FailureAmbiguous 表示请求可能已被接受，但结果未知；禁止自动重试。
+	FailureAmbiguous
+)
+
+// DeliveryError 给发送错误附加可重试性。
+type DeliveryError struct {
+	Kind FailureKind
+	Err  error
+}
+
+func (e *DeliveryError) Error() string { return e.Err.Error() }
+func (e *DeliveryError) Unwrap() error { return e.Err }
+
+// Retryable 标记明确未接受、可安全重试的失败。
+func Retryable(err error) error { return &DeliveryError{Kind: FailureRetryable, Err: err} }
+
+// Ambiguous 标记结果不确定、不可自动重试的失败。
+func Ambiguous(err error) error { return &DeliveryError{Kind: FailureAmbiguous, Err: err} }
+
+// Definite 标记明确失败、不可重试的错误。
+func Definite(err error) error { return &DeliveryError{Kind: FailureDefinite, Err: err} }
+
+// FailureKindOf 返回错误的重试分类；未知错误按明确失败处理。
+func FailureKindOf(err error) FailureKind {
+	var de *DeliveryError
+	if errors.As(err, &de) {
+		return de.Kind
+	}
+	return FailureDefinite
+}
+
 // Channel 是发送侧的最小接口。
 //
 // @remarks 入站由连接层直接交给核心，不经过本接口。
