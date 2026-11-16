@@ -151,6 +151,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 - 调用通道前推进到 `calling`；只有通道明确未接受（如限流）才退避重试；
 - 网络/超时等结果不明进入 `ambiguous`，不自动重发，管理台运行详情可见；
 - 恢复扫描器回收过期租约：`claimed` 安全重试，`calling` 标歧义；租约由 `AGENTHUB_DELIVERY_LEASE_SECONDS` 控制；
+- 管理台运行详情可对 `ambiguous` / `failed` 投递人工重试；人工确认后才会重发；
 - 队列中的消息超过 `AGENTHUB_QUEUE_TTL_SECONDS` 后不再执行，并投递“请重新发送”的说明。
 
 ### 4.4 附件

@@ -145,7 +145,17 @@ export function SessionDetail() {
 }
 
 function RunDetailPanel({ runId, onClose }: { runId: string; onClose: () => void }) {
-  const { data, loading, error } = useAsync<RunDetail>(() => api(`/runs/${encodeURIComponent(runId)}`), [runId]);
+  const { data, loading, error, reload } = useAsync<RunDetail>(() => api(`/runs/${encodeURIComponent(runId)}`), [runId]);
+  const { show } = useToast();
+  const retryDelivery = async (key: string) => {
+    try {
+      await api(`/deliveries/${encodeURIComponent(key)}/retry`, { method: "POST" });
+      show("已重新投递");
+      reload();
+    } catch (err) {
+      show((err as Error).message, true);
+    }
+  };
   return (
     <Card title="运行详情" actions={<Button className="link" onClick={onClose}>关闭</Button>}>
       {loading && !data ? <Skeleton height={120} /> : null}
@@ -191,7 +201,7 @@ function RunDetailPanel({ runId, onClose }: { runId: string; onClose: () => void
             {data.deliveries?.length ? (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>类型</th><th>状态</th><th>尝试</th><th>错误</th></tr></thead>
+                  <thead><tr><th>类型</th><th>状态</th><th>尝试</th><th>错误</th><th /></tr></thead>
                   <tbody>
                     {data.deliveries.map((delivery) => (
                       <tr key={delivery.IdempotencyKey}>
@@ -199,6 +209,9 @@ function RunDetailPanel({ runId, onClose }: { runId: string; onClose: () => void
                         <td><Badge kind={delivery.State === "ambiguous" || delivery.State === "failed" ? "danger" : delivery.State === "sent" ? "ok" : "warn"}>{delivery.State}</Badge></td>
                         <td>{delivery.Attempts}</td>
                         <td className="muted" style={{ maxWidth: 420, wordBreak: "break-all" }}>{delivery.Error || "—"}</td>
+                        <td>{delivery.State === "ambiguous" || delivery.State === "failed" ? (
+                          <Button className="link" onClick={() => retryDelivery(delivery.IdempotencyKey)}>重试</Button>
+                        ) : null}</td>
                       </tr>
                     ))}
                   </tbody>

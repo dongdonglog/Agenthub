@@ -529,6 +529,34 @@ func (j *Journal) LoadPendingDeliveries(ctx context.Context, limit int) ([]*core
 	return out, rows.Err()
 }
 
+// LoadDeliveriesByRun 返回一次运行的全部投递。
+func (j *Journal) LoadDeliveriesByRun(ctx context.Context, runID string) ([]*core.Delivery, error) {
+	rows, err := j.pool.Query(ctx, `SELECT `+deliveryColumns+` FROM delivery_state WHERE run_id = $1 ORDER BY created_at`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*core.Delivery
+	for rows.Next() {
+		d, err := scanDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// LoadDelivery 按幂等键读取一条投递。
+func (j *Journal) LoadDelivery(ctx context.Context, key string) (*core.Delivery, error) {
+	row := j.pool.QueryRow(ctx, `SELECT `+deliveryColumns+` FROM delivery_state WHERE idempotency_key = $1`, key)
+	d, err := scanDelivery(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return d, err
+}
+
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。
 func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, []*core.Run, error) {
 	rows, err := j.pool.Query(ctx, `

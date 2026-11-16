@@ -106,8 +106,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	}
 
 	lastProgress := time.Time{}
-	progress := func(phase string) {
-		e.recordEvent(run.ID, RunEvent{Kind: "phase", Name: phase})
+	updateCard := func(phase string) {
 		if cardHandle == "" || e.presenter == nil || phase == "" {
 			return
 		}
@@ -118,6 +117,10 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		if err := e.presenter.Update(ctx, cardHandle, phase, ""); err != nil {
 			e.log.Debug("presenter update failed", "error", err)
 		}
+	}
+	progress := func(phase string) {
+		e.recordEvent(run.ID, RunEvent{Kind: "phase", Name: phase})
+		updateCard(phase)
 	}
 
 	binding := e.profileFor(ctx, conv, batch[0].Generation)
@@ -137,6 +140,11 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 				detail = err.Error()
 			}
 			e.recordEvent(run.ID, RunEvent{Kind: "tool", Name: name, Detail: detail, DurationMS: dur.Milliseconds()})
+			phase := "工具 · " + name
+			if err != nil {
+				phase = "工具失败 · " + name
+			}
+			updateCard(phase)
 		},
 	}
 	for _, m := range batch {

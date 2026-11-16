@@ -116,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/sessions/apply-config", s.handleSessionsApplyConfig)
 	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/reset", s.handleSessionReset)
 	mux.HandleFunc("POST /admin/api/v1/sessions/reset", s.handleSessionsReset)
+	mux.HandleFunc("POST /admin/api/v1/deliveries/{key}/retry", s.handleDeliveryRetry)
 	mux.HandleFunc("GET /admin/api/v1/queue", s.handleQueue)
 	mux.HandleFunc("GET /admin/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("POST /admin/api/v1/tasks", s.handleTasks)
@@ -813,6 +814,16 @@ func (s *Server) handleSessionsReset(rw http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "sessions.reset", "all", fmt.Sprintf("sessions=%d", count))
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "sessions": count})
+}
+
+func (s *Server) handleDeliveryRetry(rw http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	if err := s.engine.RetryDelivery(r.Context(), key); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.audit(r, "delivery.retry", key, "")
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleRuns(rw http.ResponseWriter, _ *http.Request) {

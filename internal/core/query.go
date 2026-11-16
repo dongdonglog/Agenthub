@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -63,7 +65,6 @@ func (e *Engine) RunByID(runID string) *Run {
 
 func (e *Engine) DeliveriesFor(runID string) []*Delivery {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	var out []*Delivery
 	for _, d := range e.deliveries {
 		if d.RunID == runID {
@@ -71,7 +72,56 @@ func (e *Engine) DeliveriesFor(runID string) []*Delivery {
 			out = append(out, &c)
 		}
 	}
+	journal := e.journal
+	e.mu.Unlock()
+	if len(out) == 0 && journal != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if loaded, err := journal.LoadDeliveriesByRun(ctx, runID); err == nil {
+			out = loaded
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].IdempotencyKey < out[j].IdempotencyKey })
 	return out
+}
+
+// RetryDelivery 手动重发失败或歧义投递；仅用于管理台人工确认。
+func (e *Engine) RetryDelivery(ctx context.Context, key string) error {
+	e.mu.Lock()
+	d := e.deliveries[key]
+	journal := e.journal
+	e.mu.Unlock()
+	if d == nil && journal != nil {
+		loaded, err := journal.LoadDelivery(ctx, key)
+		if err != nil {
+			return err
+		}
+		d = loaded
+	}
+	if d == nil {
+		return errors.New("投递不存在")
+	}
+	if d.State != "ambiguous" && d.State != "failed" {
+		return fmt.Errorf("只有 ambiguous/failed 投递可以手动重试，当前为 %s", d.State)
+	}
+	e.mu.Lock()
+	d.State = "pending"
+	d.Error = ""
+	d.Attempts = 0
+	d.NextAttempt = time.Time{}
+	d.LeaseOwner = ""
+	d.LeaseToken = ""
+	d.LeaseExpiresAt = time.Time{}
+	d.SendPhase = ""
+	e.deliveries[key] = d
+	e.mu.Unlock()
+	if journal != nil {
+		if err := journal.SaveDelivery(ctx, d); err != nil {
+			return err
+		}
+	}
+	go e.send(ctx, d)
+	return nil
 }
 
 func (e *Engine) Messages(conv string) []*Message {

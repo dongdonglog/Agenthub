@@ -179,6 +179,8 @@ type Journal interface {
 	LoadArtifact(ctx context.Context, id string) (*Artifact, error)
 	LoadRecent(ctx context.Context, limit int) ([]*Message, []*Run, error)
 	LoadPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	LoadDeliveriesByRun(ctx context.Context, runID string) ([]*Delivery, error)
+	LoadDelivery(ctx context.Context, key string) (*Delivery, error)
 	ResolveDeliveryConversation(ctx context.Context, externalID string) (conversationID, chatID string, ok bool, err error)
 	SaveIdentity(ctx context.Context, conv, chatName, userName string) error
 	SavePriority(ctx context.Context, conv string, priority int) error
