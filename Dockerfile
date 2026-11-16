@@ -17,6 +17,7 @@ COPY --from=web /internal/admin/static /src/internal/admin/static
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X github.com/moying/agenthub/internal/version.Version=${VERSION}" \
     -o /out/agentd ./cmd/agentd
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/agenthub-ops-mcp ./cmd/agenthub-ops-mcp
 RUN mkdir -p /out/data
 
 # 运行：Node 22 + pi 1.4.0 + 常用命令行工具链
@@ -49,6 +50,7 @@ RUN apt-get update \
     && npm cache clean --force
 WORKDIR /app
 COPY --from=build /out/agentd /app/agentd
+COPY --from=build /out/agenthub-ops-mcp /app/agenthub-ops-mcp
 COPY migrations /app/migrations
 COPY examples/mcp /app/examples/mcp
 COPY --from=build --chown=node:node /out/data /data

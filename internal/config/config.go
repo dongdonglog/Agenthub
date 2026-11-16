@@ -45,23 +45,39 @@ type Config struct {
 	// DeliveryLeaseSeconds 是投递领取租约，应大于单次通道调用可能耗时。
 	DeliveryLeaseSeconds int `yaml:"delivery_lease_seconds"`
 	// OutboundQPS 是跨会话共享的出站消息速率；0 表示不限。
-	OutboundQPS int            `yaml:"outbound_qps"`
-	Webhook     WebhookConfig  `yaml:"webhook"`
-	Feishu      FeishuConfig   `yaml:"feishu"`
-	Dingtalk    DingtalkConfig `yaml:"dingtalk"`
-	Pi          PiConfig       `yaml:"pi"`
-	Agent       AgentConfig    `yaml:"agent"`
-	AIOps       AIOpsConfig    `yaml:"aiops"`
-	Log         LogConfig      `yaml:"log"`
+	OutboundQPS   int                 `yaml:"outbound_qps"`
+	Webhook       WebhookConfig       `yaml:"webhook"`
+	Feishu        FeishuConfig        `yaml:"feishu"`
+	Dingtalk      DingtalkConfig      `yaml:"dingtalk"`
+	Pi            PiConfig            `yaml:"pi"`
+	Agent         AgentConfig         `yaml:"agent"`
+	AIOps         AIOpsConfig         `yaml:"aiops"`
+	Observability ObservabilityConfig `yaml:"observability"`
+	Log           LogConfig           `yaml:"log"`
 }
 
 // AIOpsConfig 是 Prometheus Alertmanager 告警接入配置。
 type AIOpsConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	Token      string `yaml:"token"`
-	ChatID     string `yaml:"chat_id"`
-	RunbookDir string `yaml:"runbook_dir"`
-	MaxAlerts  int    `yaml:"max_alerts"`
+	Enabled        bool   `yaml:"enabled"`
+	Token          string `yaml:"token"`
+	ChatID         string `yaml:"chat_id"`
+	RunbookDir     string `yaml:"runbook_dir"`
+	ServiceCatalog string `yaml:"service_catalog"`
+	MaxAlerts      int    `yaml:"max_alerts"`
+}
+
+// ObservabilityConfig 是只读观测工具连接配置。
+type ObservabilityConfig struct {
+	PrometheusURL      string `yaml:"prometheus_url"`
+	PrometheusToken    string `yaml:"prometheus_token"`
+	PrometheusUser     string `yaml:"prometheus_user"`
+	PrometheusPassword string `yaml:"prometheus_password"`
+	LokiURL            string `yaml:"loki_url"`
+	LokiToken          string `yaml:"loki_token"`
+	LokiUser           string `yaml:"loki_user"`
+	LokiPassword       string `yaml:"loki_password"`
+	// OpsMCPBin 是内置 ops MCP server 路径；为空时自动查找可执行文件旁。
+	OpsMCPBin string `yaml:"ops_mcp_bin"`
 }
 
 // HTTPConfig 是健康检查与指标监听配置。
@@ -217,6 +233,7 @@ func defaults() Config {
 			ArtifactMaxTotal: 50 << 20,
 		},
 		AIOps:                AIOpsConfig{MaxAlerts: 20},
+		Observability:        ObservabilityConfig{},
 		RetentionDays:        90,
 		MaxConcurrentRuns:    4,
 		QueueTTLSeconds:      6 * 3600,
@@ -299,6 +316,16 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.AIOps.Token, "AGENTHUB_AIOPS_TOKEN")
 	setStr(&cfg.AIOps.ChatID, "AGENTHUB_AIOPS_CHAT_ID")
 	setStr(&cfg.AIOps.RunbookDir, "AGENTHUB_AIOPS_RUNBOOK_DIR")
+	setStr(&cfg.AIOps.ServiceCatalog, "AGENTHUB_SERVICE_CATALOG")
+	setStr(&cfg.Observability.PrometheusURL, "AGENTHUB_PROMETHEUS_URL")
+	setStr(&cfg.Observability.PrometheusToken, "AGENTHUB_PROMETHEUS_TOKEN")
+	setStr(&cfg.Observability.PrometheusUser, "AGENTHUB_PROMETHEUS_USER")
+	setStr(&cfg.Observability.PrometheusPassword, "AGENTHUB_PROMETHEUS_PASSWORD")
+	setStr(&cfg.Observability.LokiURL, "AGENTHUB_LOKI_URL")
+	setStr(&cfg.Observability.LokiToken, "AGENTHUB_LOKI_TOKEN")
+	setStr(&cfg.Observability.LokiUser, "AGENTHUB_LOKI_USER")
+	setStr(&cfg.Observability.LokiPassword, "AGENTHUB_LOKI_PASSWORD")
+	setStr(&cfg.Observability.OpsMCPBin, "AGENTHUB_OPS_MCP_BIN")
 	setInt(&cfg.AIOps.MaxAlerts, "AGENTHUB_AIOPS_MAX_ALERTS")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
 	setStr(&cfg.Agent.FallbackModel, "AGENTHUB_AGENT_FALLBACK_MODEL")

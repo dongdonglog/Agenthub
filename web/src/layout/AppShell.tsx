@@ -6,6 +6,7 @@ import { useTheme } from "../theme";
 
 const NAV = [
   { to: "/", label: "运行概览", icon: "📊", end: true },
+  { to: "/workbench", label: "工作台", icon: "🗂️" },
   { to: "/incidents", label: "运维事故", icon: "🚨" },
   { to: "/sessions", label: "在线会话", icon: "💬" },
   { to: "/history", label: "历史会话", icon: "🗂️" },

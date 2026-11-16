@@ -87,7 +87,24 @@ AGENTHUB_AIOPS_MAX_ALERTS=20
 
 首次出现 firing 事故时，把告警摘要 + 公共标签 + 运行手册（`<runbook_dir>/<alertname>.md` 或 `<service>.md`）作为一条消息投给 agent。重复 webhook 只更新时间线，不重复拉起诊断。
 
-### 2.4 运行手册
+### 2.4 服务目录
+
+`services.yaml` 把告警服务映射到 owner/team/runbook/dashboard/repo/namespace：
+
+```yaml
+services:
+  checkout-api:
+    owner: checkout-team
+    team: payments
+    runbook: https://wiki.example.com/runbooks/checkout
+    dashboard: https://grafana.example.com/d/checkout
+    repo: git@gitlab.example.com:payments/checkout.git
+    namespace: prod
+```
+
+诊断 prompt 会自动带上这些上下文。
+
+### 2.5 运行手册
 
 建议按告警名或服务名放 Markdown：
 
@@ -99,17 +116,43 @@ AGENTHUB_AIOPS_MAX_ALERTS=20
 
 内容至少包含：影响面、快速检查、常见根因、回滚/降级、升级路径、禁止动作。
 
+### 2.6 数字员工与工作台
+
+- 默认员工 `sre-oncall`：SRE 值班员；
+- Alertmanager 事故自动映射为统一案件 `case_item`；
+- 案件时间线 `case_event`；
+- 管理台「工作台」：员工、案件、时间线、生成交接、关闭案件、生成复盘草稿；
+- 服务目录 `services.yaml`：owner/team/runbook/dashboard/repo/namespace，自动注入诊断 prompt。
+
+### 2.7 只读观测 MCP
+
+`agenthub-ops-mcp` 随镜像构建，配置 Prometheus/Loki 地址后自动注册给 pi：
+
+- `prom_query`、`prom_query_range`、`prom_alerts`；
+- `loki_query`、`loki_labels`、`loki_label_values`；
+- 只读 GET、超时 20s、响应截断、认证走环境变量。
+
+配置：
+
+```bash
+AGENTHUB_PROMETHEUS_URL=http://prometheus:9090
+AGENTHUB_PROMETHEUS_TOKEN=
+AGENTHUB_LOKI_URL=http://loki:3100
+AGENTHUB_LOKI_TOKEN=
+```
+
+没有配置 URL 时不会注册 ops MCP，避免给模型空工具。
+
 ## 3. 距离生产级 AIOps 还缺什么
 
-当前是**可用 MVP**，不是自动处置平台：
+当前是**可用的 SRE 数字员工 MVP**，不是自动处置平台：
 
-1. **指标/日志/链路查询工具**：需要把 Prometheus/Loki/Tempo/K8s 以只读 MCP 或 CLI 接入；
-2. **服务目录/拓扑/变更**：告警要能自动关联 owner、上下游、最近发布；
-3. **告警相关性**：同一根因的多条告警需要聚类/抑制，而不是每个 group 都开事故；
+1. **Tempo/K8s/Git/Argo 只读工具**：Prometheus/Loki 已接入，链路、K8s、变更还没；
+2. **告警相关性**：同一根因的多条告警仍需聚类/抑制，而不是每个 group 都开案；
+3. **评估闭环**：缺历史事故回放、人工反馈和准确率看板；
 4. **审批与动作执行**：目前只建议动作，不执行写操作；
-5. **评估闭环**：缺历史事故回放、人工反馈和准确率看板；
-6. **多租户/权限**：按团队隔离事故和工具权限；
-7. **HA**：飞书长连接仍是单实例入口。
+5. **多租户/权限**：按团队隔离案件和工具权限；
+6. **HA**：飞书长连接仍是单实例入口。
 
 ## 4. 分阶段路线
 

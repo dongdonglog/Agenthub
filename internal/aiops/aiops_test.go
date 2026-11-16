@@ -57,13 +57,18 @@ func TestIngestCreatesIncidentAndDiagnosisRun(t *testing.T) {
 	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Pool().Exec(ctx, `TRUNCATE incident, alert_event, incident_event`); err != nil {
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE incident, alert_event, incident_event, case_item, case_event, employee`); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ch := &captureChannel{}
 	engine := core.New(agent.Echo{}, ch, logger)
+	caseStore := store.NewCaseStore(db)
+	if _, err := caseStore.EnsureDefaultEmployee(ctx, "oc_ops", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	ingestor := NewIngestor(store.NewIncidentStore(db), engine, Config{ChatID: "oc_ops", MaxAlerts: 10}, logger, nil)
+	ingestor.SetCases(caseStore, "sre-oncall")
 
 	body := `{"version":"4","groupKey":"group-1","status":"firing","commonLabels":{"service":"api","severity":"critical"},"commonAnnotations":{"summary":"错误率过高"},"alerts":[{"status":"firing","labels":{"alertname":"HighErrorRate","service":"api"},"annotations":{"summary":"错误率过高"},"startsAt":"2026-11-16T00:00:00Z","fingerprint":"fp1"}]}`
 	if n, err := ingestor.Handle(ctx, []byte(body)); err != nil || n != 1 {
@@ -93,5 +98,25 @@ func TestIngestCreatesIncidentAndDiagnosisRun(t *testing.T) {
 	items, _ = store.NewIncidentStore(db).ListIncidents(ctx, 10)
 	if len(items) != 1 || items[0].Status != "resolved" {
 		t.Fatalf("resolved = %+v", items)
+	}
+	cases, err := caseStore.ListCases(ctx, 10)
+	if err != nil || len(cases) != 1 || cases[0].Status != "resolved" {
+		t.Fatalf("cases = %+v err=%v", cases, err)
+	}
+}
+
+func TestServiceCatalogLookup(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/services.yaml"
+	if err := os.WriteFile(path, []byte("services:\n  checkout-api:\n    owner: checkout\n    team: payments\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := LoadCatalog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, ok := catalog.Lookup("Checkout-API")
+	if !ok || svc.Owner != "checkout" || svc.Team != "payments" {
+		t.Fatalf("svc = %+v ok=%v", svc, ok)
 	}
 }

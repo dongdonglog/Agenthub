@@ -38,7 +38,8 @@ AgentHub 把入口放进日常 IM，把执行放进可清理的工作区，把�
 - **工具链**：常用 CLI + `edit/write` 原生工具 + MCP 配方；见 [工具链](docs/tools.md)；
 - **模型主备**：多供应商、有序候选、超时/429/5xx 自动切换、熔断，图片走 vision 线路；
 - **调度**：跨会话并发上限、公平队列 + 等待老化、每会话限流、cron 定时任务；
-- **AIOps 入口**：Alertmanager webhook → 事故聚合 → 只读诊断 → 飞书事故群/时间线；见 [AIOps 方案](docs/aiops.md)；
+- **数字员工工作台**：员工、案件、时间线、交接；AIOps 告警自动建案并拉起只读诊断；见 [AIOps 方案](docs/aiops.md)；
+- **只读观测工具**：Prometheus/Loki MCP 自动注册，诊断引用真实指标/日志；
 - **可治理**：管理台 Token、CSRF、审计、在线/批量重置、投递人工重试、健康检查、Prometheus 指标、备份恢复脚本；
 - **可靠投递**：领取租约 + `claimed/calling` 阶段；结果不明只标歧义、不盲目重发；排队消息有 TTL。
 

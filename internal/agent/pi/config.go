@@ -22,6 +22,8 @@ type AgentConfig struct {
 	SystemPrompt string
 	SkillsSrc    string
 	MCPFile      string
+	// BuiltinMCP 是平台内置的 MCP server（例如 ops 观测工具），会与管理台配置合并。
+	BuiltinMCP []MCPServerConfig
 	// RouterURL/RouterToken 非空时使用内置模型路由。
 	RouterURL      string
 	RouterToken    string
@@ -29,6 +31,16 @@ type AgentConfig struct {
 	ContextWindow  int
 	MaxTokens      int
 	SupportsImages bool
+}
+
+// MCPServerConfig 是一个 MCP stdio/http server 配置。
+type MCPServerConfig struct {
+	Name      string   `yaml:"name"`
+	Transport string   `yaml:"transport"`
+	Command   string   `yaml:"command"`
+	Args      []string `yaml:"args"`
+	URL       string   `yaml:"url"`
+	Enabled   bool     `yaml:"enabled"`
 }
 
 type modelsFile struct {
@@ -119,21 +131,18 @@ func PrepareAgentDir(cfg AgentConfig) error {
 		}
 	}
 
+	servers := append([]MCPServerConfig(nil), cfg.BuiltinMCP...)
 	if cfg.MCPFile != "" {
 		if raw, err := os.ReadFile(cfg.MCPFile); err == nil {
-			var servers []struct {
-				Name      string   `yaml:"name"`
-				Transport string   `yaml:"transport"`
-				Command   string   `yaml:"command"`
-				Args      []string `yaml:"args"`
-				URL       string   `yaml:"url"`
-				Enabled   bool     `yaml:"enabled"`
+			var configured []MCPServerConfig
+			if err := yaml.Unmarshal(raw, &configured); err == nil {
+				servers = append(configured, servers...)
 			}
-			if err := yaml.Unmarshal(raw, &servers); err == nil && len(servers) > 0 {
-				if err := writeMCPConfig(filepath.Join(cfg.Dir, "mcp.json"), servers); err != nil {
-					return err
-				}
-			}
+		}
+	}
+	if len(servers) > 0 {
+		if err := writeMCPConfig(filepath.Join(cfg.Dir, "mcp.json"), servers); err != nil {
+			return err
 		}
 	}
 
@@ -187,14 +196,7 @@ type mcpFile struct {
 }
 
 // writeMCPConfig 把管理台的 MCP 配置转换为 pi 的 mcp.json。
-func writeMCPConfig(path string, servers []struct {
-	Name      string   `yaml:"name"`
-	Transport string   `yaml:"transport"`
-	Command   string   `yaml:"command"`
-	Args      []string `yaml:"args"`
-	URL       string   `yaml:"url"`
-	Enabled   bool     `yaml:"enabled"`
-}) error {
+func writeMCPConfig(path string, servers []MCPServerConfig) error {
 	out := mcpFile{MCPServers: map[string]mcpServerFile{}}
 	for _, srv := range servers {
 		if srv.Name == "" || !srv.Enabled {

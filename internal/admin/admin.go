@@ -76,6 +76,8 @@ type Options struct {
 	ReloadAgentConfig func() error
 	// Incidents 是 AIOps 事故存储；为空表示未启用。
 	Incidents *store.IncidentStore
+	// Cases 是统一案件与数字员工存储；为空表示未启用。
+	Cases *store.CaseStore
 }
 
 // Server 提供管理页面与管理 API。
@@ -119,6 +121,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/reset", s.handleSessionReset)
 	mux.HandleFunc("POST /admin/api/v1/sessions/reset", s.handleSessionsReset)
 	mux.HandleFunc("POST /admin/api/v1/deliveries/{key}/retry", s.handleDeliveryRetry)
+	mux.HandleFunc("GET /admin/api/v1/employees", s.handleEmployees)
+	mux.HandleFunc("GET /admin/api/v1/cases", s.handleCases)
+	mux.HandleFunc("GET /admin/api/v1/cases/{id}", s.handleCase)
+	mux.HandleFunc("POST /admin/api/v1/cases/{id}/handoff", s.handleCaseHandoff)
+	mux.HandleFunc("POST /admin/api/v1/cases/{id}/resolve", s.handleCaseResolve)
+	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
 	mux.HandleFunc("GET /admin/api/v1/incidents", s.handleIncidents)
 	mux.HandleFunc("GET /admin/api/v1/incidents/{id}", s.handleIncident)
 	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/ack", s.handleIncidentAck)
@@ -831,6 +839,126 @@ func (s *Server) handleDeliveryRetry(rw http.ResponseWriter, r *http.Request) {
 	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleEmployees(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := s.opts.Cases.ListEmployees(r.Context())
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []*store.Employee{}
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleCases(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := s.opts.Cases.ListCases(r.Context(), 100)
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []*store.Case{}
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	c, err := s.opts.Cases.GetCase(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if c == nil {
+		writeError(rw, http.StatusNotFound, "案件不存在")
+		return
+	}
+	events, err := s.opts.Cases.ListCaseEvents(r.Context(), c.ID, 300)
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events})
+}
+
+func (s *Server) handleCaseHandoff(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	c, err := s.opts.Cases.GetCase(r.Context(), r.PathValue("id"))
+	if err != nil || c == nil {
+		writeError(rw, http.StatusNotFound, "案件不存在")
+		return
+	}
+	events, _ := s.opts.Cases.ListCaseEvents(r.Context(), c.ID, 50)
+	var b strings.Builder
+	fmt.Fprintf(&b, "【交接】%s\n状态: %s / %s\n服务: %s\n摘要: %s\n\n未闭环事项:\n", c.ID, c.Status, c.Severity, c.Service, c.Summary)
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind == "resolved" {
+			continue
+		}
+		fmt.Fprintf(&b, "- %s %s: %s\n", events[i].CreatedAt.Format("15:04"), events[i].Kind, events[i].Text)
+	}
+	text := b.String()
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "handoff", "admin", text, time.Now())
+	s.audit(r, "case.handoff", c.ID, "")
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "summary": text})
+}
+
+func (s *Server) handleCaseResolve(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	id := r.PathValue("id")
+	if err := s.opts.Cases.SetCaseStatus(r.Context(), id, "resolved", time.Now()); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), id, "resolved", "admin", "人工关闭", time.Now())
+	s.audit(r, "case.resolve", id, "")
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleCasePostmortem(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	c, err := s.opts.Cases.GetCase(r.Context(), r.PathValue("id"))
+	if err != nil || c == nil {
+		writeError(rw, http.StatusNotFound, "案件不存在")
+		return
+	}
+	events, _ := s.opts.Cases.ListCaseEvents(r.Context(), c.ID, 100)
+	var b strings.Builder
+	fmt.Fprintf(&b, "# 事故复盘草稿：%s\n\n", c.Title)
+	fmt.Fprintf(&b, "- 案件：%s\n- 服务：%s / %s\n- 级别：%s\n- 状态：%s\n\n", c.ID, c.Service, c.Environment, c.Severity, c.Status)
+	b.WriteString("## 摘要\n\n")
+	b.WriteString(c.Summary + "\n\n## 时间线\n\n")
+	for i := len(events) - 1; i >= 0; i-- {
+		fmt.Fprintf(&b, "- %s [%s] %s: %s\n", events[i].CreatedAt.Format(time.RFC3339), events[i].Kind, events[i].Actor, events[i].Text)
+	}
+	b.WriteString("\n## 根因候选\n\n- 待补充（需结合指标/日志/变更证据）\n\n## 行动项\n\n- [ ] 补充根因\n- [ ] 补充改进项与负责人\n")
+	text := b.String()
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "postmortem", "admin", "生成复盘草稿", time.Now())
+	s.audit(r, "case.postmortem", c.ID, "")
+	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "markdown": text})
+}
+
 func (s *Server) handleIncidents(rw http.ResponseWriter, r *http.Request) {
 	if s.opts.Incidents == nil {
 		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
@@ -840,6 +968,9 @@ func (s *Server) handleIncidents(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if items == nil {
+		items = []*store.Incident{}
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }

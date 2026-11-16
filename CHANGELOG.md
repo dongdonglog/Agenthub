@@ -7,6 +7,7 @@
 
 ### Added
 
+- 数字员工/统一案件/工作台/交接/复盘草稿；服务目录；Prometheus/Loki 只读 MCP 自动注册并接入 pi；
 - AIOps：Alertmanager webhook、事故/告警事件/时间线、只读诊断、管理台事故页；
 - 镜像工具链：git/git-lfs/gh/glab/ssh/jq/yq/rg/fd/tree/sqlite3/zip 等；pi 增加 `edit`/`write` 工具；
 - 投递租约：`claimed/calling` 阶段、租约令牌、过期恢复扫描；结果不明标记 `ambiguous` 并停止自动重试；

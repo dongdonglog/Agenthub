@@ -11,6 +11,7 @@ import { MCPs, MCPDetail } from "./pages/MCPs";
 import { Tasks, TaskDetail } from "./pages/Tasks";
 import { Audits } from "./pages/Audits";
 import { Incidents } from "./pages/Incidents";
+import { Workbench } from "./pages/Workbench";
 import { Settings } from "./pages/Settings";
 
 export function App() {
@@ -22,6 +23,7 @@ export function App() {
             <Routes>
               <Route element={<AppShell />}>
                 <Route path="/" element={<Overview />} />
+                <Route path="/workbench" element={<Workbench />} />
                 <Route path="/incidents" element={<Incidents />} />
                 <Route path="/sessions" element={<Sessions />} />
                 <Route path="/sessions/:id" element={<SessionDetail />} />

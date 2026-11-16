@@ -186,6 +186,24 @@ func TestPrepareAgentDirMCP(t *testing.T) {
 	}
 }
 
+func TestPrepareAgentDirBuiltinMCP(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, "agent")
+	if err := PrepareAgentDir(AgentConfig{
+		Dir: agentDir, BaseURL: "https://gw/v1", APIKey: "k", Model: "m",
+		BuiltinMCP: []MCPServerConfig{{Name: "ops", Transport: "stdio", Command: "/app/agenthub-ops-mcp", Enabled: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(agentDir, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"ops"`) || !strings.Contains(string(raw), `agenthub-ops-mcp`) {
+		t.Fatalf("mcp.json = %s", raw)
+	}
+}
+
 func TestRuntimeRealPiUsage(t *testing.T) {
 	key := os.Getenv("PI_E2E_API_KEY")
 	if key == "" {

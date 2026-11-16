@@ -199,6 +199,21 @@ func run() int {
 	if piWorkspaceDir == "" {
 		piWorkspaceDir = filepath.Join(piRoot, "workspaces")
 	}
+	opsMCPBin := cfg.Observability.OpsMCPBin
+	if opsMCPBin == "" {
+		if exe, err := os.Executable(); err == nil {
+			candidate := filepath.Join(filepath.Dir(exe), "agenthub-ops-mcp")
+			if _, err := os.Stat(candidate); err == nil {
+				opsMCPBin = candidate
+			}
+		}
+	}
+	builtinMCP := []pi.MCPServerConfig{}
+	if opsMCPBin != "" && (cfg.Observability.PrometheusURL != "" || cfg.Observability.LokiURL != "") {
+		builtinMCP = append(builtinMCP, pi.MCPServerConfig{
+			Name: "ops", Transport: "stdio", Command: opsMCPBin, Enabled: true,
+		})
+	}
 	preparePi := func(current modelcfg.Config) error {
 		route, ok := current.Route("main")
 		if !ok {
@@ -232,6 +247,7 @@ func run() int {
 			SystemPrompt:   pi.SystemPrompt(),
 			SkillsSrc:      skillsDir,
 			MCPFile:        filepath.Join(cfg.Storage.Dir, "mcp.yaml"),
+			BuiltinMCP:     builtinMCP,
 		})
 	}
 	if err := preparePi(modelConfig); err != nil {
@@ -307,8 +323,13 @@ func run() int {
 	engine.SetMetrics(metrics)
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 	var incidentStore *store.IncidentStore
+	var caseStore *store.CaseStore
 	if db != nil {
 		incidentStore = store.NewIncidentStore(db)
+		caseStore = store.NewCaseStore(db)
+		if _, err := caseStore.EnsureDefaultEmployee(ctx, cfg.AIOps.ChatID, time.Now()); err != nil {
+			logger.Warn("seed default employee failed", "error", err)
+		}
 	}
 	if cfg.AIOps.Enabled {
 		if incidentStore == nil {
@@ -321,6 +342,16 @@ func run() int {
 			ingestor := aiops.NewIngestor(incidentStore, engine, aiops.Config{
 				ChatID: cfg.AIOps.ChatID, RunbookDir: cfg.AIOps.RunbookDir, MaxAlerts: cfg.AIOps.MaxAlerts,
 			}, logger, metrics)
+			catalogPath := cfg.AIOps.ServiceCatalog
+			if catalogPath == "" {
+				catalogPath = filepath.Join(cfg.Storage.Dir, "services.yaml")
+			}
+			if catalog, err := aiops.LoadCatalog(catalogPath); err == nil {
+				ingestor.SetCatalog(catalog)
+			} else {
+				logger.Warn("load service catalog failed", "error", err, "path", catalogPath)
+			}
+			ingestor.SetCases(caseStore, "sre-oncall")
 			srv.SetAlertHandler(aiops.NewHandler(ingestor, cfg.AIOps.Token))
 			logger.Info("aiops alert webhook enabled", "chat", cfg.AIOps.ChatID, "runbook_dir", cfg.AIOps.RunbookDir)
 		}
@@ -378,6 +409,7 @@ func run() int {
 		PiVersion:    piVersion,
 		Profiles:     profiles,
 		Incidents:    incidentStore,
+		Cases:        caseStore,
 		History: func(ctx context.Context) ([]store.Generation, error) {
 			if journal == nil {
 				return nil, nil

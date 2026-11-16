@@ -94,7 +94,13 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_AIOPS_TOKEN` | 空 | 告警 webhook Bearer token |
 | `AGENTHUB_AIOPS_CHAT_ID` | 空 | 事故诊断投递的飞书群 ID |
 | `AGENTHUB_AIOPS_RUNBOOK_DIR` | `<data>/runbooks` | 告警运行手册目录 |
+| `AGENTHUB_SERVICE_CATALOG` | `<data>/services.yaml` | 服务目录（owner/team/runbook） |
 | `AGENTHUB_AIOPS_MAX_ALERTS` | `20` | 单次 webhook 最多处理告警数 |
+| `AGENTHUB_PROMETHEUS_URL` | 空 | Prometheus 只读地址；配置后启用 ops MCP |
+| `AGENTHUB_PROMETHEUS_TOKEN/USER/PASSWORD` | 空 | Prometheus 认证 |
+| `AGENTHUB_LOKI_URL` | 空 | Loki 只读地址 |
+| `AGENTHUB_LOKI_TOKEN/USER/PASSWORD` | 空 | Loki 认证 |
+| `AGENTHUB_OPS_MCP_BIN` | 同目录 | agenthub-ops-mcp 路径 |
 | `DINGTALK_GROUP_OPEN` | `false` | 钉钉群内免用户白名单；仍受群白名单限制 |
 | `FEISHU_ADMIN_OPEN_IDS` | 空 | 允许引用机器人消息干预他人会话的管理员 open_id |
 | `PI_BIN` | `pi` | pi 可执行文件 |

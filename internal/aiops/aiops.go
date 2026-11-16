@@ -30,12 +30,15 @@ type Config struct {
 
 // Ingestor 把 Alertmanager webhook 转成事故和一次诊断运行。
 type Ingestor struct {
-	store   *store.IncidentStore
-	engine  *core.Engine
-	cfg     Config
-	log     *slog.Logger
-	metrics Metrics
-	now     func() time.Time
+	store    *store.IncidentStore
+	cases    *store.CaseStore
+	catalog  *Catalog
+	employee string
+	engine   *core.Engine
+	cfg      Config
+	log      *slog.Logger
+	metrics  Metrics
+	now      func() time.Time
 }
 
 // NewIngestor 构造告警处理器。
@@ -47,6 +50,15 @@ func NewIngestor(st *store.IncidentStore, engine *core.Engine, cfg Config, log *
 		cfg.MaxAlerts = 20
 	}
 	return &Ingestor{store: st, engine: engine, cfg: cfg, log: log, metrics: metrics, now: time.Now}
+}
+
+// SetCatalog 挂接服务目录。
+func (i *Ingestor) SetCatalog(catalog *Catalog) { i.catalog = catalog }
+
+// SetCases 挂接统一案件存储；employeeID 为负责该告警的员工。
+func (i *Ingestor) SetCases(cases *store.CaseStore, employeeID string) {
+	i.cases = cases
+	i.employee = employeeID
 }
 
 // AlertmanagerPayload 是 Alertmanager webhook v4 的最小字段。
@@ -98,6 +110,7 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 		}
 		if ok && inc != nil {
 			_ = i.store.AddEvent(ctx, inc.ID, "resolved", "alertmanager", "告警组已恢复", now)
+			i.syncCase(ctx, inc, "resolved", now)
 			if i.metrics != nil {
 				i.metrics.Inc("agenthub_incidents_total", map[string]string{"status": "resolved"})
 			}
@@ -137,6 +150,7 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 		_ = i.store.AddEvent(ctx, incident.ID, "alert", "alertmanager", "告警组新增事件", now)
 		return accepted, nil
 	}
+	i.syncCase(ctx, incident, "in_progress", now)
 	if err := i.submitDiagnosis(ctx, incident, payload); err != nil {
 		i.log.Error("submit aiops diagnosis failed", "incident", incident.ID, "error", err)
 		return accepted, err
@@ -145,6 +159,29 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 		i.metrics.Inc("agenthub_incidents_total", map[string]string{"status": "firing"})
 	}
 	return accepted, nil
+}
+
+func (i *Ingestor) syncCase(ctx context.Context, incident *store.Incident, status string, now time.Time) {
+	if i.cases == nil || incident == nil {
+		return
+	}
+	c, created, err := i.cases.EnsureCase(ctx, i.employee, "incident", "alertmanager", incident.ID,
+		incident.Title, incident.Summary, incident.Severity, incident.Service, incident.Environment, incident.ChatID, now)
+	if err != nil {
+		i.log.Warn("sync case failed", "incident", incident.ID, "error", err)
+		return
+	}
+	if status == "resolved" {
+		_ = i.cases.SetCaseStatus(ctx, c.ID, "resolved", now)
+		_ = i.cases.AddCaseEvent(ctx, c.ID, "resolved", "alertmanager", "告警组恢复，案件关闭", now)
+		return
+	}
+	_ = i.cases.SetCaseStatus(ctx, c.ID, "in_progress", now)
+	if created {
+		_ = i.cases.AddCaseEvent(ctx, c.ID, "created", "alertmanager", "由告警创建案件", now)
+	} else {
+		_ = i.cases.AddCaseEvent(ctx, c.ID, "updated", "alertmanager", "案件收到新告警", now)
+	}
 }
 
 func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident, payload AlertmanagerPayload) error {
@@ -183,6 +220,13 @@ func (i *Ingestor) buildPrompt(incident *store.Incident, payload AlertmanagerPay
 		b.WriteString("\n公共标签:\n")
 		for key, value := range payload.CommonLabels {
 			fmt.Fprintf(&b, "- %s=%s\n", key, value)
+		}
+	}
+	if i.catalog != nil {
+		if svc, ok := i.catalog.Lookup(incident.Service); ok {
+			b.WriteString("\n服务目录:\n")
+			fmt.Fprintf(&b, "- owner: %s\n- team: %s\n- namespace: %s\n- repo: %s\n- dashboard: %s\n- runbook: %s\n",
+				svc.Owner, svc.Team, svc.Namespace, svc.Repo, svc.Dashboard, svc.Runbook)
 		}
 	}
 	if runbook := i.runbookFor(incident, payload); runbook != "" {
