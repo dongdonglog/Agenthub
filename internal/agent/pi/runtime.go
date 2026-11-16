@@ -52,7 +52,7 @@ func New(cfg Config) *Runtime {
 		cfg.Bin = "pi"
 	}
 	if cfg.Tools == "" {
-		cfg.Tools = "read,bash,grep,find,ls,tool_search"
+		cfg.Tools = "read,bash,edit,write,grep,find,ls,tool_search"
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 10 * time.Minute

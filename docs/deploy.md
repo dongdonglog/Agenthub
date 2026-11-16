@@ -76,6 +76,7 @@ DINGTALK_BOT_NAME=助手                      # 可选，去掉 @前缀
 ## pi 运行时
 
 - 镜像内固定 `@earendil-works/pi-coding-agent@1.4.0`，`docker exec <app> pi --version` 可核对；
+- 常用 CLI（git/gh/glab/ssh/jq/yq/rg/fd/sqlite3 等）见 [工具链](tools.md)；
 - 部署配置在 `/data/pi/agent`（models.json / SYSTEM.md / skills / mcp.json），首次启动自动生成；
 - 会话文件在 `/data/pi/sessions`，工作区在 `/data/pi/workspaces`；
 - `PI_ISOLATION`：容器默认 `process_group`；Linux 主机具备用户命名空间时可设 `namespace` 使用 unshare；

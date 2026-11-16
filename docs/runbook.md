@@ -93,7 +93,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `DINGTALK_GROUP_OPEN` | `false` | 钉钉群内免用户白名单；仍受群白名单限制 |
 | `FEISHU_ADMIN_OPEN_IDS` | 空 | 允许引用机器人消息干预他人会话的管理员 open_id |
 | `PI_BIN` | `pi` | pi 可执行文件 |
-| `PI_TOOLS` | `read,bash,grep,find,ls,tool_search` | 暴露给 pi 的工具 |
+| `PI_TOOLS` | `read,bash,edit,write,grep,find,ls,tool_search` | 暴露给 pi 的工具 |
 | `PI_AGENT_DIR` | `<data>/pi/agent` | 部署配置目录 |
 | `PI_SESSION_DIR` | `<data>/pi/sessions` | 会话文件目录 |
 | `PI_WORKSPACE_DIR` | `<data>/pi/workspaces` | 会话工作区 |

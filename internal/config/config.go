@@ -219,7 +219,7 @@ func defaults() Config {
 		},
 		Pi: PiConfig{
 			Bin:            "pi",
-			Tools:          "read,bash,grep,find,ls,tool_search",
+			Tools:          "read,bash,edit,write,grep,find,ls,tool_search",
 			Isolation:      "namespace",
 			TimeoutSeconds: 600,
 		},
