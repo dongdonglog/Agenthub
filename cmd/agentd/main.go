@@ -32,6 +32,7 @@ import (
 	"github.com/moying/agenthub/internal/platform/feishu"
 	"github.com/moying/agenthub/internal/scheduler"
 	"github.com/moying/agenthub/internal/store"
+	"github.com/moying/agenthub/internal/support"
 	"github.com/moying/agenthub/internal/version"
 )
 
@@ -365,6 +366,22 @@ func run() int {
 		caseStore = store.NewCaseStore(db)
 		if _, err := caseStore.EnsureDefaultEmployee(ctx, cfg.AIOps.ChatID, time.Now()); err != nil {
 			logger.Warn("seed default employee failed", "error", err)
+		}
+		if _, err := caseStore.EnsureEmployee(ctx, store.Employee{
+			ID: "tech-support", Name: "技术支持", Title: "技术支持数字同事", Role: "tech-support",
+			Mission: "接住支持工单，查知识/历史工单，给出可执行步骤，无法解决时升级人工。",
+			Status:  "active", ChatID: cfg.Support.ChatID,
+		}, time.Now()); err != nil {
+			logger.Warn("seed support employee failed", "error", err)
+		}
+	}
+	if cfg.Support.Enabled {
+		if caseStore == nil {
+			logger.Error("support enabled without database; webhook disabled")
+		} else {
+			ingestor := support.New(caseStore, engine, support.Config{ChatID: cfg.Support.ChatID, EmployeeID: cfg.Support.EmployeeID}, logger)
+			srv.SetTicketHandler(support.NewHandler(ingestor, cfg.Support.Token))
+			logger.Info("support ticket webhook enabled", "chat", cfg.Support.ChatID)
 		}
 	}
 	if cfg.AIOps.Enabled {

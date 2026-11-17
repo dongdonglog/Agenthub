@@ -52,6 +52,7 @@ type Config struct {
 	Pi            PiConfig            `yaml:"pi"`
 	Agent         AgentConfig         `yaml:"agent"`
 	AIOps         AIOpsConfig         `yaml:"aiops"`
+	Support       SupportConfig       `yaml:"support"`
 	Observability ObservabilityConfig `yaml:"observability"`
 	Log           LogConfig           `yaml:"log"`
 }
@@ -64,6 +65,14 @@ type AIOpsConfig struct {
 	RunbookDir     string `yaml:"runbook_dir"`
 	ServiceCatalog string `yaml:"service_catalog"`
 	MaxAlerts      int    `yaml:"max_alerts"`
+}
+
+// SupportConfig 是技术支持工单入口配置。
+type SupportConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Token      string `yaml:"token"`
+	ChatID     string `yaml:"chat_id"`
+	EmployeeID string `yaml:"employee_id"`
 }
 
 // ObservabilityConfig 是只读观测工具连接配置。
@@ -239,6 +248,7 @@ func defaults() Config {
 			ArtifactMaxTotal: 50 << 20,
 		},
 		AIOps:                AIOpsConfig{MaxAlerts: 20},
+		Support:              SupportConfig{EmployeeID: "tech-support"},
 		Observability:        ObservabilityConfig{},
 		RetentionDays:        90,
 		MaxConcurrentRuns:    4,
@@ -319,6 +329,10 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
 	setBool(&cfg.AIOps.Enabled, "AGENTHUB_AIOPS_ENABLED")
+	setBool(&cfg.Support.Enabled, "AGENTHUB_SUPPORT_ENABLED")
+	setStr(&cfg.Support.Token, "AGENTHUB_SUPPORT_TOKEN")
+	setStr(&cfg.Support.ChatID, "AGENTHUB_SUPPORT_CHAT_ID")
+	setStr(&cfg.Support.EmployeeID, "AGENTHUB_SUPPORT_EMPLOYEE_ID")
 	setStr(&cfg.AIOps.Token, "AGENTHUB_AIOPS_TOKEN")
 	setStr(&cfg.AIOps.ChatID, "AGENTHUB_AIOPS_CHAT_ID")
 	setStr(&cfg.AIOps.RunbookDir, "AGENTHUB_AIOPS_RUNBOOK_DIR")
@@ -448,6 +462,17 @@ func (c *Config) Validate() error {
 		}
 		if c.AIOps.ChatID == "" {
 			return errors.New("aiops.chat_id 不能为空")
+		}
+	}
+	if c.Support.EmployeeID == "" {
+		c.Support.EmployeeID = "tech-support"
+	}
+	if c.Support.Enabled {
+		if c.Support.Token == "" {
+			return errors.New("support.token 不能为空")
+		}
+		if c.Support.ChatID == "" {
+			return errors.New("support.chat_id 不能为空")
 		}
 	}
 	return nil

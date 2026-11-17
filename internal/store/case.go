@@ -88,15 +88,27 @@ func NewCaseStore(db *DB) *CaseStore {
 
 // EnsureDefaultEmployee 创建默认 SRE 值班员工（幂等）。
 func (s *CaseStore) EnsureDefaultEmployee(ctx context.Context, chatID string, now time.Time) (*Employee, error) {
+	return s.EnsureEmployee(ctx, Employee{
+		ID: "sre-oncall", Name: "SRE 值班员", Title: "SRE 数字同事", Role: "sre-oncall",
+		Mission: "接住运维告警，查证据、做诊断、写时间线、完成交接，不执行未经审批的写操作。",
+		Status:  "active", ChatID: chatID,
+	}, now)
+}
+
+// EnsureEmployee 创建或更新一个数字员工。
+func (s *CaseStore) EnsureEmployee(ctx context.Context, e Employee, now time.Time) (*Employee, error) {
+	if e.Status == "" {
+		e.Status = "active"
+	}
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO employee (id, name, title, role, mission, status, chat_id, created_at, updated_at)
-		VALUES ('sre-oncall', 'SRE 值班员', 'SRE 数字同事', 'sre-oncall',
-			'接住运维告警，查证据、做诊断、写时间线、完成交接，不执行未经审批的写操作。', 'active', $1, $2, $2)
-		ON CONFLICT (id) DO UPDATE SET chat_id = EXCLUDED.chat_id, updated_at = EXCLUDED.updated_at`,
-		chatID, now); err != nil {
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
+		ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, title=EXCLUDED.title, role=EXCLUDED.role,
+			mission=EXCLUDED.mission, status=EXCLUDED.status, chat_id=EXCLUDED.chat_id, updated_at=EXCLUDED.updated_at`,
+		e.ID, e.Name, e.Title, e.Role, e.Mission, e.Status, e.ChatID, now); err != nil {
 		return nil, err
 	}
-	return s.GetEmployee(ctx, "sre-oncall")
+	return s.GetEmployee(ctx, e.ID)
 }
 
 // ListEmployees 返回数字员工。

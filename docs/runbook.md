@@ -95,6 +95,10 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_AIOPS_CHAT_ID` | 空 | 事故诊断投递的飞书群 ID |
 | `AGENTHUB_AIOPS_RUNBOOK_DIR` | `<data>/runbooks` | 告警运行手册目录 |
 | `AGENTHUB_SERVICE_CATALOG` | `<data>/services.yaml` | 服务目录（owner/team/runbook） |
+| `AGENTHUB_SUPPORT_ENABLED` | `false` | 启用技术支持工单入口 |
+| `AGENTHUB_SUPPORT_TOKEN` | 空 | 工单 webhook token |
+| `AGENTHUB_SUPPORT_CHAT_ID` | 空 | 支持案件投递群 |
+| `AGENTHUB_SUPPORT_EMPLOYEE_ID` | `tech-support` | 支持数字员工 ID |
 | `AGENTHUB_AIOPS_MAX_ALERTS` | `20` | 单次 webhook 最多处理告警数 |
 | `AGENTHUB_PROMETHEUS_URL` | 空 | Prometheus 只读地址；配置后启用 ops MCP |
 | `AGENTHUB_PROMETHEUS_TOKEN/USER/PASSWORD` | 空 | Prometheus 认证 |

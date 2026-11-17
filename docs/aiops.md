@@ -161,6 +161,19 @@ AGENTHUB_LOKI_TOKEN=
 
 没有配置 URL 时不会注册 ops MCP，避免给模型空工具。
 
+### 2.9 技术支持工单入口
+
+`POST /api/v1/tickets`：
+
+```json
+{"id":"T-1","title":"无法登录","description":"登录 500","requester":"ou_1","priority":"P1","service":"account","environment":"prod"}
+```
+
+- 鉴权：`Authorization: Bearer <AGENTHUB_SUPPORT_TOKEN>`；
+- 自动创建 `tech-support` 员工案件；
+- 只读拉起技术支持诊断；
+- 管理台工作台统一查看。
+
 ## 3. 距离生产级 AIOps 还缺什么
 
 当前是**可用的 SRE 数字员工 MVP**，不是自动处置平台：
