@@ -100,6 +100,10 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_PROMETHEUS_TOKEN/USER/PASSWORD` | 空 | Prometheus 认证 |
 | `AGENTHUB_LOKI_URL` | 空 | Loki 只读地址 |
 | `AGENTHUB_LOKI_TOKEN/USER/PASSWORD` | 空 | Loki 认证 |
+| `AGENTHUB_TEMPO_URL` | 空 | Tempo 只读地址 |
+| `AGENTHUB_TEMPO_TOKEN/USER/PASSWORD` | 空 | Tempo 认证 |
+| `AGENTHUB_K8S_ENABLED` | `false` | 启用 K8s 只读工具 |
+| `AGENTHUB_KUBECTL_BIN` | `kubectl` | kubectl 路径 |
 | `AGENTHUB_OPS_MCP_BIN` | 同目录 | agenthub-ops-mcp 路径 |
 | `AGENTHUB_PI_PACKAGE` | 同目录/当前目录 | pi-package 资源目录 |
 | `DINGTALK_GROUP_OPEN` | `false` | 钉钉群内免用户白名单；仍受群白名单限制 |

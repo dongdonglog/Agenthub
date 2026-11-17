@@ -22,6 +22,28 @@ const destructive = [
 ];
 
 export default function (pi: ExtensionAPI) {
+  let evidenceNudged = false;
+
+  pi.on("agent_before_settle", async (event, ctx) => {
+    if (process.env.AGENTHUB_READONLY !== "1" || evidenceNudged) return undefined;
+    const branch = ctx.sessionManager.getBranch();
+    const usedQuery = branch.some((entry) => {
+      if (entry.type !== "message" || entry.message.role !== "toolResult") return false;
+      return /^(prom_|loki_|tempo_|k8s_|ops_investigate|mcp__ops)/.test(entry.message.toolName ?? "");
+    });
+    if (usedQuery) return undefined;
+    evidenceNudged = true;
+    return {
+      entries: [{
+        type: "custom_message" as const,
+        customType: "agenthub-evidence-gate",
+        content: "只读诊断还没有调用任何观测工具。请先查 Prometheus/Loki/Tempo/K8s 证据；如果数据源不可用，明确说明缺少哪个数据源，再给出带“未验证”标记的结论。",
+        display: true,
+      }],
+      continue: true,
+    };
+  });
+
   pi.on("tool_call", async (event) => {
     if (process.env.AGENTHUB_READONLY !== "1") return undefined;
     if (event.toolName === "edit" || event.toolName === "write") {

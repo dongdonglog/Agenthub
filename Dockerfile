@@ -29,7 +29,7 @@ RUN apt-get update \
         ca-certificates bash procps python3 python3-pip \
         ripgrep fd-find git git-lfs gh \
         curl wget jq yq less tree file unzip zip sqlite3 xxd \
-        openssh-client vim-tiny \
+        openssh-client vim-tiny kubernetes-client \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     && if ! command -v glab >/dev/null 2>&1; then \
          arch="$(dpkg --print-architecture)"; \

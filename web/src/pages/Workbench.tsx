@@ -8,7 +8,9 @@ type CaseItem = {
   severity: string; status: string; service: string; environment: string; created_at: string; updated_at: string;
 };
 type Event = { id: number; kind: string; actor: string; text: string; created_at: string };
-type Detail = { case: CaseItem; events: Event[] };
+type Feedback = { id: number; verdict: string; note: string; actor: string; created_at: string };
+type Stats = { employee_id: string; cases: number; resolved: number; useful: number; not_useful: number; avg_resolve_ms: number };
+type Detail = { case: CaseItem; events: Event[]; feedback?: Feedback[] };
 
 const statusKind = (status: string) => status === "resolved" || status === "closed" ? "ok" : status === "waiting_human" ? "warn" : "danger";
 
@@ -21,11 +23,18 @@ export function Workbench() {
     [selected],
   );
   const { show } = useToast();
+  const [stats, setStats] = useState<Stats | null>(null);
+  const loadStats = async (employeeID: string) => {
+    try { setStats(await api<Stats>(`/employees/${encodeURIComponent(employeeID)}/stats`)); } catch { setStats(null); }
+  };
 
-  const act = async (path: string, success: string) => {
+  const act = async (path: string, success: string, body?: Record<string, string>) => {
     if (!selected) return;
     try {
-      const result = await api<{ summary?: string }>(`/cases/${encodeURIComponent(selected)}/${path}`, { method: "POST" });
+      const result = await api<{ summary?: string }>(`/cases/${encodeURIComponent(selected)}/${path}`, {
+        method: "POST",
+        body: body ? JSON.stringify(body) : undefined,
+      });
       show(result.summary ?? success);
       cases.reload();
       detail.reload();
@@ -45,11 +54,13 @@ export function Workbench() {
               <div className="cell-main">{employee.name} <Badge kind="ok">{employee.status}</Badge></div>
               <div className="cell-sub">{employee.title} · {employee.role}</div>
               <div className="muted small" style={{ marginTop: 4 }}>{employee.mission}</div>
+              <Button className="link" onClick={() => loadStats(employee.id)}>绩效</Button>
             </div>
             <span className="mono muted small">{employee.chat_id || "未绑定群"}</span>
           </div>
         ))}
         {employees.data && employees.data.items.length === 0 ? <div className="muted">还没有数字员工</div> : null}
+        {stats ? <div className="muted small">案件 {stats.cases} · 已解决 {stats.resolved} · 有用 {stats.useful} · 无用 {stats.not_useful} · 平均解决 {Math.round(stats.avg_resolve_ms / 1000)}s</div> : null}
       </Card>
 
       <Card title="案件">
@@ -90,8 +101,10 @@ export function Workbench() {
                 <span className="mono muted small">{detail.data.case.id}</span>
               </div>
               <div>{detail.data.case.summary || detail.data.case.title}</div>
-              <div className="row" style={{ gap: 8 }}>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 <Button onClick={() => act("handoff", "交接摘要已生成")}>生成交接</Button>
+                <Button onClick={() => act("feedback", "已标记有用", { verdict: "useful" })}>有用</Button>
+                <Button onClick={() => act("feedback", "已标记无用", { verdict: "not_useful" })}>无用</Button>
                 <Button onClick={async () => {
                   if (!selected) return;
                   try {

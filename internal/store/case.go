@@ -55,6 +55,26 @@ type CaseEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// CaseFeedback 是值班人对案件的反馈。
+type CaseFeedback struct {
+	ID        int64     `json:"id"`
+	CaseID    string    `json:"case_id"`
+	Actor     string    `json:"actor"`
+	Verdict   string    `json:"verdict"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// EmployeeStats 是员工绩效快照。
+type EmployeeStats struct {
+	EmployeeID   string  `json:"employee_id"`
+	Cases        int     `json:"cases"`
+	Resolved     int     `json:"resolved"`
+	Useful       int     `json:"useful"`
+	NotUseful    int     `json:"not_useful"`
+	AvgResolveMS float64 `json:"avg_resolve_ms"`
+}
+
 // CaseStore 读写数字员工与案件。
 type CaseStore struct{ pool *pgxpool.Pool }
 
@@ -151,6 +171,47 @@ func (s *CaseStore) SetCaseStatus(ctx context.Context, id, status string, now ti
 func (s *CaseStore) AddCaseEvent(ctx context.Context, caseID, kind, actor, text string, now time.Time) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO case_event (case_id, kind, actor, text, created_at) VALUES ($1,$2,$3,$4,$5)`, caseID, kind, actor, text, now)
 	return err
+}
+
+// AddFeedback 记录案件反馈。
+func (s *CaseStore) AddFeedback(ctx context.Context, caseID, actor, verdict, note string, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO case_feedback (case_id, actor, verdict, note, created_at) VALUES ($1,$2,$3,$4,$5)`, caseID, actor, verdict, note, now)
+	return err
+}
+
+// ListFeedback 返回案件反馈。
+func (s *CaseStore) ListFeedback(ctx context.Context, caseID string, limit int) ([]CaseFeedback, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, case_id, actor, verdict, note, created_at FROM case_feedback WHERE case_id=$1 ORDER BY id DESC LIMIT $2`, caseID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CaseFeedback
+	for rows.Next() {
+		var item CaseFeedback
+		if err := rows.Scan(&item.ID, &item.CaseID, &item.Actor, &item.Verdict, &item.Note, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// EmployeeStats 汇总员工案件与反馈。
+func (s *CaseStore) EmployeeStats(ctx context.Context, employeeID string) (EmployeeStats, error) {
+	stats := EmployeeStats{EmployeeID: employeeID}
+	if err := s.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status IN ('resolved','closed')) FROM case_item WHERE employee_id=$1`, employeeID).Scan(&stats.Cases, &stats.Resolved); err != nil {
+		return stats, err
+	}
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE f.verdict='useful'), count(*) FILTER (WHERE f.verdict='not_useful')
+		FROM case_feedback f JOIN case_item c ON c.id=f.case_id WHERE c.employee_id=$1`, employeeID).Scan(&stats.Useful, &stats.NotUseful); err != nil {
+		return stats, err
+	}
+	_ = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (resolved_at-created_at))*1000),0)
+		FROM case_item WHERE employee_id=$1 AND resolved_at IS NOT NULL`, employeeID).Scan(&stats.AvgResolveMS)
+	return stats, nil
 }
 
 // ListCases 返回最近案件。

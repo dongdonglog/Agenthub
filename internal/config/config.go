@@ -76,6 +76,12 @@ type ObservabilityConfig struct {
 	LokiToken          string `yaml:"loki_token"`
 	LokiUser           string `yaml:"loki_user"`
 	LokiPassword       string `yaml:"loki_password"`
+	TempoURL           string `yaml:"tempo_url"`
+	TempoToken         string `yaml:"tempo_token"`
+	TempoUser          string `yaml:"tempo_user"`
+	TempoPassword      string `yaml:"tempo_password"`
+	K8sEnabled         bool   `yaml:"k8s_enabled"`
+	KubectlBin         string `yaml:"kubectl_bin"`
 	// OpsMCPBin 是内置 ops MCP server 路径；为空时自动查找可执行文件旁。
 	OpsMCPBin string `yaml:"ops_mcp_bin"`
 }
@@ -325,6 +331,12 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Observability.LokiToken, "AGENTHUB_LOKI_TOKEN")
 	setStr(&cfg.Observability.LokiUser, "AGENTHUB_LOKI_USER")
 	setStr(&cfg.Observability.LokiPassword, "AGENTHUB_LOKI_PASSWORD")
+	setStr(&cfg.Observability.TempoURL, "AGENTHUB_TEMPO_URL")
+	setStr(&cfg.Observability.TempoToken, "AGENTHUB_TEMPO_TOKEN")
+	setStr(&cfg.Observability.TempoUser, "AGENTHUB_TEMPO_USER")
+	setStr(&cfg.Observability.TempoPassword, "AGENTHUB_TEMPO_PASSWORD")
+	setBool(&cfg.Observability.K8sEnabled, "AGENTHUB_K8S_ENABLED")
+	setStr(&cfg.Observability.KubectlBin, "AGENTHUB_KUBECTL_BIN")
 	setStr(&cfg.Observability.OpsMCPBin, "AGENTHUB_OPS_MCP_BIN")
 	setInt(&cfg.AIOps.MaxAlerts, "AGENTHUB_AIOPS_MAX_ALERTS")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")

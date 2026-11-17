@@ -127,6 +127,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/handoff", s.handleCaseHandoff)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/resolve", s.handleCaseResolve)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
+	mux.HandleFunc("POST /admin/api/v1/cases/{id}/feedback", s.handleCaseFeedback)
+	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
 	mux.HandleFunc("GET /admin/api/v1/incidents", s.handleIncidents)
 	mux.HandleFunc("GET /admin/api/v1/incidents/{id}", s.handleIncident)
 	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/ack", s.handleIncidentAck)
@@ -890,7 +892,8 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events})
+	feedback, _ := s.opts.Cases.ListFeedback(r.Context(), c.ID, 50)
+	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback})
 }
 
 func (s *Server) handleCaseHandoff(rw http.ResponseWriter, r *http.Request) {
@@ -957,6 +960,50 @@ func (s *Server) handleCasePostmortem(rw http.ResponseWriter, r *http.Request) {
 	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "postmortem", "admin", "生成复盘草稿", time.Now())
 	s.audit(r, "case.postmortem", c.ID, "")
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "markdown": text})
+}
+
+func (s *Server) handleCaseFeedback(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	var body struct {
+		Verdict string `json:"verdict"`
+		Note    string `json:"note"`
+		Actor   string `json:"actor"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Verdict != "useful" && body.Verdict != "not_useful" {
+		writeError(rw, http.StatusBadRequest, "verdict 必须是 useful 或 not_useful")
+		return
+	}
+	if body.Actor == "" {
+		body.Actor = "admin"
+	}
+	id := r.PathValue("id")
+	if err := s.opts.Cases.AddFeedback(r.Context(), id, body.Actor, body.Verdict, body.Note, time.Now()); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), id, "feedback", body.Actor, body.Verdict+" "+body.Note, time.Now())
+	s.audit(r, "case.feedback", id, body.Verdict)
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleEmployeeStats(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	stats, err := s.opts.Cases.EmployeeStats(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, stats)
 }
 
 func (s *Server) handleIncidents(rw http.ResponseWriter, r *http.Request) {

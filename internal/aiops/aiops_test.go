@@ -103,6 +103,13 @@ func TestIngestCreatesIncidentAndDiagnosisRun(t *testing.T) {
 	if err != nil || len(cases) != 1 || cases[0].Status != "resolved" {
 		t.Fatalf("cases = %+v err=%v", cases, err)
 	}
+	if err := caseStore.AddFeedback(ctx, cases[0].ID, "oncall", "useful", "根因正确", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := caseStore.EmployeeStats(ctx, "sre-oncall")
+	if err != nil || stats.Cases != 1 || stats.Resolved != 1 || stats.Useful != 1 {
+		t.Fatalf("stats = %+v err=%v", stats, err)
+	}
 }
 
 func TestServiceCatalogLookup(t *testing.T) {

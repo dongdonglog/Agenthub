@@ -209,7 +209,10 @@ func run() int {
 		}
 	}
 	builtinMCP := []pi.MCPServerConfig{}
-	if opsMCPBin != "" && (cfg.Observability.PrometheusURL != "" || cfg.Observability.LokiURL != "") {
+	if cfg.Observability.K8sEnabled && os.Getenv("AGENTHUB_KUBECTL_BIN") == "" {
+		_ = os.Setenv("AGENTHUB_KUBECTL_BIN", "kubectl")
+	}
+	if opsMCPBin != "" && (cfg.Observability.PrometheusURL != "" || cfg.Observability.LokiURL != "" || cfg.Observability.TempoURL != "" || cfg.Observability.K8sEnabled) {
 		builtinMCP = append(builtinMCP, pi.MCPServerConfig{
 			Name: "ops", Transport: "stdio", Command: opsMCPBin, Enabled: true,
 		})

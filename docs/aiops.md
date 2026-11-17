@@ -122,6 +122,7 @@ services:
 - Alertmanager 事故自动映射为统一案件 `case_item`；
 - 案件时间线 `case_event`；
 - 管理台「工作台」：员工、案件、时间线、生成交接、关闭案件、生成复盘草稿；
+- 案件反馈：有用/无用；员工绩效：案件数、解决数、采纳数、平均解决时长；
 - 服务目录 `services.yaml`：owner/team/runbook/dashboard/repo/namespace，自动注入诊断 prompt。
 
 ### 2.7 pi 原生能力和只读约束
@@ -132,6 +133,7 @@ services:
 - `extensions/agenthub-redact.ts`：`tool_result` 脱敏 token/密码/私钥并截断超大输出；
 - `extensions/agenthub-compaction.ts`：事故上下文压缩保留影响面、证据、假设和未闭环动作；
 - `extensions/agenthub-subagent.ts`：`ops_investigate` 并行启动 metrics/logs/changes/traces 只读调查，每个子调查独立上下文；
+- guard 的 `agent_before_settle`：只读诊断未调用任何观测工具时，最多追加一次“先查证据”的提示，避免纯猜测结论。
 - `skills/sre-oncall`：SRE 诊断流程；
 - `skills/tech-support`：技术支持流程；
 - `prompts/diagnose.md`、`handoff.md`、`postmortem.md`。
@@ -144,6 +146,8 @@ AIOps 诊断消息带 `ReadOnly=true`，pi 进程收到 `AGENTHUB_READONLY=1`，
 
 - `prom_query`、`prom_query_range`、`prom_alerts`；
 - `loki_query`、`loki_labels`、`loki_label_values`；
+- `tempo_search`、`tempo_trace`；
+- `k8s_get`、`k8s_logs`、`k8s_events`（资源/命名空间 allowlist，只读 kubectl）；
 - 只读 GET、超时 20s、响应截断、认证走环境变量。
 
 配置：

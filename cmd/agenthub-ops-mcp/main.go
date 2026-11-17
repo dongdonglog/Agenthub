@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -46,21 +48,27 @@ type tool struct {
 }
 
 type server struct {
-	promURL  string
-	promAuth string
-	lokiURL  string
-	lokiAuth string
-	http     *http.Client
-	tools    []tool
+	promURL   string
+	promAuth  string
+	lokiURL   string
+	lokiAuth  string
+	tempoURL  string
+	tempoAuth string
+	kubectl   string
+	http      *http.Client
+	tools     []tool
 }
 
 func main() {
 	s := &server{
-		promURL:  strings.TrimRight(os.Getenv("AGENTHUB_PROMETHEUS_URL"), "/"),
-		promAuth: authHeader("AGENTHUB_PROMETHEUS_TOKEN", "AGENTHUB_PROMETHEUS_USER", "AGENTHUB_PROMETHEUS_PASSWORD"),
-		lokiURL:  strings.TrimRight(os.Getenv("AGENTHUB_LOKI_URL"), "/"),
-		lokiAuth: authHeader("AGENTHUB_LOKI_TOKEN", "AGENTHUB_LOKI_USER", "AGENTHUB_LOKI_PASSWORD"),
-		http:     &http.Client{Timeout: 20 * time.Second},
+		promURL:   strings.TrimRight(os.Getenv("AGENTHUB_PROMETHEUS_URL"), "/"),
+		promAuth:  authHeader("AGENTHUB_PROMETHEUS_TOKEN", "AGENTHUB_PROMETHEUS_USER", "AGENTHUB_PROMETHEUS_PASSWORD"),
+		lokiURL:   strings.TrimRight(os.Getenv("AGENTHUB_LOKI_URL"), "/"),
+		lokiAuth:  authHeader("AGENTHUB_LOKI_TOKEN", "AGENTHUB_LOKI_USER", "AGENTHUB_LOKI_PASSWORD"),
+		tempoURL:  strings.TrimRight(os.Getenv("AGENTHUB_TEMPO_URL"), "/"),
+		tempoAuth: authHeader("AGENTHUB_TEMPO_TOKEN", "AGENTHUB_TEMPO_USER", "AGENTHUB_TEMPO_PASSWORD"),
+		kubectl:   os.Getenv("AGENTHUB_KUBECTL_BIN"),
+		http:      &http.Client{Timeout: 20 * time.Second},
 	}
 	s.tools = s.listTools()
 	log.SetOutput(os.Stderr)
@@ -191,6 +199,46 @@ func (s *server) runTool(name string, args map[string]any) (string, error) {
 			return "", errors.New("未配置 AGENTHUB_LOKI_URL")
 		}
 		return s.fetch(s.lokiURL+"/loki/api/v1/labels", nil, s.lokiAuth)
+	case "tempo_search":
+		if s.tempoURL == "" {
+			return "", errors.New("未配置 AGENTHUB_TEMPO_URL")
+		}
+		params := url.Values{"tags": {stringArg(args, "tags")}}
+		for _, key := range []string{"start", "end"} {
+			if value := stringArg(args, key); value != "" {
+				params.Set(key, value)
+			}
+		}
+		limit := intArg(args, "limit")
+		if limit <= 0 || limit > 100 {
+			limit = 20
+		}
+		params.Set("limit", strconv.Itoa(limit))
+		return s.fetch(s.tempoURL+"/api/search", params, s.tempoAuth)
+	case "tempo_trace":
+		if s.tempoURL == "" {
+			return "", errors.New("未配置 AGENTHUB_TEMPO_URL")
+		}
+		id := stringArg(args, "trace_id")
+		if id == "" {
+			return "", errors.New("trace_id 不能为空")
+		}
+		return s.fetch(s.tempoURL+"/api/traces/"+url.PathEscape(id), nil, s.tempoAuth)
+	case "k8s_get":
+		if s.kubectl == "" {
+			return "", errors.New("未启用 K8s 只读工具")
+		}
+		return s.kubectlGet(args)
+	case "k8s_logs":
+		if s.kubectl == "" {
+			return "", errors.New("未启用 K8s 只读工具")
+		}
+		return s.kubectlLogs(args)
+	case "k8s_events":
+		if s.kubectl == "" {
+			return "", errors.New("未启用 K8s 只读工具")
+		}
+		return s.kubectlEvents(args)
 	case "loki_label_values":
 		if s.lokiURL == "" {
 			return "", errors.New("未配置 AGENTHUB_LOKI_URL")
@@ -258,6 +306,37 @@ func (s *server) listTools() []tool {
 			tool{Name: "prom_alerts", Description: "只读读取 Prometheus 当前告警。", InputSchema: object(nil, nil)},
 		)
 	}
+	if s.tempoURL != "" {
+		out = append(out,
+			tool{Name: "tempo_search", Description: "只读 Tempo trace 搜索，按 tags/时间窗返回 trace 列表。", InputSchema: object(map[string]any{
+				"tags":  map[string]any{"type": "string", "description": "TraceQL/标签过滤，例如 service.name=api"},
+				"start": map[string]any{"type": "string"},
+				"end":   map[string]any{"type": "string"},
+				"limit": map[string]any{"type": "integer"},
+			}, []string{"tags"})},
+			tool{Name: "tempo_trace", Description: "只读读取单个 Tempo trace。", InputSchema: object(map[string]any{
+				"trace_id": map[string]any{"type": "string"},
+			}, []string{"trace_id"})},
+		)
+	}
+	if s.kubectl != "" {
+		out = append(out,
+			tool{Name: "k8s_get", Description: "只读 kubectl get（资源/命名空间 allowlist，JSON 输出）。", InputSchema: object(map[string]any{
+				"resource":  map[string]any{"type": "string"},
+				"namespace": map[string]any{"type": "string"},
+				"name":      map[string]any{"type": "string"},
+			}, []string{"resource"})},
+			tool{Name: "k8s_logs", Description: "只读 kubectl logs（最多 1000 行）。", InputSchema: object(map[string]any{
+				"pod":       map[string]any{"type": "string"},
+				"namespace": map[string]any{"type": "string"},
+				"container": map[string]any{"type": "string"},
+				"tail":      map[string]any{"type": "integer"},
+			}, []string{"pod"})},
+			tool{Name: "k8s_events", Description: "只读读取命名空间事件。", InputSchema: object(map[string]any{
+				"namespace": map[string]any{"type": "string"},
+			}, nil)},
+		)
+	}
 	if s.lokiURL != "" {
 		out = append(out,
 			tool{Name: "loki_query", Description: "只读 LogQL 区间查询；返回 Loki 原始 JSON，limit 最大 500。", InputSchema: object(map[string]any{
@@ -274,6 +353,78 @@ func (s *server) listTools() []tool {
 		)
 	}
 	return out
+}
+
+var k8sResourceRE = regexp.MustCompile(`^(pods|deployments|statefulsets|daemonsets|services|endpoints|events|nodes|namespaces|replicasets|jobs|cronjobs|configmaps|ingresses|horizontalpodautoscalers)$`)
+var k8sNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,252}$`)
+
+func (s *server) kubectlGet(args map[string]any) (string, error) {
+	resource := stringArg(args, "resource")
+	if !k8sResourceRE.MatchString(resource) {
+		return "", errors.New("resource 不在只读 allowlist")
+	}
+	cmd := []string{"get", resource}
+	if name := stringArg(args, "name"); name != "" {
+		if !k8sNameRE.MatchString(name) {
+			return "", errors.New("name 非法")
+		}
+		cmd = append(cmd, name)
+	}
+	if ns := stringArg(args, "namespace"); ns != "" {
+		if !k8sNameRE.MatchString(ns) {
+			return "", errors.New("namespace 非法")
+		}
+		cmd = append(cmd, "-n", ns)
+	}
+	cmd = append(cmd, "-o", "json", "--request-timeout=15s")
+	return runKubectl(s.kubectl, cmd)
+}
+
+func (s *server) kubectlLogs(args map[string]any) (string, error) {
+	pod := stringArg(args, "pod")
+	if !k8sNameRE.MatchString(pod) {
+		return "", errors.New("pod 非法")
+	}
+	cmd := []string{"logs", pod}
+	if ns := stringArg(args, "namespace"); ns != "" {
+		if !k8sNameRE.MatchString(ns) {
+			return "", errors.New("namespace 非法")
+		}
+		cmd = append(cmd, "-n", ns)
+	}
+	if container := stringArg(args, "container"); container != "" {
+		if !k8sNameRE.MatchString(container) {
+			return "", errors.New("container 非法")
+		}
+		cmd = append(cmd, "-c", container)
+	}
+	tail := intArg(args, "tail")
+	if tail <= 0 || tail > 1000 {
+		tail = 200
+	}
+	cmd = append(cmd, "--tail", strconv.Itoa(tail), "--timestamps=false")
+	return runKubectl(s.kubectl, cmd)
+}
+
+func (s *server) kubectlEvents(args map[string]any) (string, error) {
+	cmd := []string{"get", "events", "-o", "json", "--request-timeout=15s"}
+	if ns := stringArg(args, "namespace"); ns != "" {
+		if !k8sNameRE.MatchString(ns) {
+			return "", errors.New("namespace 非法")
+		}
+		cmd = append(cmd, "-n", ns)
+	}
+	return runKubectl(s.kubectl, cmd)
+}
+
+func runKubectl(bin string, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("kubectl 失败: %v: %s", err, truncate(string(out), 500))
+	}
+	return truncate(string(out), 16000), nil
 }
 
 func object(properties map[string]any, required []string) map[string]any {
