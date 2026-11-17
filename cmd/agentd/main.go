@@ -639,6 +639,9 @@ func run() int {
 	if db != nil {
 		go purgeLoop(ctx, db, filepath.Join(cfg.Storage.Dir, "artifacts"), cfg.RetentionDays, logger)
 	}
+	if caseStore != nil {
+		go slaLoop(ctx, caseStore, logger)
+	}
 	go workspaceCleanupLoop(workCtx, piWorkspaceDir, piSessionDir, cfg.RetentionDays, logger)
 
 	<-ctx.Done()
@@ -660,6 +663,24 @@ func run() int {
 	}
 	logger.Info("stopped")
 	return 0
+}
+
+func slaLoop(ctx context.Context, cases *store.CaseStore, logger *slog.Logger) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		ids, err := cases.EscalateOverdue(ctx, time.Now(), 50)
+		if err != nil && ctx.Err() == nil {
+			logger.Warn("sla escalation failed", "error", err)
+		} else if len(ids) > 0 {
+			logger.Warn("cases escalated past SLA", "count", len(ids), "cases", ids)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func migrationsDir() string {

@@ -124,6 +124,7 @@ services:
 - 管理台「工作台」：员工、案件、时间线、生成交接、关闭案件、生成复盘草稿；
 - 案件反馈：有用/无用 + CSAT 1–5；员工绩效：案件数、解决数、采纳数、平均解决时长、CSAT；
 - SLA：critical/P1 1h、high/P2 4h、medium/P3 24h、其他 72h；工作台显示截止时间和超时标记；
+- 每分钟扫描超时未结案件，自动升级为 `waiting_human` 并写时间线；
 - 员工级工具授权：`employee.allowed_tools`，SRE/技术支持默认只授予 `read/bash/grep/find/ls/tool_search`；`PUT /admin/api/v1/employees/{id}` 可调整；
 - 服务目录 `services.yaml`：owner/team/runbook/dashboard/repo/namespace，自动注入诊断 prompt。
 

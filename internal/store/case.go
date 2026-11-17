@@ -341,6 +341,42 @@ func (s *CaseStore) GetCase(ctx context.Context, id string) (*Case, error) {
 	return c, err
 }
 
+// EscalateOverdue 把超过 SLA 的未结案件升级为等待人工，返回升级的案件 ID。
+func (s *CaseStore) EscalateOverdue(ctx context.Context, now time.Time, limit int) ([]string, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		WITH overdue AS (
+			SELECT id FROM case_item
+			WHERE sla_due_at IS NOT NULL AND sla_due_at < $1
+			  AND status NOT IN ('waiting_human','resolved','closed')
+			ORDER BY sla_due_at LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE case_item SET status='waiting_human', updated_at=$1
+		WHERE id IN (SELECT id FROM overdue) RETURNING id`, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		_ = s.AddCaseEvent(ctx, id, "sla", "system", "超过 SLA，升级等待人工", now)
+	}
+	return ids, nil
+}
+
 // ListCaseEvents 返回时间线。
 func (s *CaseStore) ListCaseEvents(ctx context.Context, caseID string, limit int) ([]CaseEvent, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, case_id, kind, actor, text, created_at FROM case_event WHERE case_id=$1 ORDER BY id DESC LIMIT $2`, caseID, limit)
