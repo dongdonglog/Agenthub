@@ -83,6 +83,8 @@ type Options struct {
 	ExecuteAction func(ctx context.Context, approval *store.Approval) (string, error)
 	// NotifyApproval 把审批卡片发到案件群；为空表示不发送。
 	NotifyApproval func(ctx context.Context, approval *store.Approval) error
+	// CreateTicket 手动创建支持工单。
+	CreateTicket func(ctx context.Context, title, summary, service, environment, priority, requester string) (string, error)
 }
 
 // Server 提供管理页面与管理 API。
@@ -133,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/resolve", s.handleCaseResolve)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/feedback", s.handleCaseFeedback)
+	mux.HandleFunc("POST /admin/api/v1/cases", s.handleCaseCreate)
 	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
 	mux.HandleFunc("PUT /admin/api/v1/employees/{id}", s.handleEmployeeUpdate)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/approvals", s.handleCaseApprovalCreate)
@@ -996,6 +999,32 @@ func (s *Server) handleCasePostmortem(rw http.ResponseWriter, r *http.Request) {
 	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "postmortem", "admin", "生成复盘草稿", time.Now())
 	s.audit(r, "case.postmortem", c.ID, "")
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "markdown": text})
+}
+
+func (s *Server) handleCaseCreate(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.CreateTicket == nil {
+		writeError(rw, http.StatusServiceUnavailable, "工单入口未启用")
+		return
+	}
+	var body struct {
+		Title       string `json:"title"`
+		Summary     string `json:"summary"`
+		Service     string `json:"service"`
+		Environment string `json:"environment"`
+		Priority    string `json:"priority"`
+		Requester   string `json:"requester"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	id, err := s.opts.CreateTicket(r.Context(), body.Title, body.Summary, body.Service, body.Environment, body.Priority, body.Requester)
+	if err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.audit(r, "case.create", id, body.Title)
+	writeJSON(rw, http.StatusOK, map[string]string{"id": id})
 }
 
 func (s *Server) handleCaseFeedback(rw http.ResponseWriter, r *http.Request) {

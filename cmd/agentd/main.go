@@ -404,12 +404,14 @@ func run() int {
 			logger.Info("knowledge ingested", "docs", count, "dir", knowledgeDir)
 		}
 	}
+	var supportIngestor *support.Ingestor
 	if cfg.Support.Enabled {
 		if caseStore == nil {
 			logger.Error("support enabled without database; webhook disabled")
 		} else {
 			ingestor := support.New(caseStore, engine, support.Config{ChatID: cfg.Support.ChatID, EmployeeID: cfg.Support.EmployeeID, Team: cfg.Support.Team}, logger)
 			ingestor.SetKnowledge(knowledgeStore)
+			supportIngestor = ingestor
 			srv.SetTicketHandler(support.NewHandler(ingestor, cfg.Support.Token))
 			logger.Info("support ticket webhook enabled", "chat", cfg.Support.ChatID)
 		}
@@ -553,6 +555,27 @@ func run() int {
 		Incidents:     incidentStore,
 		Cases:         caseStore,
 		ExecuteAction: actionExecutor,
+		CreateTicket: func(ctx context.Context, title, summary, service, environment, priority, requester string) (string, error) {
+			if supportIngestor == nil {
+				return "", fmt.Errorf("support disabled")
+			}
+			return supportIngestor.Create(ctx, support.Ticket{
+				ID: fmt.Sprintf("manual-%d", time.Now().UnixNano()), Title: title, Description: summary,
+				Service: service, Environment: environment, Priority: priority, Requester: requester, Source: "manual",
+			})
+		},
+		NotifyApproval: func(ctx context.Context, approval *store.Approval) error {
+			fc, ok := ch.(*feishu.Channel)
+			if !ok || caseStore == nil {
+				return nil
+			}
+			c, err := caseStore.GetCase(ctx, approval.CaseID)
+			if err != nil || c == nil || c.ChatID == "" {
+				return err
+			}
+			_, err = fc.Client().CreateCard(ctx, c.ChatID, "", feishu.ApprovalCard(approval))
+			return err
+		},
 		History: func(ctx context.Context) ([]store.Generation, error) {
 			if journal == nil {
 				return nil, nil

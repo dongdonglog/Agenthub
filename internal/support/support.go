@@ -57,12 +57,17 @@ func New(st *store.CaseStore, engine *core.Engine, cfg Config, log *slog.Logger)
 // SetKnowledge 挂接知识库。
 func (i *Ingestor) SetKnowledge(k *store.KnowledgeStore) { i.knowledge = k }
 
-// Handle 处理一份工单；返回案件 ID。
+// Handle 解析并处理一份工单；返回案件 ID。
 func (i *Ingestor) Handle(ctx context.Context, raw []byte) (string, error) {
 	var ticket Ticket
 	if err := json.Unmarshal(raw, &ticket); err != nil {
 		return "", fmt.Errorf("解析工单失败: %w", err)
 	}
+	return i.Create(ctx, ticket)
+}
+
+// Create 创建工单案件并拉起技术支持运行。
+func (i *Ingestor) Create(ctx context.Context, ticket Ticket) (string, error) {
 	ticket.ID = strings.TrimSpace(ticket.ID)
 	ticket.Title = strings.TrimSpace(ticket.Title)
 	if ticket.ID == "" || ticket.Title == "" {

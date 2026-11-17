@@ -37,6 +37,23 @@ export function Workbench() {
     } catch (err) { show((err as Error).message, true); }
   };
 
+  const createTicket = async () => {
+    const title = window.prompt("工单标题");
+    if (!title) return;
+    const summary = window.prompt("问题描述") ?? "";
+    const service = window.prompt("服务") ?? "";
+    const priority = window.prompt("优先级 P1/P2/P3", "P3") ?? "P3";
+    try {
+      const result = await api<{ id: string }>("/cases", {
+        method: "POST",
+        body: JSON.stringify({ title, summary, service, priority, requester: "admin" }),
+      });
+      show("工单已创建");
+      cases.reload();
+      setSelected(result.id);
+    } catch (err) { show((err as Error).message, true); }
+  };
+
   const requestScale = async () => {
     if (!selected) return;
     const namespace = window.prompt("namespace");
@@ -101,7 +118,7 @@ export function Workbench() {
         {stats ? <div className="muted small">案件 {stats.cases} · 已解决 {stats.resolved} · 有用 {stats.useful} · 无用 {stats.not_useful} · 平均解决 {Math.round(stats.avg_resolve_ms / 1000)}s · CSAT {stats.csat ? stats.csat.toFixed(1) : "—"}</div> : null}
       </Card>
 
-      <Card title="案件">
+      <Card title="案件" actions={<div className="row" style={{ gap: 8 }}><Button className="link" onClick={createTicket}>新建工单</Button><Button className="link" onClick={() => cases.reload()}>刷新</Button></div>}>
         {cases.loading && !cases.data ? <Skeleton height={220} /> : null}
         {cases.error ? <div className="danger-text">{cases.error}</div> : null}
         {cases.data && cases.data.items.length === 0 ? <div className="empty"><div className="empty-icon">🗂️</div><div>还没有案件</div></div> : null}
