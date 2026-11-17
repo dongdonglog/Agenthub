@@ -640,7 +640,18 @@ func run() int {
 		go purgeLoop(ctx, db, filepath.Join(cfg.Storage.Dir, "artifacts"), cfg.RetentionDays, logger)
 	}
 	if caseStore != nil {
-		go slaLoop(ctx, caseStore, logger)
+		var notifySLA func(context.Context, string, string, string)
+		if fc, ok := ch.(*feishu.Channel); ok {
+			notifySLA = func(ctx context.Context, chatID, caseID, text string) {
+				if chatID == "" {
+					return
+				}
+				if _, err := fc.Client().SendText(ctx, chatID, "", text); err != nil {
+					logger.Warn("sla notify failed", "case", caseID, "error", err)
+				}
+			}
+		}
+		go slaLoop(ctx, caseStore, notifySLA, logger)
 	}
 	go workspaceCleanupLoop(workCtx, piWorkspaceDir, piSessionDir, cfg.RetentionDays, logger)
 
@@ -665,7 +676,7 @@ func run() int {
 	return 0
 }
 
-func slaLoop(ctx context.Context, cases *store.CaseStore, logger *slog.Logger) {
+func slaLoop(ctx context.Context, cases *store.CaseStore, notify func(context.Context, string, string, string), logger *slog.Logger) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -674,6 +685,15 @@ func slaLoop(ctx context.Context, cases *store.CaseStore, logger *slog.Logger) {
 			logger.Warn("sla escalation failed", "error", err)
 		} else if len(ids) > 0 {
 			logger.Warn("cases escalated past SLA", "count", len(ids), "cases", ids)
+			if notify != nil {
+				for _, id := range ids {
+					c, _ := cases.GetCase(ctx, id)
+					if c == nil {
+						continue
+					}
+					notify(ctx, c.ChatID, c.ID, "SLA 超时，案件已升级为等待人工："+c.Title+"（"+c.ID+"）")
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
