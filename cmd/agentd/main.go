@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
+	"github.com/moying/agenthub/internal/ha"
 	"github.com/moying/agenthub/internal/httpapi"
 	"github.com/moying/agenthub/internal/knowledge"
 	"github.com/moying/agenthub/internal/modelcfg"
@@ -126,7 +128,19 @@ func run() int {
 
 	var ch channel.Channel
 	var dt *dingtalk.Channel
-	feishuStatus := func() string { return "off" }
+	var statusMu sync.RWMutex
+	statusFn := func() string { return "off" }
+	feishuStatus := func() string {
+		statusMu.RLock()
+		fn := statusFn
+		statusMu.RUnlock()
+		return fn()
+	}
+	setFeishuStatus := func(fn func() string) {
+		statusMu.Lock()
+		statusFn = fn
+		statusMu.Unlock()
+	}
 	if cfg.Channel == config.ChannelFeishu {
 		client := feishu.NewClient(cfg.Feishu.AppID, cfg.Feishu.AppSecret)
 		ch = feishu.NewChannel(client)
@@ -437,7 +451,28 @@ func run() int {
 	}
 
 	if cfg.Channel == config.ChannelFeishu {
-		feishuStatus = startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal)
+		if cfg.HA.Enabled && db != nil {
+			leader := ha.New(db, logger)
+			go func() {
+				err := leader.Run(ctx,
+					func(leaderCtx context.Context) {
+						setFeishuStatus(func() string { return "connecting" })
+						fn := startFeishu(leaderCtx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal)
+						setFeishuStatus(fn)
+					},
+					func() { setFeishuStatus(func() string { return "standby" }) },
+				)
+				if err != nil && ctx.Err() == nil {
+					logger.Error("ha leader stopped", "error", err)
+					stop()
+				}
+			}()
+		} else {
+			if cfg.HA.Enabled {
+				logger.Warn("ha enabled without database; starting feishu connector locally")
+			}
+			setFeishuStatus(startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal))
+		}
 	}
 	if dt != nil {
 		go func() {
@@ -446,7 +481,7 @@ func run() int {
 				stop()
 			}
 		}()
-		feishuStatus = func() string { return "connected" }
+		setFeishuStatus(func() string { return "connected" })
 		srv.RegisterCheck("dingtalk", func() (bool, string) { return true, "stream" })
 	}
 

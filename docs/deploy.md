@@ -38,6 +38,20 @@ echo 'POSTGRES_PASSWORD=强密码' >> .env
 docker compose up -d --build
 ```
 
+## 多实例单活
+
+同一 PostgreSQL 上启动多个 AgentHub 时，设置：
+
+```bash
+AGENTHUB_HA_ENABLED=true
+```
+
+- 实例通过 PostgreSQL advisory lock 竞争 leader；
+- 只有 leader 启动飞书长连接，standby 保持 HTTP/管理面待命；
+- leader 退出或数据库连接丢失后，standby 在数秒内接管；
+- 投递租约在数据库层保证不会因接管重复发送；
+- 目前只覆盖飞书入口；钉钉多实例仍需单独验证。
+
 ## 管理员干预
 
 配置 `FEISHU_ADMIN_OPEN_IDS` 后，管理员在群里引用机器人消息并发送内容，消息会进入被引用运行所在的会话，而不是管理员自己的会话；需同时满足群白名单。用于客服/运维接手他人会话。

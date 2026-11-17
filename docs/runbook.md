@@ -86,6 +86,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_MIGRATIONS_DIR` | `migrations` | 迁移目录；启动时按文件名顺序应用 |
 | `AGENTHUB_RETENTION_DAYS` | `90` | 历史数据保留天数；0 关闭清理 |
 | `AGENTHUB_MAX_CONCURRENT_RUNS` | `4` | 跨会话并发运行上限 |
+| `AGENTHUB_HA_ENABLED` | `false` | 多实例单活入口（PostgreSQL advisory lock） |
 | `AGENTHUB_RATE_LIMIT_PER_MIN` | `0` | 每会话每分钟消息上限；0 关闭 |
 | `AGENTHUB_QUEUE_TTL_SECONDS` | `21600` | 排队消息最长等待秒数；0 关闭 |
 | `AGENTHUB_DELIVERY_LEASE_SECONDS` | `120` | 投递领取租约，应大于单次通道调用耗时 |

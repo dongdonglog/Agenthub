@@ -52,6 +52,7 @@ type Config struct {
 	Pi            PiConfig            `yaml:"pi"`
 	Agent         AgentConfig         `yaml:"agent"`
 	AIOps         AIOpsConfig         `yaml:"aiops"`
+	HA            HAConfig            `yaml:"ha"`
 	Support       SupportConfig       `yaml:"support"`
 	Observability ObservabilityConfig `yaml:"observability"`
 	Log           LogConfig           `yaml:"log"`
@@ -65,6 +66,11 @@ type AIOpsConfig struct {
 	RunbookDir     string `yaml:"runbook_dir"`
 	ServiceCatalog string `yaml:"service_catalog"`
 	MaxAlerts      int    `yaml:"max_alerts"`
+}
+
+// HAConfig 是单活入口选主配置。
+type HAConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // SupportConfig 是技术支持工单入口配置。
@@ -254,6 +260,7 @@ func defaults() Config {
 			ArtifactMaxTotal: 50 << 20,
 		},
 		AIOps:                AIOpsConfig{MaxAlerts: 20},
+		HA:                   HAConfig{},
 		Support:              SupportConfig{EmployeeID: "tech-support"},
 		Observability:        ObservabilityConfig{},
 		RetentionDays:        90,
@@ -337,6 +344,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Agent.Provider, "AGENTHUB_AGENT_PROVIDER")
 	setStr(&cfg.Agent.Model, "AGENTHUB_AGENT_MODEL")
 	setBool(&cfg.AIOps.Enabled, "AGENTHUB_AIOPS_ENABLED")
+	setBool(&cfg.HA.Enabled, "AGENTHUB_HA_ENABLED")
 	setBool(&cfg.Support.Enabled, "AGENTHUB_SUPPORT_ENABLED")
 	setStr(&cfg.Support.Token, "AGENTHUB_SUPPORT_TOKEN")
 	setStr(&cfg.Support.ChatID, "AGENTHUB_SUPPORT_CHAT_ID")
