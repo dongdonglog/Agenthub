@@ -67,6 +67,7 @@ type AIOpsConfig struct {
 	RunbookDir     string            `yaml:"runbook_dir"`
 	ServiceCatalog string            `yaml:"service_catalog"`
 	MaxAlerts      int               `yaml:"max_alerts"`
+	RatePerMin     int               `yaml:"rate_per_min"`
 	SourceTokens   map[string]string `yaml:"source_tokens"`
 }
 
@@ -262,7 +263,7 @@ func defaults() Config {
 			ArtifactMaxCount: 10,
 			ArtifactMaxTotal: 50 << 20,
 		},
-		AIOps:                AIOpsConfig{MaxAlerts: 20},
+		AIOps:                AIOpsConfig{MaxAlerts: 20, RatePerMin: 120},
 		HA:                   HAConfig{},
 		Support:              SupportConfig{EmployeeID: "tech-support"},
 		Observability:        ObservabilityConfig{},
@@ -375,6 +376,7 @@ func applyEnv(cfg *Config) {
 	setList(&cfg.Observability.K8sNamespaces, "AGENTHUB_K8S_NAMESPACES")
 	setStr(&cfg.Observability.OpsMCPBin, "AGENTHUB_OPS_MCP_BIN")
 	setInt(&cfg.AIOps.MaxAlerts, "AGENTHUB_AIOPS_MAX_ALERTS")
+	setInt(&cfg.AIOps.RatePerMin, "AGENTHUB_AIOPS_RATE_PER_MIN")
 	if raw := os.Getenv("AGENTHUB_AIOPS_SOURCE_TOKENS"); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg.AIOps.SourceTokens)
 	}
@@ -480,6 +482,9 @@ func (c *Config) Validate() error {
 	}
 	if c.AIOps.MaxAlerts <= 0 {
 		c.AIOps.MaxAlerts = 20
+	}
+	if c.AIOps.RatePerMin <= 0 {
+		c.AIOps.RatePerMin = 120
 	}
 	if c.AIOps.Enabled {
 		if c.AIOps.Token == "" {

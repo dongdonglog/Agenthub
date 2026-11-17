@@ -439,6 +439,7 @@ func run() int {
 			ingestor.SetCases(caseStore, "sre-oncall")
 			alertHandler := aiops.NewHandler(ingestor, cfg.AIOps.Token)
 			alertHandler.SetSourceTokens(cfg.AIOps.SourceTokens)
+			alertHandler.SetRateLimit(cfg.AIOps.RatePerMin)
 			srv.SetAlertHandler(alertHandler)
 			logger.Info("aiops alert webhook enabled", "chat", cfg.AIOps.ChatID, "runbook_dir", cfg.AIOps.RunbookDir)
 		}

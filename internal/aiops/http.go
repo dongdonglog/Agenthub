@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/moying/agenthub/internal/alerting"
 )
@@ -16,6 +18,14 @@ type Handler struct {
 	token        string
 	sourceTokens map[string]string
 	registry     *alerting.Registry
+	rateMu       sync.Mutex
+	rates        map[string]*rateBucket
+	ratePerMin   int
+}
+
+type rateBucket struct {
+	tokens float64
+	last   time.Time
 }
 
 // NewHandler 构造 webhook handler，默认支持 Alertmanager/Grafana/通用/PagerDuty。
@@ -32,6 +42,9 @@ func (h *Handler) SetRegistry(registry *alerting.Registry) { h.registry = regist
 
 // SetSourceTokens 设置按来源区分的 token；未配置的来源回退到全局 token。
 func (h *Handler) SetSourceTokens(tokens map[string]string) { h.sourceTokens = tokens }
+
+// SetRateLimit 设置每个来源每分钟的告警上限；<=0 表示不限制。
+func (h *Handler) SetRateLimit(perMin int) { h.ratePerMin = perMin }
 
 // ServeHTTP 处理一次告警 webhook。
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
@@ -63,6 +76,10 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if h.ratePerMin > 0 && !h.allow(source) {
+		http.Error(rw, "rate limited", http.StatusTooManyRequests)
+		return
+	}
 	if h.registry == nil {
 		h.registry = alerting.NewRegistry(alerting.Alertmanager{}, alerting.Grafana{}, alerting.Generic{}, alerting.PagerDuty{})
 	}
@@ -84,4 +101,28 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(rw).Encode(map[string]any{"status": "accepted", "alerts": count, "source": source})
+}
+
+func (h *Handler) allow(source string) bool {
+	h.rateMu.Lock()
+	defer h.rateMu.Unlock()
+	if h.rates == nil {
+		h.rates = map[string]*rateBucket{}
+	}
+	now := time.Now()
+	b := h.rates[source]
+	if b == nil {
+		b = &rateBucket{tokens: float64(h.ratePerMin), last: now}
+		h.rates[source] = b
+	}
+	b.tokens += now.Sub(b.last).Seconds() * float64(h.ratePerMin) / 60
+	if b.tokens > float64(h.ratePerMin) {
+		b.tokens = float64(h.ratePerMin)
+	}
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
 }

@@ -39,6 +39,16 @@ type upstream struct {
 func (s *server) startUpstreams() {
 	raw := strings.TrimSpace(os.Getenv("AGENTHUB_MCP_UPSTREAMS"))
 	if raw == "" {
+		if path := os.Getenv("AGENTHUB_MCP_UPSTREAMS_FILE"); path != "" {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				log.Printf("mcp gateway: read upstream file failed: %v", err)
+				return
+			}
+			raw = strings.TrimSpace(string(content))
+		}
+	}
+	if raw == "" {
 		return
 	}
 	var specs []upstreamSpec

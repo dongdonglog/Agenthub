@@ -73,6 +73,7 @@ SSH 密钥放在 `/data/home/.ssh`，不要把宿主机个人 `~/.ssh` 整体挂
 - 工具名自动加前缀（如 `datadog__query_metrics`），避免冲突；
 - `read_only=false` 的上游默认跳过，只有 `AGENTHUB_MCP_ALLOW_WRITE=true` 才装载；
 - 网关统一超时、错误隔离和 stderr 审计；单个上游启动失败不影响内置工具；
+- `AGENTHUB_MCP_UPSTREAMS_FILE` 可从文件读取上游配置，避免凭据长期在环境变量；
 - `AGENTHUB_MCP_TOOL_ALLOW` / `DENY` 控制工具白/黑名单；
 - `AGENTHUB_MCP_AUDIT_FILE` 写 JSONL 审计（工具、耗时、错误，不记录参数）。
 
