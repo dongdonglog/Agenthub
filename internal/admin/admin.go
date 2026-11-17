@@ -1005,6 +1005,7 @@ func (s *Server) handleCaseFeedback(rw http.ResponseWriter, r *http.Request) {
 		Verdict string `json:"verdict"`
 		Note    string `json:"note"`
 		Actor   string `json:"actor"`
+		CSAT    int    `json:"csat"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(rw, http.StatusBadRequest, err.Error())
@@ -1018,7 +1019,11 @@ func (s *Server) handleCaseFeedback(rw http.ResponseWriter, r *http.Request) {
 		body.Actor = "admin"
 	}
 	id := r.PathValue("id")
-	if err := s.opts.Cases.AddFeedback(r.Context(), id, body.Actor, body.Verdict, body.Note, time.Now()); err != nil {
+	if body.CSAT < 0 || body.CSAT > 5 {
+		writeError(rw, http.StatusBadRequest, "csat 必须在 0-5")
+		return
+	}
+	if err := s.opts.Cases.AddFeedback(r.Context(), id, body.Actor, body.Verdict, body.Note, body.CSAT, time.Now()); err != nil {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -64,6 +65,7 @@ type CaseFeedback struct {
 	Actor     string    `json:"actor"`
 	Verdict   string    `json:"verdict"`
 	Note      string    `json:"note"`
+	CSAT      int       `json:"csat"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -75,6 +77,7 @@ type EmployeeStats struct {
 	Useful       int     `json:"useful"`
 	NotUseful    int     `json:"not_useful"`
 	AvgResolveMS float64 `json:"avg_resolve_ms"`
+	CSAT         float64 `json:"csat"`
 }
 
 // Approval 是一次受控动作审批。
@@ -161,24 +164,25 @@ func (s *CaseStore) EnsureCase(ctx context.Context, employeeID, caseType, source
 	if err != nil {
 		return nil, false, err
 	}
+	due := now.Add(slaFor(severity))
 	if c != nil {
-		_, err := s.pool.Exec(ctx, `UPDATE case_item SET title=$2, summary=$3, severity=$4, service=$5, environment=$6, employee_id=$7, updated_at=$8 WHERE id=$1`,
-			c.ID, title, summary, severity, service, environment, employeeID, now)
+		_, err := s.pool.Exec(ctx, `UPDATE case_item SET title=$2, summary=$3, severity=$4, service=$5, environment=$6, employee_id=$7, sla_due_at=$8, updated_at=$9 WHERE id=$1`,
+			c.ID, title, summary, severity, service, environment, employeeID, due, now)
 		if err != nil {
 			return nil, false, err
 		}
-		c.Title, c.Summary, c.Severity, c.Service, c.Environment, c.EmployeeID, c.UpdatedAt = title, summary, severity, service, environment, employeeID, now
+		c.Title, c.Summary, c.Severity, c.Service, c.Environment, c.EmployeeID, c.SLADueAt, c.UpdatedAt = title, summary, severity, service, environment, employeeID, &due, now
 		return c, false, nil
 	}
 	id := "case_" + caseShortHash(source+sourceID+now.Format(time.RFC3339Nano))
 	c = &Case{ID: id, EmployeeID: employeeID, Type: caseType, Source: source, SourceID: sourceID,
 		Title: title, Summary: summary, Severity: severity, Status: "new", Service: service,
-		Environment: environment, ChatID: chatID, CreatedAt: now, UpdatedAt: now}
+		Environment: environment, ChatID: chatID, SLADueAt: &due, CreatedAt: now, UpdatedAt: now}
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO case_item (id, employee_id, type, source, source_id, title, summary, severity, status, service, environment, chat_id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)`,
+		INSERT INTO case_item (id, employee_id, type, source, source_id, title, summary, severity, status, service, environment, chat_id, sla_due_at, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)`,
 		c.ID, c.EmployeeID, c.Type, c.Source, c.SourceID, c.Title, c.Summary, c.Severity,
-		c.Status, c.Service, c.Environment, c.ChatID, now); err != nil {
+		c.Status, c.Service, c.Environment, c.ChatID, due, now); err != nil {
 		return nil, false, err
 	}
 	return c, true, nil
@@ -263,14 +267,14 @@ func (s *CaseStore) ListApprovals(ctx context.Context, caseID string) ([]*Approv
 }
 
 // AddFeedback 记录案件反馈。
-func (s *CaseStore) AddFeedback(ctx context.Context, caseID, actor, verdict, note string, now time.Time) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO case_feedback (case_id, actor, verdict, note, created_at) VALUES ($1,$2,$3,$4,$5)`, caseID, actor, verdict, note, now)
+func (s *CaseStore) AddFeedback(ctx context.Context, caseID, actor, verdict, note string, csat int, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO case_feedback (case_id, actor, verdict, note, csat, created_at) VALUES ($1,$2,$3,$4,$5,$6)`, caseID, actor, verdict, note, csat, now)
 	return err
 }
 
 // ListFeedback 返回案件反馈。
 func (s *CaseStore) ListFeedback(ctx context.Context, caseID string, limit int) ([]CaseFeedback, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, case_id, actor, verdict, note, created_at FROM case_feedback WHERE case_id=$1 ORDER BY id DESC LIMIT $2`, caseID, limit)
+	rows, err := s.pool.Query(ctx, `SELECT id, case_id, actor, verdict, note, csat, created_at FROM case_feedback WHERE case_id=$1 ORDER BY id DESC LIMIT $2`, caseID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +282,7 @@ func (s *CaseStore) ListFeedback(ctx context.Context, caseID string, limit int) 
 	var out []CaseFeedback
 	for rows.Next() {
 		var item CaseFeedback
-		if err := rows.Scan(&item.ID, &item.CaseID, &item.Actor, &item.Verdict, &item.Note, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.CaseID, &item.Actor, &item.Verdict, &item.Note, &item.CSAT, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -300,6 +304,9 @@ func (s *CaseStore) EmployeeStats(ctx context.Context, employeeID string) (Emplo
 	_ = s.pool.QueryRow(ctx, `
 		SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (resolved_at-created_at))*1000),0)
 		FROM case_item WHERE employee_id=$1 AND resolved_at IS NOT NULL`, employeeID).Scan(&stats.AvgResolveMS)
+	_ = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(AVG(f.csat) FILTER (WHERE f.csat > 0),0)
+		FROM case_feedback f JOIN case_item c ON c.id=f.case_id WHERE c.employee_id=$1`, employeeID).Scan(&stats.CSAT)
 	return stats, nil
 }
 
@@ -387,6 +394,19 @@ func scanCase(row caseScanner) (*Case, error) {
 		&c.Severity, &c.Status, &c.Requester, &c.Service, &c.Environment, &c.ChatID,
 		&c.SLADueAt, &c.CreatedAt, &c.UpdatedAt, &c.ResolvedAt)
 	return c, err
+}
+
+func slaFor(severity string) time.Duration {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "critical", "p1", "sev1":
+		return time.Hour
+	case "high", "p2", "sev2":
+		return 4 * time.Hour
+	case "medium", "p3", "sev3":
+		return 24 * time.Hour
+	default:
+		return 72 * time.Hour
+	}
 }
 
 func caseShortHash(value string) string {

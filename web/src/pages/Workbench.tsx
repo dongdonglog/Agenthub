@@ -5,11 +5,11 @@ import { Badge, Button, Card, PageHeader, Skeleton, useAsync, useToast } from ".
 type Employee = { id: string; name: string; title: string; role: string; mission: string; status: string; chat_id: string; allowed_tools?: string[] };
 type CaseItem = {
   id: string; employee_id: string; type: string; source: string; source_id: string; title: string; summary: string;
-  severity: string; status: string; service: string; environment: string; created_at: string; updated_at: string;
+  severity: string; status: string; service: string; environment: string; sla_due_at?: string; created_at: string; updated_at: string;
 };
 type Event = { id: number; kind: string; actor: string; text: string; created_at: string };
 type Feedback = { id: number; verdict: string; note: string; actor: string; created_at: string };
-type Stats = { employee_id: string; cases: number; resolved: number; useful: number; not_useful: number; avg_resolve_ms: number };
+type Stats = { employee_id: string; cases: number; resolved: number; useful: number; not_useful: number; avg_resolve_ms: number; csat: number };
 type Approval = { id: string; case_id: string; action: string; params: unknown; status: string; requested_by: string; approved_by: string; result: string; created_at: string };
 type Detail = { case: CaseItem; events: Event[]; feedback?: Feedback[]; approvals?: Approval[] };
 
@@ -53,7 +53,7 @@ export function Workbench() {
     } catch (err) { show((err as Error).message, true); }
   };
 
-  const act = async (path: string, success: string, body?: Record<string, string>) => {
+  const act = async (path: string, success: string, body?: Record<string, unknown>) => {
     if (!selected) return;
     try {
       const result = await api<{ summary?: string }>(`/cases/${encodeURIComponent(selected)}/${path}`, {
@@ -86,7 +86,7 @@ export function Workbench() {
           </div>
         ))}
         {employees.data && employees.data.items.length === 0 ? <div className="muted">还没有数字员工</div> : null}
-        {stats ? <div className="muted small">案件 {stats.cases} · 已解决 {stats.resolved} · 有用 {stats.useful} · 无用 {stats.not_useful} · 平均解决 {Math.round(stats.avg_resolve_ms / 1000)}s</div> : null}
+        {stats ? <div className="muted small">案件 {stats.cases} · 已解决 {stats.resolved} · 有用 {stats.useful} · 无用 {stats.not_useful} · 平均解决 {Math.round(stats.avg_resolve_ms / 1000)}s · CSAT {stats.csat ? stats.csat.toFixed(1) : "—"}</div> : null}
       </Card>
 
       <Card title="案件">
@@ -127,10 +127,16 @@ export function Workbench() {
                 <span className="mono muted small">{detail.data.case.id}</span>
               </div>
               <div>{detail.data.case.summary || detail.data.case.title}</div>
+              {detail.data.case.sla_due_at ? (
+                <div className="muted small">
+                  SLA 截止：{new Date(detail.data.case.sla_due_at).toLocaleString()}
+                  {detail.data.case.status !== "resolved" && detail.data.case.status !== "closed" && new Date(detail.data.case.sla_due_at).getTime() < Date.now() ? "（已超时）" : ""}
+                </div>
+              ) : null}
               <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 <Button onClick={() => act("handoff", "交接摘要已生成")}>生成交接</Button>
-                <Button onClick={() => act("feedback", "已标记有用", { verdict: "useful" })}>有用</Button>
-                <Button onClick={() => act("feedback", "已标记无用", { verdict: "not_useful" })}>无用</Button>
+                <Button onClick={() => act("feedback", "已标记有用", { verdict: "useful", csat: 5 })}>有用</Button>
+                <Button onClick={() => act("feedback", "已标记无用", { verdict: "not_useful", csat: 1 })}>无用</Button>
                 <Button onClick={async () => {
                   if (!selected) return;
                   try {
