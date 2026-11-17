@@ -119,6 +119,7 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 	}
 
 	seed := seedOf(payload)
+	seed.ChatID = i.cfg.ChatID
 	accepted := 0
 	createdIncident := false
 	var incident *store.Incident
