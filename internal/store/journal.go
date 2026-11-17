@@ -478,6 +478,13 @@ func (j *Journal) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, err
 		`DELETE FROM delivery_state WHERE created_at < $1 AND state NOT IN ('pending','retrying')`,
 		`DELETE FROM run_trace WHERE created_at < $1`,
 		`DELETE FROM run_artifact WHERE created_at < $1`,
+		`DELETE FROM incident_event WHERE incident_id IN (SELECT id FROM incident WHERE status = 'resolved' AND updated_at < $1)`,
+		`DELETE FROM alert_event WHERE incident_id IN (SELECT id FROM incident WHERE status = 'resolved' AND updated_at < $1)`,
+		`DELETE FROM incident WHERE status = 'resolved' AND updated_at < $1`,
+		`DELETE FROM case_event WHERE case_id IN (SELECT id FROM case_item WHERE status IN ('resolved','closed') AND updated_at < $1)`,
+		`DELETE FROM case_feedback WHERE case_id IN (SELECT id FROM case_item WHERE status IN ('resolved','closed') AND updated_at < $1)`,
+		`DELETE FROM approval_request WHERE case_id IN (SELECT id FROM case_item WHERE status IN ('resolved','closed') AND updated_at < $1)`,
+		`DELETE FROM case_item WHERE status IN ('resolved','closed') AND updated_at < $1`,
 		`DELETE FROM run_state WHERE ended_at IS NOT NULL AND ended_at < $1`,
 		`DELETE FROM message_state WHERE created_at < $1 AND status NOT IN ('queued','processing')`,
 	}

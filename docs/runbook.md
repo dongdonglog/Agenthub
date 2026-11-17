@@ -186,6 +186,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 ### 4.5 持久化
 
 - 消息、运行、投递写入 `message_state` / `run_state` / `delivery_state`；
+- 已恢复的事故、已关闭案件、反馈和审批按保留期清理；
 - 启动时 `Restore` 恢复最近 1000 条消息与运行，`processing` 状态的消息重新排队；
 - 集成测试：`AGENTHUB_TEST_DATABASE_URL=... go test ./internal/core -run TestJournalPersistenceAndRestore`。
 
