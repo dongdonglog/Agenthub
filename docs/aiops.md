@@ -267,7 +267,7 @@ POST /api/v1/alerts/{source}
 - 同会话合并为 1 个 run（20 inputs），completed；
 - 发送 1 条 resolved 后，对应 incident/case 变为 resolved；
 - `generic` 来源单独创建案件成功；
-- 真实模型 + Alertmanager → 飞书投递成功，消息 ID `om_x100b608a8c72cc88b08952ddb1c691f`。
+- 20 条批量使用桩模型验证管道语义；另 1 条真实模型经 Alertmanager → 飞书投递成功，消息 ID `om_x100b608a8c72cc88b08952ddb1c691f`。
 
 - 全局 token：`AGENTHUB_AIOPS_TOKEN`；
 - 按来源 token：`AGENTHUB_AIOPS_SOURCE_TOKENS='{"grafana":"..."}'`；
