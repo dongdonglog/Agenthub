@@ -186,15 +186,16 @@ func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident
 	}
 	_, err := i.engine.Submit(ctx, channel.Inbound{
 		Channel: "aiops", Tenant: "aiops",
-		ExternalID: "incident:" + incident.ID + ":firing",
-		SentAt:     i.now(),
-		Sender:     channel.Sender{OpenID: payload.Source, Name: payload.Source},
-		Chat:       channel.Chat{ID: i.cfg.ChatID, Kind: "group", Name: "运维告警"},
-		Text:       prompt,
-		MsgType:    "text",
-		ReadOnly:   true,
-		NoReply:    true,
-		ToolAllow:  toolAllow,
+		ConversationKey: "aiops:" + incident.ID,
+		ExternalID:      "incident:" + incident.ID + ":firing",
+		SentAt:          i.now(),
+		Sender:          channel.Sender{OpenID: payload.Source, Name: payload.Source},
+		Chat:            channel.Chat{ID: i.cfg.ChatID, Kind: "group", Name: "运维告警"},
+		Text:            prompt,
+		MsgType:         "text",
+		ReadOnly:        true,
+		NoReply:         true,
+		ToolAllow:       toolAllow,
 	})
 	return err
 }

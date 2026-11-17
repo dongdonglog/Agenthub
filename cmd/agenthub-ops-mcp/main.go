@@ -58,6 +58,9 @@ type server struct {
 	http      *http.Client
 	tools     []tool
 	upstreams []*upstream
+	allow     map[string]bool
+	deny      map[string]bool
+	audit     *os.File
 }
 
 func main() {
@@ -71,8 +74,9 @@ func main() {
 		kubectl:   os.Getenv("AGENTHUB_KUBECTL_BIN"),
 		http:      &http.Client{Timeout: 20 * time.Second},
 	}
+	s.loadPolicy()
 	s.startUpstreams()
-	s.tools = s.listTools()
+	s.tools = s.filterTools(s.listTools())
 	log.SetOutput(os.Stderr)
 	log.Printf("ops-mcp ready: prometheus=%v loki=%v tools=%d", s.promURL != "", s.lokiURL != "", len(s.tools))
 
@@ -138,7 +142,13 @@ func (s *server) call(raw json.RawMessage) (any, error) {
 	}
 	for _, u := range s.upstreams {
 		if strings.HasPrefix(params.Name, u.prefix()+"__") {
-			return u.call(params.Name, params.Arguments)
+			started := time.Now()
+			result, err := u.call(params.Name, params.Arguments)
+			s.auditCall(params.Name, started, err)
+			if err != nil {
+				return map[string]any{"content": []any{map[string]string{"type": "text", "text": "上游工具失败: " + err.Error()}}, "isError": true}, nil
+			}
+			return result, nil
 		}
 	}
 	text, err := s.runTool(params.Name, args)

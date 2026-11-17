@@ -531,5 +531,8 @@ type Conversation struct {
 // Deliveries 返回全部投递记录。
 
 func conversationKey(in channel.Inbound) string {
+	if in.ConversationKey != "" {
+		return in.ConversationKey
+	}
 	return in.Tenant + ":" + in.Chat.ID + ":" + in.Sender.OpenID
 }

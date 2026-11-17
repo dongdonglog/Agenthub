@@ -102,7 +102,7 @@ func (i *Ingestor) Create(ctx context.Context, ticket Ticket) (string, error) {
 		}
 	}
 	if _, err := i.engine.Submit(ctx, channel.Inbound{
-		Channel: "support", Tenant: "support", ExternalID: "ticket:" + ticket.ID,
+		Channel: "support", Tenant: "support", ConversationKey: "support:" + ticket.ID, ExternalID: "ticket:" + ticket.ID,
 		SentAt: now, Sender: channel.Sender{OpenID: "ticket", Name: "工单系统"},
 		Chat: channel.Chat{ID: i.cfg.ChatID, Kind: "group", Name: "技术支持"},
 		Text: prompt, MsgType: "text", ReadOnly: true, NoReply: true, ToolAllow: toolAllow,

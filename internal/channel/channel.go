@@ -53,6 +53,8 @@ type Inbound struct {
 	ReadOnly bool
 	// ToolAllow 是本次运行允许的 pi 工具；空表示使用全局配置。
 	ToolAllow []string
+	// ConversationKey 覆盖默认会话键；为空时按 Tenant:ChatID:Sender 计算。
+	ConversationKey string
 	// NoReply 为 true 时投递不回挂消息（用于定时任务等没有平台消息 ID 的来源）。
 	NoReply      bool
 	Attachments  []Attachment
