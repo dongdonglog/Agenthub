@@ -13,9 +13,9 @@ import { Incidents } from "./pages/Incidents";
 import { IncidentDetail } from "./pages/IncidentDetail";
 import { Cases } from "./pages/Cases";
 import { CaseDetail } from "./pages/CaseDetail";
-import { Employees } from "./pages/Employees";
-import { Review } from "./pages/Review";
 import { Workbench } from "./pages/Workbench";
+import { Reports } from "./pages/Reports";
+import { CaseReport } from "./pages/CaseReport";
 import { System } from "./pages/System";
 import { Settings } from "./pages/Settings";
 
@@ -31,8 +31,8 @@ export function App() {
                 <Route path="/workbench" element={<Navigate to="/" replace />} />
                 <Route path="/cases" element={<Cases />} />
                 <Route path="/cases/:id" element={<CaseDetail />} />
-                <Route path="/employees" element={<Employees />} />
-                <Route path="/review" element={<Review />} />
+                <Route path="/cases/:id/report" element={<CaseReport />} />
+                <Route path="/reports" element={<Reports />} />
                 <Route path="/incidents" element={<Incidents />} />
                 <Route path="/incidents/:id" element={<IncidentDetail />} />
                 <Route path="/sessions" element={<Sessions />} />

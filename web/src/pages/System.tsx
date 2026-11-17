@@ -8,8 +8,9 @@ import { MCPs } from "./MCPs";
 import { Tasks } from "./Tasks";
 import { Audits } from "./Audits";
 import { Settings } from "./Settings";
+import { Employees } from "./Employees";
 
-type Tab = "overview" | "sessions" | "history" | "skills" | "mcps" | "tasks" | "audits" | "settings";
+type Tab = "overview" | "employees" | "sessions" | "history" | "skills" | "mcps" | "tasks" | "audits" | "settings";
 
 export function System() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -21,6 +22,7 @@ export function System() {
         onChange={setTab}
         items={[
           { value: "overview", label: "运行概览" },
+          { value: "employees", label: "数字员工" },
           { value: "sessions", label: "在线会话" },
           { value: "history", label: "历史会话" },
           { value: "skills", label: "Skill" },
@@ -31,6 +33,7 @@ export function System() {
         ]}
       />
       {tab === "overview" ? <Overview /> : null}
+      {tab === "employees" ? <Employees /> : null}
       {tab === "sessions" ? <Sessions /> : null}
       {tab === "history" ? <History /> : null}
       {tab === "skills" ? <Skills /> : null}

@@ -25,7 +25,7 @@ export function IncidentDetail() {
     <div className="stack">
       <Breadcrumbs items={[{ label: "运维事故", to: "/incidents" }, { label: inc.id }]} />
       <PageHeader title={inc.title} description={<span>{inc.service || "未标服务"} · {inc.environment || "未标环境"} · <span className="mono">{inc.id}</span></span>}
-        actions={<div className="row">{inc.status !== "resolved" ? <Button onClick={() => action("ack")}>认领</Button> : null}{inc.status !== "resolved" ? <Button className="danger" onClick={() => action("resolve")}>手动恢复</Button> : null}<Button onClick={detail.reload}>刷新</Button></div>} />
+        actions={<div className="row">{detail.data.case ? <Button className="primary" onClick={() => navigate(`/cases/${detail.data?.case?.id}/report`)}>写处置报告</Button> : null}{inc.status !== "resolved" ? <Button onClick={() => action("ack")}>认领</Button> : null}{inc.status !== "resolved" ? <Button className="danger" onClick={() => action("resolve")}>手动恢复</Button> : null}<Button onClick={detail.reload}>刷新</Button></div>} />
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <Badge kind={statusKind(inc.status)}>{inc.status}</Badge>
         <Badge kind={severityKind(inc.severity)}>{inc.severity || "未分级"}</Badge>

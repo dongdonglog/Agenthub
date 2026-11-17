@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/moying/agenthub/internal/store"
@@ -65,5 +66,30 @@ func (e *Executor) Execute(ctx context.Context, approval *store.Approval) (strin
 	if err != nil {
 		return string(out), fmt.Errorf("执行失败: %w: %s", err, string(out))
 	}
-	return string(out), nil
+	result := strings.TrimSpace(string(out))
+	if verified, verifyErr := e.verify(ctx, approval.Action, params.Namespace, params.Deployment); verifyErr != nil {
+		result += "\n验证失败: " + verifyErr.Error()
+	} else if verified != "" {
+		result += "\n验证: " + verified
+	}
+	return result, nil
+}
+
+func (e *Executor) verify(ctx context.Context, action, namespace, deployment string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	var args []string
+	switch action {
+	case "k8s_scale":
+		args = []string{"get", "deployment/" + deployment, "-n", namespace, "-o", "jsonpath={.status.readyReplicas}/{.spec.replicas}", "--request-timeout=15s"}
+	case "k8s_restart":
+		args = []string{"rollout", "status", "deployment/" + deployment, "-n", namespace, "--timeout=50s"}
+	default:
+		return "", nil
+	}
+	out, err := exec.CommandContext(ctx, e.Kubectl, args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
 }

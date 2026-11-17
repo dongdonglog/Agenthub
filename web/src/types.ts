@@ -42,6 +42,20 @@ export type Approval = {
   result: string;
   created_at: string;
 };
+export type CaseReport = {
+  case_id: string;
+  problem: string;
+  impact: string;
+  evidence: string;
+  root_cause: string;
+  actions: string;
+  verification: string;
+  prevention: string;
+  status: string;
+  author: string;
+  created_at?: string;
+  updated_at?: string;
+};
 export type CaseReview = { id: number; case_id: string; reviewer: string; evidence: number; root_cause: number; safety: number; usefulness: number; honesty: number; note: string; created_at: string };
 export type Run = { ID: string; State: string; Output: string; Error: string; InputTokens: number; OutputTokens: number };
 export type CaseDetail = {
@@ -49,6 +63,7 @@ export type CaseDetail = {
   events: CaseEvent[];
   feedback?: Feedback[];
   reviews?: CaseReview[];
+  report?: CaseReport | null;
   approvals?: Approval[];
   run?: Run | null;
 };

@@ -556,3 +556,70 @@ func (s *CaseStore) FindCaseBySource(ctx context.Context, source, sourceID strin
 	}
 	return c, err
 }
+
+// CaseReport 是案件的处置报告。
+type CaseReport struct {
+	CaseID       string    `json:"case_id"`
+	Problem      string    `json:"problem"`
+	Impact       string    `json:"impact"`
+	Evidence     string    `json:"evidence"`
+	RootCause    string    `json:"root_cause"`
+	Actions      string    `json:"actions"`
+	Verification string    `json:"verification"`
+	Prevention   string    `json:"prevention"`
+	Status       string    `json:"status"`
+	Author       string    `json:"author"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// GetCaseReport 读取处置报告。
+func (s *CaseStore) GetCaseReport(ctx context.Context, caseID string) (*CaseReport, error) {
+	r := &CaseReport{}
+	err := s.pool.QueryRow(ctx, `SELECT case_id, problem, impact, evidence, root_cause, actions, verification, prevention, status, author, created_at, updated_at FROM case_report WHERE case_id=$1`, caseID).
+		Scan(&r.CaseID, &r.Problem, &r.Impact, &r.Evidence, &r.RootCause, &r.Actions, &r.Verification, &r.Prevention, &r.Status, &r.Author, &r.CreatedAt, &r.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return r, err
+}
+
+// SaveCaseReport 保存处置报告。
+func (s *CaseStore) SaveCaseReport(ctx context.Context, r CaseReport, now time.Time) error {
+	if r.Status == "" {
+		r.Status = "draft"
+	}
+	if r.Author == "" {
+		r.Author = "admin"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO case_report (case_id, problem, impact, evidence, root_cause, actions, verification, prevention, status, author, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
+		ON CONFLICT (case_id) DO UPDATE SET problem=EXCLUDED.problem, impact=EXCLUDED.impact,
+			evidence=EXCLUDED.evidence, root_cause=EXCLUDED.root_cause, actions=EXCLUDED.actions,
+			verification=EXCLUDED.verification, prevention=EXCLUDED.prevention, status=EXCLUDED.status,
+			author=EXCLUDED.author, updated_at=EXCLUDED.updated_at`,
+		r.CaseID, r.Problem, r.Impact, r.Evidence, r.RootCause, r.Actions, r.Verification, r.Prevention, r.Status, r.Author, now)
+	return err
+}
+
+// ListCaseReports 返回最近的处置报告。
+func (s *CaseStore) ListCaseReports(ctx context.Context, limit int) ([]CaseReport, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `SELECT case_id, problem, impact, evidence, root_cause, actions, verification, prevention, status, author, created_at, updated_at FROM case_report ORDER BY updated_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CaseReport
+	for rows.Next() {
+		var r CaseReport
+		if err := rows.Scan(&r.CaseID, &r.Problem, &r.Impact, &r.Evidence, &r.RootCause, &r.Actions, &r.Verification, &r.Prevention, &r.Status, &r.Author, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

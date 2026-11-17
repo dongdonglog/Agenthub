@@ -62,3 +62,37 @@ func TestCaseAndIncidentFilters(t *testing.T) {
 		t.Fatalf("resolved=%+v ok=%v err=%v", resolved, ok, err)
 	}
 }
+
+func TestCaseReportRoundTrip(t *testing.T) {
+	url := testDatabaseURL(t)
+	ctx := context.Background()
+	db, err := store.Open(ctx, url, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE case_item, case_report, case_event, employee`); err != nil {
+		t.Fatal(err)
+	}
+	cases := store.NewCaseStore(db)
+	now := time.Now()
+	c, _, err := cases.EnsureCase(ctx, "sre-oncall", "incident", "test", "r1", "支付故障", "", "P1", "pay", "prod", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := store.CaseReport{CaseID: c.ID, Problem: "支付 5xx", RootCause: "连接池耗尽", Verification: "错误率恢复", Status: "final"}
+	if err := cases.SaveCaseReport(ctx, report, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := cases.GetCaseReport(ctx, c.ID)
+	if err != nil || got == nil || got.RootCause != "连接池耗尽" || got.Status != "final" {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	list, err := cases.ListCaseReports(ctx, 10)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%+v err=%v", list, err)
+	}
+}

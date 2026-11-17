@@ -136,6 +136,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/feedback", s.handleCaseFeedback)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/review", s.handleCaseReview)
+	mux.HandleFunc("GET /admin/api/v1/cases/{id}/report", s.handleCaseReportGet)
+	mux.HandleFunc("PUT /admin/api/v1/cases/{id}/report", s.handleCaseReportPut)
+	mux.HandleFunc("GET /admin/api/v1/reports", s.handleReports)
 	mux.HandleFunc("POST /admin/api/v1/cases", s.handleCaseCreate)
 	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
 	mux.HandleFunc("PUT /admin/api/v1/employees/{id}", s.handleEmployeeUpdate)
@@ -940,6 +943,7 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 	}
 	feedback, _ := s.opts.Cases.ListFeedback(r.Context(), c.ID, 50)
 	reviews, _ := s.opts.Cases.ListReviews(r.Context(), c.ID)
+	report, _ := s.opts.Cases.GetCaseReport(r.Context(), c.ID)
 	approvals, _ := s.opts.Cases.ListApprovals(r.Context(), c.ID)
 	var run any
 	if s.opts.Journal != nil {
@@ -954,7 +958,7 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 			run, _ = s.opts.Journal.LatestRunForConversation(r.Context(), conv)
 		}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "reviews": reviews, "approvals": approvals, "run": run})
+	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "reviews": reviews, "report": report, "approvals": approvals, "run": run})
 }
 
 func (s *Server) handleCaseHandoff(rw http.ResponseWriter, r *http.Request) {
@@ -1021,6 +1025,110 @@ func (s *Server) handleCasePostmortem(rw http.ResponseWriter, r *http.Request) {
 	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "postmortem", "admin", "生成复盘草稿", time.Now())
 	s.audit(r, "case.postmortem", c.ID, "")
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "markdown": text})
+}
+
+func (s *Server) handleCaseReportGet(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	c, err := s.opts.Cases.GetCase(r.Context(), r.PathValue("id"))
+	if err != nil || c == nil {
+		writeError(rw, http.StatusNotFound, "案件不存在")
+		return
+	}
+	report, _ := s.opts.Cases.GetCaseReport(r.Context(), c.ID)
+	if report == nil {
+		report = s.draftReport(r.Context(), c)
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "report": report})
+}
+
+func (s *Server) handleCaseReportPut(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	c, err := s.opts.Cases.GetCase(r.Context(), r.PathValue("id"))
+	if err != nil || c == nil {
+		writeError(rw, http.StatusNotFound, "案件不存在")
+		return
+	}
+	var body store.CaseReport
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	body.CaseID = c.ID
+	if body.Status != "draft" && body.Status != "final" {
+		body.Status = "draft"
+	}
+	if body.Problem == "" {
+		writeError(rw, http.StatusBadRequest, "问题描述不能为空")
+		return
+	}
+	if err := s.opts.Cases.SaveCaseReport(r.Context(), body, time.Now()); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "report", "admin", "保存处置报告（"+body.Status+"）", time.Now())
+	if body.Status == "final" {
+		_ = s.opts.Cases.SetCaseStatus(r.Context(), c.ID, "resolved", time.Now())
+		_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "resolved", "admin", "报告定稿，案件关闭", time.Now())
+	}
+	s.audit(r, "case.report", c.ID, body.Status)
+	writeJSON(rw, http.StatusOK, body)
+}
+
+func (s *Server) handleReports(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	reports, err := s.opts.Cases.ListCaseReports(r.Context(), 100)
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	items := make([]map[string]any, 0, len(reports))
+	for _, report := range reports {
+		c, _ := s.opts.Cases.GetCase(r.Context(), report.CaseID)
+		items = append(items, map[string]any{"report": report, "case": c})
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (s *Server) draftReport(ctx context.Context, c *store.Case) *store.CaseReport {
+	report := &store.CaseReport{CaseID: c.ID, Problem: c.Title, Impact: fmt.Sprintf("%s / %s / %s", c.Severity, c.Service, c.Environment), Status: "draft"}
+	if c.Summary != "" {
+		report.Problem = c.Title + "\n\n" + c.Summary
+	}
+	if c.Source == "alertmanager" && s.opts.Incidents != nil {
+		if inc, _ := s.opts.Incidents.GetIncident(ctx, c.SourceID); inc != nil {
+			report.Impact = fmt.Sprintf("告警 %d 条；级别 %s；服务 %s；环境 %s", inc.AlertCount, inc.Severity, inc.Service, inc.Environment)
+		}
+	}
+	if s.opts.Journal != nil {
+		conv := ""
+		if c.Source == "alertmanager" {
+			conv = "aiops:" + c.SourceID
+		} else if c.Type == "ticket" {
+			conv = "support:" + c.SourceID
+		}
+		if conv != "" {
+			if run, _ := s.opts.Journal.LatestRunForConversation(ctx, conv); run != nil {
+				report.Evidence = run.Output
+			}
+		}
+	}
+	if approvals, _ := s.opts.Cases.ListApprovals(ctx, c.ID); len(approvals) > 0 {
+		var b strings.Builder
+		for _, approval := range approvals {
+			fmt.Fprintf(&b, "- %s：%s（%s）\n", approval.Action, approval.Status, approval.Result)
+		}
+		report.Actions = b.String()
+	}
+	return report
 }
 
 func (s *Server) handleCaseReview(rw http.ResponseWriter, r *http.Request) {

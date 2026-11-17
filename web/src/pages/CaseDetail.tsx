@@ -45,7 +45,7 @@ export function CaseDetail() {
       <PageHeader
         title={c.title}
         description={<span>{c.service || "未标服务"} · {c.environment || "未标环境"} · <span className="mono">{c.id}</span></span>}
-        actions={<div className="row"><Button onClick={() => { navigator.clipboard?.writeText(c.id); show("案件 ID 已复制"); }}>复制 ID</Button><Button onClick={reload}>刷新</Button></div>}
+        actions={<div className="row"><Button onClick={() => { navigator.clipboard?.writeText(c.id); show("案件 ID 已复制"); }}>复制 ID</Button><Button className="primary" onClick={() => navigate(`/cases/${c.id}/report`)}>处置报告</Button><Button onClick={reload}>刷新</Button></div>}
       />
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <Badge kind={statusKind(c.status)}>{c.status}</Badge>
@@ -98,17 +98,6 @@ export function CaseDetail() {
             </table>
           </div>
         ) : <div className="muted">没有审批记录</div>}
-      </Card>
-
-      <Card title="人工评审">
-        {detail.data.reviews?.length ? (
-          <div className="table-wrap"><table>
-            <thead><tr><th>评审人</th><th>证据</th><th>根因</th><th>安全</th><th>有用</th><th>诚实</th><th>备注</th></tr></thead>
-            <tbody>{detail.data.reviews.map((review) => (
-              <tr key={review.id}><td>{review.reviewer}</td><td>{review.evidence}</td><td>{review.root_cause}</td><td>{review.safety}</td><td>{review.usefulness}</td><td>{review.honesty}</td><td className="muted">{review.note || "—"}</td></tr>
-            ))}</tbody>
-          </table></div>
-        ) : <div className="muted">还没有人工评审。<Link to="/review">去评审</Link></div>}
       </Card>
 
       <Card title="时间线">
