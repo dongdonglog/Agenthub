@@ -265,6 +265,7 @@ func nullIncidentTime(t time.Time) any {
 // IncidentFilter 是事故查询条件。
 type IncidentFilter struct {
 	Status, Service, Query string
+	From, To               *time.Time
 	Limit, Offset          int
 }
 
@@ -276,15 +277,16 @@ func (s *IncidentStore) ListIncidentsFiltered(ctx context.Context, f IncidentFil
 	if f.Offset < 0 {
 		f.Offset = 0
 	}
-	const where = `($1='' OR status=$1) AND ($2='' OR service=$2) AND ($3='' OR title ILIKE '%'||$3||'%' OR summary ILIKE '%'||$3||'%' OR service ILIKE '%'||$3||'%')`
+	const where = `($1='' OR status=$1) AND ($2='' OR service=$2) AND ($3='' OR title ILIKE '%'||$3||'%' OR summary ILIKE '%'||$3||'%' OR service ILIKE '%'||$3||'%')
+		AND ($4::timestamptz IS NULL OR created_at >= $4) AND ($5::timestamptz IS NULL OR created_at <= $5)`
 	var total int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM incident WHERE `+where, f.Status, f.Service, f.Query).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM incident WHERE `+where, f.Status, f.Service, f.Query, f.From, f.To).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, fingerprint, status, severity, title, summary, service, environment, chat_id,
 			alert_count, acknowledged_by, acknowledged_at, resolved_at, created_at, updated_at
-		FROM incident WHERE `+where+` ORDER BY updated_at DESC LIMIT $4 OFFSET $5`, f.Status, f.Service, f.Query, f.Limit, f.Offset)
+		FROM incident WHERE `+where+` ORDER BY updated_at DESC LIMIT $6 OFFSET $7`, f.Status, f.Service, f.Query, f.From, f.To, f.Limit, f.Offset)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -1,16 +1,21 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Badge, Card, Empty, PageHeader, Skeleton, useAsync } from "../components/ui";
+import { TimeFilter } from "../components/TimeFilter";
 import type { CaseItem, CaseReport } from "../types";
 
 type Item = { report: CaseReport; case: CaseItem | null };
 
 export function Reports() {
-  const reports = useAsync<{ items: Item[]; total: number }>(() => api("/reports"), []);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const reports = useAsync<{ items: Item[]; total: number }>(() => api(`/reports${from || to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : ""}`), [from, to]);
   return (
     <div className="stack">
       <PageHeader title="处置报告" description="每个需要闭环的案件，都要有根因、动作和验证结果。" />
       <Card>
+        <TimeFilter from={from} to={to} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} />
         {reports.loading && !reports.data ? <Skeleton height={220} /> : null}
         {reports.error ? <div className="danger-text">{reports.error}</div> : null}
         {reports.data && reports.data.items.length === 0 ? <Empty icon="📄" text="还没有处置报告，先打开案件生成草稿" /> : null}

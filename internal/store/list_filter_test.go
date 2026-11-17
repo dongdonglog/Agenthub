@@ -34,6 +34,10 @@ func TestCaseAndIncidentFilters(t *testing.T) {
 	if err != nil || total != 1 || len(items) != 1 || items[0].Type != "ticket" {
 		t.Fatalf("items=%+v total=%d err=%v", items, total, err)
 	}
+	future := now.Add(time.Hour)
+	if _, total, err := cases.ListCasesFiltered(ctx, store.CaseFilter{From: &future, Limit: 10}); err != nil || total != 0 {
+		t.Fatalf("future filter total=%d err=%v", total, err)
+	}
 
 	if err := cases.AddReview(ctx, store.CaseReview{CaseID: items[0].ID, Reviewer: "alice", Evidence: 2, RootCause: 1, Safety: 3, Usefulness: 2, Honesty: 3}, now); err != nil {
 		t.Fatal(err)
@@ -56,6 +60,9 @@ func TestCaseAndIncidentFilters(t *testing.T) {
 	list, total, err := incidents.ListIncidentsFiltered(ctx, store.IncidentFilter{Status: "firing", Query: "支付", Limit: 10})
 	if err != nil || total != 1 || len(list) != 1 {
 		t.Fatalf("list=%+v total=%d err=%v", list, total, err)
+	}
+	if _, total, err := incidents.ListIncidentsFiltered(ctx, store.IncidentFilter{From: &future, Limit: 10}); err != nil || total != 0 {
+		t.Fatalf("incident future filter total=%d err=%v", total, err)
 	}
 	resolved, ok, err := incidents.ResolveIncidentByID(ctx, inc.ID, "admin", now)
 	if err != nil || !ok || resolved.Status != "resolved" {

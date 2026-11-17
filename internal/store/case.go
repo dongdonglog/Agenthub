@@ -512,6 +512,7 @@ func caseShortHash(value string) string {
 // CaseFilter 是案件查询条件。
 type CaseFilter struct {
 	Status, Type, Source, Query string
+	From, To                    *time.Time
 	Limit, Offset               int
 }
 
@@ -524,14 +525,15 @@ func (s *CaseStore) ListCasesFiltered(ctx context.Context, f CaseFilter) ([]*Cas
 		f.Offset = 0
 	}
 	const where = `($1='' OR status=$1) AND ($2='' OR type=$2) AND ($3='' OR source=$3)
-		AND ($4='' OR title ILIKE '%'||$4||'%' OR summary ILIKE '%'||$4||'%' OR service ILIKE '%'||$4||'%')`
+		AND ($4='' OR title ILIKE '%'||$4||'%' OR summary ILIKE '%'||$4||'%' OR service ILIKE '%'||$4||'%')
+		AND ($5::timestamptz IS NULL OR created_at >= $5) AND ($6::timestamptz IS NULL OR created_at <= $6)`
 	var total int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM case_item WHERE `+where, f.Status, f.Type, f.Source, f.Query).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM case_item WHERE `+where, f.Status, f.Type, f.Source, f.Query, f.From, f.To).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, employee_id, type, source, source_id, title, summary, severity, status, requester, service, environment, chat_id, sla_due_at, created_at, updated_at, resolved_at
-		FROM case_item WHERE `+where+` ORDER BY updated_at DESC LIMIT $5 OFFSET $6`, f.Status, f.Type, f.Source, f.Query, f.Limit, f.Offset)
+		FROM case_item WHERE `+where+` ORDER BY updated_at DESC LIMIT $7 OFFSET $8`, f.Status, f.Type, f.Source, f.Query, f.From, f.To, f.Limit, f.Offset)
 	if err != nil {
 		return nil, 0, err
 	}

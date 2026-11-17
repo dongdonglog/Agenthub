@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, qs, type Paged } from "../api/client";
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Pagination, Select, Skeleton, Textarea, useAsync, useToast } from "../components/ui";
+import { TimeFilter } from "../components/TimeFilter";
 import { statusKind, type CaseItem } from "../types";
 
 const PAGE_SIZE = 20;
@@ -11,11 +12,13 @@ export function Cases() {
   const [status, setStatus] = useState("");
   const [type, setType] = useState("");
   const [page, setPage] = useState(1);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [creating, setCreating] = useState(false);
   const { show } = useToast();
   const cases = useAsync<Paged<CaseItem>>(
-    () => api(`/cases${qs({ q, status, type, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })}`),
-    [q, status, type, page],
+    () => api(`/cases${qs({ q, status, type, from, to, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })}`),
+    [q, status, type, from, to, page],
   );
 
   const change = (setter: (value: string) => void) => (value: string) => {
@@ -46,6 +49,7 @@ export function Cases() {
             <option value="incident">事故</option>
             <option value="ticket">工单</option>
           </Select>
+          <TimeFilter from={from} to={to} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); setPage(1); }} />
           <Button onClick={() => cases.reload()}>刷新</Button>
         </div>
         {cases.loading && !cases.data ? <Skeleton height={240} /> : null}

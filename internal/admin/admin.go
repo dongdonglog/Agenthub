@@ -913,6 +913,7 @@ func (s *Server) handleCases(rw http.ResponseWriter, r *http.Request) {
 	items, total, err := s.opts.Cases.ListCasesFiltered(r.Context(), store.CaseFilter{
 		Status: r.URL.Query().Get("status"), Type: r.URL.Query().Get("type"),
 		Source: r.URL.Query().Get("source"), Query: r.URL.Query().Get("q"),
+		From: queryTime(r, "from"), To: queryTime(r, "to"),
 		Limit: limit, Offset: offset,
 	})
 	if err != nil {
@@ -1122,8 +1123,15 @@ func (s *Server) handleReports(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
+	from, to := queryTime(r, "from"), queryTime(r, "to")
 	items := make([]map[string]any, 0, len(reports))
 	for _, report := range reports {
+		if from != nil && report.UpdatedAt.Before(*from) {
+			continue
+		}
+		if to != nil && report.UpdatedAt.After(*to) {
+			continue
+		}
 		c, _ := s.opts.Cases.GetCase(r.Context(), report.CaseID)
 		items = append(items, map[string]any{"report": report, "case": c})
 	}
@@ -1384,7 +1392,8 @@ func (s *Server) handleIncidents(rw http.ResponseWriter, r *http.Request) {
 	offset := queryInt(r, "offset", 0)
 	items, total, err := s.opts.Incidents.ListIncidentsFiltered(r.Context(), store.IncidentFilter{
 		Status: r.URL.Query().Get("status"), Service: r.URL.Query().Get("service"),
-		Query: r.URL.Query().Get("q"), Limit: limit, Offset: offset,
+		Query: r.URL.Query().Get("q"), From: queryTime(r, "from"), To: queryTime(r, "to"),
+		Limit: limit, Offset: offset,
 	})
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, err.Error())
@@ -1478,6 +1487,19 @@ func (s *Server) handleIncidentResolve(rw http.ResponseWriter, r *http.Request) 
 	}
 	s.audit(r, "incident.resolve", inc.ID, body.Actor)
 	writeJSON(rw, http.StatusOK, inc)
+}
+
+func queryTime(r *http.Request, key string) *time.Time {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		if value, err := time.Parse(layout, raw); err == nil {
+			return &value
+		}
+	}
+	return nil
 }
 
 func queryInt(r *http.Request, key string, fallback int) int {

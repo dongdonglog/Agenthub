@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, qs, type Paged } from "../api/client";
 import { Badge, Button, Card, Empty, Input, PageHeader, Pagination, Select, Skeleton, useAsync } from "../components/ui";
+import { TimeFilter } from "../components/TimeFilter";
 import { severityKind, statusKind, type Incident } from "../types";
 
 const PAGE_SIZE = 20;
@@ -10,9 +11,11 @@ export function Incidents() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const incidents = useAsync<Paged<Incident>>(
-    () => api(`/incidents${qs({ q, status, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })}`),
-    [q, status, page],
+    () => api(`/incidents${qs({ q, status, from, to, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })}`),
+    [q, status, from, to, page],
   );
   const reset = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(1); };
 
@@ -25,6 +28,7 @@ export function Incidents() {
           <Select value={status} onChange={(event) => reset(setStatus)(event.target.value)}>
             <option value="">全部状态</option><option value="firing">firing</option><option value="acknowledged">acknowledged</option><option value="resolved">resolved</option>
           </Select>
+          <TimeFilter from={from} to={to} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); setPage(1); }} />
           <Button onClick={() => incidents.reload()}>刷新</Button>
         </div>
         {incidents.loading && !incidents.data ? <Skeleton height={240} /> : null}

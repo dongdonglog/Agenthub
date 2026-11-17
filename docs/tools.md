@@ -64,6 +64,14 @@ SSH 密钥放在 `/data/home/.ssh`，不要把宿主机个人 `~/.ssh` 整体挂
 - `bash` 能访问容器网络；需要出站白名单时由部署层网络策略限制；
 - 工具会继承容器环境变量，接入凭据应只放容器环境或 `/data` 卷，不要写入技能/日志。
 
+## 扩展方式
+
+- 新增领域 SOP/知识：在 `pi-package/skills/<name>/SKILL.md` 增加 skill，pi 自动发现，不需要改 Go；
+- 新增只读数据源：优先加 MCP server，并通过 `AGENTHUB_MCP_UPSTREAMS` 挂到工具网关；
+- 新增固定输出格式：加 `pi-package/prompts/<name>.md`；
+- 新增安全/上下文钩子：加 pi extension；
+- 只有新的告警来源、案件字段、权限或 UI 才需要改 Go/React。
+
 ## MCP 工具网关
 
 `agenthub-ops-mcp` 是统一工具网关，不是每个数据源一个 server：
