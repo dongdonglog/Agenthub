@@ -204,7 +204,12 @@ AGENTHUB_LOKI_TOKEN=
 - `k8s_restart` 触发滚动重启；
 - 全部经 kubectl，只读/动作边界和审批由 AgentHub 控制。
 
-Tempo 仍需目标环境联调。
+Tempo 已在本地 2.6 容器验证：
+
+- OTLP HTTP 推送 trace；
+- `tempo_search` 返回 `checkout` 的 `GET /pay`；
+- `tempo_trace` 返回完整 span；
+- 查询链路与只读边界正常。
 
 ### 2.11 审批与受控动作
 
