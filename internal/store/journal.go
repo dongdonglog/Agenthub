@@ -648,3 +648,28 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	}
 	return messages, runs, nil
 }
+
+// LatestRunForConversation 返回一个会话最近一次运行。
+func (j *Journal) LatestRunForConversation(ctx context.Context, conversationID string) (*core.Run, error) {
+	r := &core.Run{}
+	var inputs []byte
+	var started, ended *time.Time
+	err := j.pool.QueryRow(ctx, `
+		SELECT id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id
+		FROM run_state WHERE conversation_id=$1 ORDER BY started_at DESC NULLS LAST LIMIT 1`, conversationID).
+		Scan(&r.ID, &r.ConversationID, &r.State, &inputs, &r.Output, &r.Error, &started, &ended, &r.InputTokens, &r.OutputTokens, &r.TraceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal(inputs, &r.InputIDs)
+	if started != nil {
+		r.StartedAt = *started
+	}
+	if ended != nil {
+		r.EndedAt = *ended
+	}
+	return r, nil
+}

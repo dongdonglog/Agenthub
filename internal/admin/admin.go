@@ -932,7 +932,20 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 	}
 	feedback, _ := s.opts.Cases.ListFeedback(r.Context(), c.ID, 50)
 	approvals, _ := s.opts.Cases.ListApprovals(r.Context(), c.ID)
-	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "approvals": approvals})
+	var run any
+	if s.opts.Journal != nil {
+		conv := ""
+		switch {
+		case c.Source == "alertmanager":
+			conv = "aiops:" + c.SourceID
+		case c.Type == "ticket":
+			conv = "support:" + c.SourceID
+		}
+		if conv != "" {
+			run, _ = s.opts.Journal.LatestRunForConversation(r.Context(), conv)
+		}
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "approvals": approvals, "run": run})
 }
 
 func (s *Server) handleCaseHandoff(rw http.ResponseWriter, r *http.Request) {

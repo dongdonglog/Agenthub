@@ -11,7 +11,8 @@ type Event = { id: number; kind: string; actor: string; text: string; created_at
 type Feedback = { id: number; verdict: string; note: string; actor: string; created_at: string };
 type Stats = { employee_id: string; cases: number; resolved: number; useful: number; not_useful: number; avg_resolve_ms: number; csat: number };
 type Approval = { id: string; case_id: string; action: string; params: unknown; status: string; requested_by: string; approved_by: string; result: string; created_at: string };
-type Detail = { case: CaseItem; events: Event[]; feedback?: Feedback[]; approvals?: Approval[] };
+type Run = { ID: string; State: string; Output: string; Error: string; InputTokens: number; OutputTokens: number };
+type Detail = { case: CaseItem; events: Event[]; feedback?: Feedback[]; approvals?: Approval[]; run?: Run | null };
 
 const statusKind = (status: string) => status === "resolved" || status === "closed" ? "ok" : status === "waiting_human" ? "warn" : "danger";
 
@@ -156,6 +157,13 @@ export function Workbench() {
                 <span className="mono muted small">{detail.data.case.id}</span>
               </div>
               <div>{detail.data.case.summary || detail.data.case.title}</div>
+              {detail.data.run ? (
+                <details open>
+                  <summary className="muted small">诊断输出（{detail.data.run.State} · {detail.data.run.InputTokens} in / {detail.data.run.OutputTokens} out）</summary>
+                  {detail.data.run.Error ? <div className="danger-text small">{detail.data.run.Error}</div> : null}
+                  <pre className="mono small" style={{ whiteSpace: "pre-wrap", maxHeight: 420, overflow: "auto", background: "var(--bg-subtle, #f7f7f7)", padding: 10, borderRadius: 6 }}>{detail.data.run.Output || "（无输出）"}</pre>
+                </details>
+              ) : null}
               {detail.data.case.sla_due_at ? (
                 <div className="muted small">
                   SLA 截止：{new Date(detail.data.case.sla_due_at).toLocaleString()}
