@@ -1,10 +1,9 @@
 # AgentHub
 
-**把 AI 同事放进飞书和钉钉：能查、能做、有过程、可治理。**
+**把 AI SRE 数字同事放进飞书和钉钉：接警、查证据、做处置、写报告。**
 
-AgentHub 是一个自托管的团队 AI 助手服务。消息从飞书群、钉钉群或私聊进来，
-交给 [pi](https://github.com/earendil-works/pi) 在独立工作区里执行，再把结果、过程和文件送回会话；
-技能、MCP、模型、定时任务、审计都在管理台统一配置。
+AgentHub 是一个自托管的 AI 运维数字员工。告警或工单进入后，交给 [pi](https://github.com/earendil-works/pi) 在独立工作区里查指标、日志、trace 和 K8s，
+把诊断、处置报告、审批和结果送回飞书/钉钉。技能、MCP、模型、审计和案件都在管理台统一管理。
 
 [![CI](https://github.com/dongdonglog/Agenthub/actions/workflows/ci.yml/badge.svg)](https://github.com/dongdonglog/Agenthub/actions/workflows/ci.yml)
 [![Release](https://github.com/dongdonglog/Agenthub/actions/workflows/release.yml/badge.svg)](https://github.com/dongdonglog/Agenthub/actions/workflows/release.yml)
@@ -12,10 +11,10 @@ AgentHub 是一个自托管的团队 AI 助手服务。消息从飞书群、钉�
 [![Go](https://img.shields.io/badge/go-1.23-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **English**: AgentHub is a self-hosted AI teammate for Feishu and DingTalk.
-> It runs the pi coding agent in per-conversation workspaces, with scheduling,
-> skills, MCP tools, model failover, an admin console, and audit — one Go binary
-> plus PostgreSQL. MIT licensed.
+> **English**: AgentHub is a self-hosted AI SRE teammate for Feishu and DingTalk.
+> It ingests alerts, runs the pi agent against observability tools, and produces
+> evidence-backed cases and incident reports with human-approved actions — one Go
+> binary plus PostgreSQL. MIT licensed.
 
 ![管理台](docs/images/admin-overview.png)
 
@@ -32,15 +31,14 @@ AgentHub 把入口放进日常 IM，把执行放进可清理的工作区，把�
 ## 特性
 
 - **IM 原生**：飞书长连接 / Webhook、钉钉 Stream；支持 @、引用消息、附件、消息状态表情；
-- **真执行**：pi 在会话代工作区里读写文件、跑 `bash`、搜索、调 MCP；镜像内置 git/gh/glab/ssh/jq/yq/rg/fd 等常用 CLI；
-- **交付物回传**：产物写入 `submit/`，文件/图片回到群；多文档自动打包 ZIP，超限有说明；
-- **技能可运营**：`SKILL.md` + `references/`，按 Profile 裁剪；可执行文件进入会话 PATH；管理台在线编辑、ZIP 导入、停用归档；
-- **pi 原生**：扩展（只读 guard、脱敏、事故压缩、subagent）、skills、prompt templates、MCP 原生接入；SRE/技术支持岗位包见 [AIOps 方案](docs/aiops.md)；
-- **工具链**：常用 CLI + `edit/write` 原生工具 + MCP 配方；见 [工具链](docs/tools.md)；
+- **告警接入**：`/api/v1/alerts/{source}` 支持 Alertmanager、Grafana、通用 webhook、PagerDuty；统一事件模型、去重、恢复、按来源 token 与限流；
+- **真执行**：pi 在会话代工作区里读写文件、跑 `bash`、搜索、调 MCP；镜像内置 git/gh/glab/ssh/jq/yq/rg/fd/kubectl 等常用 CLI；
+- **AI 诊断**：pi 原生 skills、prompts、extensions、subagent、compaction；Prometheus/Loki/Tempo/K8s 通过 MCP 查证据；只读 guard + tool_result 脱敏 + 证据门禁；
+- **处置报告**：pi 通过 `submit_report` 提交结构化报告；Go 保存草稿，人工补根因/验证后定稿、关闭案件、发飞书；
+- **案件/事故/报告**：告警聚合、时间线、SLA、责任员工、交接、复盘、手动恢复；列表支持时间范围筛选；
+- **MCP 工具网关**：一个 `agenthub-ops-mcp` 聚合 Prom/Loki/Tempo/K8s 与外部 MCP；工具前缀、只读策略、allow/deny、JSONL 审计、超时隔离；
 - **模型主备**：多供应商、有序候选、超时/429/5xx 自动切换、熔断，图片走 vision 线路；
 - **调度**：跨会话并发上限、公平队列 + 等待老化、每会话限流、cron 定时任务；
-- **数字员工工作台**：SRE/技术支持双岗位、员工级工具授权、案件、时间线、交接；AIOps 告警自动建案并拉起只读诊断；见 [AIOps 方案](docs/aiops.md)；
-- **只读观测工具**：Prometheus/Loki MCP 自动注册，诊断引用真实指标/日志；
 - **可治理**：多实例单活入口、管理台 admin/operator/view 令牌、CSRF、审计、审批、受控 K8s 动作、在线/批量重置、投递人工重试、健康检查、Prometheus 指标、备份恢复脚本；
 - **可靠投递**：领取租约 + `claimed/calling` 阶段；结果不明只标歧义、不盲目重发；排队消息有 TTL。
 
@@ -77,6 +75,22 @@ docker compose up -d
 curl -s 127.0.0.1:8787/healthz
 ```
 
+启用 AIOps 至少再配置：
+
+```dotenv
+AGENTHUB_AIOPS_ENABLED=true
+AGENTHUB_AIOPS_TOKEN=change-me
+AGENTHUB_AIOPS_CHAT_ID=oc_xxx
+AGENTHUB_PROMETHEUS_URL=http://prometheus:9090
+AGENTHUB_LOKI_URL=http://loki:3100
+```
+
+然后把 Alertmanager webhook 指向：
+
+```text
+http://<agenthub>:8787/api/v1/alerts/alertmanager
+```
+
 默认端口只绑回环：
 
 - `127.0.0.1:8787`：`/healthz`、`/metrics`
@@ -95,8 +109,8 @@ ssh -L 8788:127.0.0.1:8788 user@your-server
 使用已发布镜像：
 
 ```bash
-AGENTHUB_TAG=0.4.0 docker compose pull
-AGENTHUB_TAG=0.4.0 docker compose up -d
+AGENTHUB_TAG=latest docker compose pull
+AGENTHUB_TAG=latest docker compose up -d
 ```
 
 ## 架构
@@ -104,16 +118,21 @@ AGENTHUB_TAG=0.4.0 docker compose up -d
 ```mermaid
 flowchart LR
   U[飞书 / 钉钉] --> C[通道适配<br/>解析 · 白名单 · 附件]
+  A[Alertmanager / Grafana / 通用 / PagerDuty] --> C
   C --> E[Engine<br/>去重 · 批次 · 会话代]
   E <--> DB[(PostgreSQL)]
   E --> R[pi 运行时]
   R --> W[会话工作区<br/>配置 · 附件 · outbox]
+  R --> G[MCP 工具网关<br/>只读策略 · 审计]
+  G --> OBS[Prometheus / Loki / Tempo / K8s]
   R --> MR[模型路由]
   MR --> P1[主模型]
   MR --> P2[备选模型]
+  R --> REP[submit_report<br/>报告草稿]
+  REP --> DB
   E --> O[Outbox<br/>重试 · 补偿]
   O --> U
-  A[管理台 / API] --> E
+  ADM[管理台 / API] --> E
 ```
 
 一次运行：
@@ -139,14 +158,11 @@ React + TypeScript + Vite，构建产物嵌入 Go 二进制；浅色/深色切�
 
 | 页面 | 内容 |
 |---|---|
-| 运行概览 | 通道状态、模型、计数、队列、在线试跑 |
-| 在线会话 | 用户/群聊/私聊/定时任务筛选与搜索、ID 复制、优先级 |
-| 历史会话 | 按会话代聚合，查看消息详情 |
-| Skill | 文件树编辑、ZIP 导入、停用/归档 |
-| MCP | 新增/编辑，保存后热更新到 pi |
-| 定时任务 | cron、启停、立即运行、上次状态 |
-| 审计 | 管理面写操作记录 |
-| 设置 | 供应商 / 模型 / 线路 / 候选健康 |
+| 工作台 | 处理中案件、等待人工、firing 事故、报告数量 |
+| 案件 | 按状态/类型/时间/关键词筛选；点开诊断、证据、审批、报告 |
+| 事故 | 告警聚合、认领、手动恢复、关联案件与诊断 |
+| 报告 | 处置报告列表；pi 自动草稿，人工定稿、下载、发飞书 |
+| 系统 | 运行概览、在线/历史会话、Skill、MCP、定时任务、审计、设置 |
 
 ## 模型主备
 
@@ -182,7 +198,7 @@ routes:
 | `AGENTHUB_CHANNEL` | `off` | `off` / `feishu` / `dingtalk` |
 | `AGENTHUB_DB_URL` | 空 | 空为内存模式；compose 会自动注入 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_BOT_OPEN_ID` | 空 | 飞书应用凭证 |
-| `FEISHU_ALLOWED_USERS` / `FEISHU_ALLOWED_GROUPS` | 空 | 白名单；留空表示拒绝所有人 |
+| `FEISHU_ALLOWED_USERS` / `FEISHU_ALLOWED_CHATS` | 空 | 白名单；留空表示拒绝所有人 |
 | `AGENTHUB_AGENT_BASE_URL` / `AGENTHUB_AGENT_API_KEY` | 空 | 模型网关地址与 Key |
 | `AGENTHUB_AGENT_MODEL` | `gpt-4.1-mini` | 默认主模型 |
 | `AGENTHUB_ADMIN_TOKEN` | 空 | 管理台访问令牌 |
@@ -236,6 +252,8 @@ AGENTHUB_TEST_DATABASE_URL='postgres://postgres:agenthub@127.0.0.1:55433/agenthu
 ## 文档
 
 - [项目介绍](docs/intro.md)
+- [AIOps / 数字员工](docs/aiops.md)
+- [工具链与 MCP 网关](docs/tools.md)
 - [部署指南](docs/deploy.md)
 - [架构设计](docs/architecture.md)
 - [运维手册](docs/runbook.md)
@@ -247,14 +265,101 @@ AGENTHUB_TEST_DATABASE_URL='postgres://postgres:agenthub@127.0.0.1:55433/agenthu
 
 ## 状态与边界
 
-AgentHub 目前是 **v0.4.x**，适合内网或受控环境的小团队使用。
+当前主线是 **v0.8.x 开发版**，适合内网或受控环境的小团队试用；生产发布以 GitHub Releases 为准。
 
-- **单实例**：飞书/钉钉长连接目前一个应用只跑一个实例；
-- **钉钉**：回复依赖 `sessionWebhook`（约 1.5 小时），卡片未接入；入站文件/图片已下载，出站文件/图片在 webhook 有效期内交付；
-- **资源**：镜像约 430MB；每个并发 pi 进程约 100MB，按 `AGENTHUB_MAX_CONCURRENT_RUNS` 估算；
+- **定位**：Agentic AIOps / AI SRE 数字同事，不是通用 AIOps 平台，也不替代 Prometheus、Grafana、PagerDuty、ITSM；
+- **只读默认**：诊断只读；写操作必须审批；K8s 动作仅支持 allowlist 内的 scale/restart；
+- **真实验收**：已跑通真实 Alertmanager + Prometheus/Loki + 真实模型的 20 条独立告警；但仍是合成事件，不等于 20 个生产事故；
+- **HA**：飞书/钉钉长连接由 PostgreSQL advisory lock 选主；单活入口，不是无状态多活；
+- **钉钉**：回复依赖 `sessionWebhook`（约 1.5 小时），卡片未接入；入站文件/图片已下载；
 - **成本**：已记录 token，尚未按单价换算金额；
-- **pi**：镜像固定 1.4.0、会话文件 v3，升级需要回归；
-- **管理台**：没有内建用户体系，建议只在内网或网关后暴露。
+- **pi**：镜像固定 1.4.0、会话文件 v3；升级需要回归；
+- **管理台**：没有内建用户体系，建议只在内网或网关后暴露；
+- **未完成**：生产长跑、压测、灾备演练、多租户、SLO/错误预算、真实钉钉双实例接管。
+## 最佳实践
+
+### 1. 先接告警，再接工具
+
+最小上线顺序：
+
+1. 接 Alertmanager/Grafana webhook；
+2. 只读接 Prometheus/Loki；
+3. 验证告警 → 案件 → pi 诊断 → 飞书；
+4. 再加 Tempo/K8s；
+5. 最后才加审批动作。
+
+不要一开始就把所有 MCP、所有写工具全打开。
+
+### 2. 只读是默认值
+
+- 诊断运行默认 `ReadOnly`；
+- 写操作必须走 `approval_request`；
+- K8s 动作必须配置 namespace allowlist；
+- 不允许模型直接执行 shell 写操作；
+- 所有动作写审计和案件时间线。
+
+### 3. 新能力优先加在 pi 侧
+
+| 需求 | 放哪里 |
+|---|---|
+| 新 SOP、排查步骤、领域知识 | `pi-package/skills/<name>/SKILL.md` |
+| 新输出格式 | `pi-package/prompts/<name>.md` |
+| 新只读数据源 | 新增 MCP，挂到 `AGENTHUB_MCP_UPSTREAMS` |
+| 安全/上下文钩子 | pi extension |
+| 新告警来源、案件字段、页面、权限 | Go / React |
+
+判断标准：
+
+> **“知道更多、查得更多”放 pi；“触发、保存、权限、投递”放 AgentHub。**
+
+### 4. 报告必须可验证
+
+- 没有证据写“未验证”，不要写“服务正常”；
+- 根因和验证结果必须由人确认后才能定稿；
+- 定稿前检查：问题、影响、证据、根因、动作、验证、改进；
+- 报告发飞书后保留 Markdown 归档。
+
+### 5. 时间窗要对齐
+
+- 告警触发时间、查询窗口、日志时间戳必须是同一个时区；
+- 列表筛选使用 `from` / `to`（RFC3339 或 `YYYY-MM-DD`）；
+- 没有触发时间时，先查最近 1 小时，并在报告里写明假设。
+
+### 6. 用 20 个事件验收，不要用感觉验收
+
+固定样本，至少记录：
+
+- 证据覆盖率；
+- 有用率；
+- 根因正确/可验证比例；
+- 未授权动作数（必须为 0）；
+- 平均首响时间；
+- token/成本。
+
+如果观测数据缺失，先修数据接入，不要先改模型。
+
+### 7. 密钥与权限
+
+- `FEISHU_APP_SECRET`、模型 Key、MCP 凭据只放环境变量或密钥管理；
+- 管理台只监听回环，公网必须加 TLS 与网关；
+- 管理面使用 admin/operator/view 分权；
+- MCP 上游配置优先用 `AGENTHUB_MCP_UPSTREAMS_FILE`，不要把凭据长期放在命令行历史里。
+
+### 8. 生产部署
+
+- 多实例至少两个，开启 `AGENTHUB_HA_ENABLED=true`；
+- 数据库和 `/data` 卷定期备份；
+- 单实例并发从 2–4 开始，观察 pi 进程内存和模型限流；
+- 先做一次“备份 → 恢复 → 验证案件/报告”演练；
+- 升级 pi 前跑完整 `go test -race ./...` 和一次真实告警回归。
+
+### 9. 不要做的事
+
+- 不要用 AI 评分替代真实值班验收；
+- 不要让模型无审批执行写操作；
+- 不要把“查无数据”当成“服务正常”；
+- 不要把所有工具塞进一个无策略的 MCP；
+- 不要用 20 条合成事件宣称生产就绪。
 
 ## 贡献
 
