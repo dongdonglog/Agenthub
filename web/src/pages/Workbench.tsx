@@ -81,6 +81,18 @@ export function Workbench() {
               <div className="muted small" style={{ marginTop: 4 }}>{employee.mission}</div>
               {employee.allowed_tools?.length ? <div className="muted small">工具：{employee.allowed_tools.join(", ")}</div> : null}
               <Button className="link" onClick={() => loadStats(employee.id)}>绩效</Button>
+              <Button className="link" onClick={async () => {
+                const raw = window.prompt("允许的工具（逗号分隔）", (employee.allowed_tools ?? []).join(","));
+                if (raw === null) return;
+                try {
+                  await api(`/employees/${encodeURIComponent(employee.id)}`, {
+                    method: "PUT",
+                    body: JSON.stringify({ ...employee, allowed_tools: raw.split(",").map((x) => x.trim()).filter(Boolean) }),
+                  });
+                  show("员工授权已更新");
+                  employees.reload();
+                } catch (err) { show((err as Error).message, true); }
+              }}>编辑授权</Button>
             </div>
             <span className="mono muted small">{employee.chat_id || "未绑定群"}</span>
           </div>
