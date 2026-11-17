@@ -78,6 +78,8 @@ type Options struct {
 	Incidents *store.IncidentStore
 	// Cases 是统一案件与数字员工存储；为空表示未启用。
 	Cases *store.CaseStore
+	// ExecuteAction 执行已批准动作；为空表示只记录审批。
+	ExecuteAction func(ctx context.Context, approval *store.Approval) (string, error)
 }
 
 // Server 提供管理页面与管理 API。
@@ -129,6 +131,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/feedback", s.handleCaseFeedback)
 	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
+	mux.HandleFunc("POST /admin/api/v1/cases/{id}/approvals", s.handleCaseApprovalCreate)
+	mux.HandleFunc("POST /admin/api/v1/approvals/{id}/approve", s.handleApprovalDecide)
+	mux.HandleFunc("POST /admin/api/v1/approvals/{id}/reject", s.handleApprovalDecide)
 	mux.HandleFunc("GET /admin/api/v1/incidents", s.handleIncidents)
 	mux.HandleFunc("GET /admin/api/v1/incidents/{id}", s.handleIncident)
 	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/ack", s.handleIncidentAck)
@@ -893,7 +898,8 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	feedback, _ := s.opts.Cases.ListFeedback(r.Context(), c.ID, 50)
-	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback})
+	approvals, _ := s.opts.Cases.ListApprovals(r.Context(), c.ID)
+	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "approvals": approvals})
 }
 
 func (s *Server) handleCaseHandoff(rw http.ResponseWriter, r *http.Request) {
@@ -991,6 +997,76 @@ func (s *Server) handleCaseFeedback(rw http.ResponseWriter, r *http.Request) {
 	_ = s.opts.Cases.AddCaseEvent(r.Context(), id, "feedback", body.Actor, body.Verdict+" "+body.Note, time.Now())
 	s.audit(r, "case.feedback", id, body.Verdict)
 	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleCaseApprovalCreate(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	var body struct {
+		Action string          `json:"action"`
+		Params json.RawMessage `json:"params"`
+		Actor  string          `json:"actor"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Action != "k8s_scale" && body.Action != "k8s_restart" {
+		writeError(rw, http.StatusBadRequest, "只支持 k8s_scale / k8s_restart")
+		return
+	}
+	if body.Actor == "" {
+		body.Actor = "admin"
+	}
+	id := r.PathValue("id")
+	a, err := s.opts.Cases.CreateApproval(r.Context(), id, body.Action, body.Params, body.Actor, time.Now())
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), id, "approval", body.Actor, "申请动作 "+body.Action, time.Now())
+	s.audit(r, "approval.create", a.ID, body.Action)
+	writeJSON(rw, http.StatusOK, a)
+}
+
+func (s *Server) handleApprovalDecide(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	id := r.PathValue("id")
+	status := "approved"
+	if strings.HasSuffix(r.URL.Path, "/reject") {
+		status = "rejected"
+	}
+	var body struct {
+		Actor string `json:"actor"`
+	}
+	_ = decode(r, &body)
+	if body.Actor == "" {
+		body.Actor = "admin"
+	}
+	a, ok, err := s.opts.Cases.DecideApproval(r.Context(), id, status, body.Actor, "", time.Now())
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeError(rw, http.StatusConflict, "审批不存在或已处理")
+		return
+	}
+	if status == "approved" && s.opts.ExecuteAction != nil {
+		result, execErr := s.opts.ExecuteAction(r.Context(), a)
+		if execErr != nil {
+			result = "执行失败: " + execErr.Error()
+		}
+		_ = s.opts.Cases.SetApprovalResult(r.Context(), a.ID, result, time.Now())
+		_ = s.opts.Cases.AddCaseEvent(r.Context(), a.CaseID, "action", body.Actor, result, time.Now())
+	}
+	s.audit(r, "approval."+status, id, body.Actor)
+	writeJSON(rw, http.StatusOK, map[string]string{"status": status})
 }
 
 func (s *Server) handleEmployeeStats(rw http.ResponseWriter, r *http.Request) {

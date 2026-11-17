@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -73,6 +74,20 @@ type EmployeeStats struct {
 	Useful       int     `json:"useful"`
 	NotUseful    int     `json:"not_useful"`
 	AvgResolveMS float64 `json:"avg_resolve_ms"`
+}
+
+// Approval 是一次受控动作审批。
+type Approval struct {
+	ID          string          `json:"id"`
+	CaseID      string          `json:"case_id"`
+	Action      string          `json:"action"`
+	Params      json.RawMessage `json:"params"`
+	Status      string          `json:"status"`
+	RequestedBy string          `json:"requested_by"`
+	ApprovedBy  string          `json:"approved_by"`
+	Result      string          `json:"result"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // CaseStore 读写数字员工与案件。
@@ -183,6 +198,68 @@ func (s *CaseStore) SetCaseStatus(ctx context.Context, id, status string, now ti
 func (s *CaseStore) AddCaseEvent(ctx context.Context, caseID, kind, actor, text string, now time.Time) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO case_event (case_id, kind, actor, text, created_at) VALUES ($1,$2,$3,$4,$5)`, caseID, kind, actor, text, now)
 	return err
+}
+
+// CreateApproval 创建待审批动作。
+func (s *CaseStore) CreateApproval(ctx context.Context, caseID, action string, params json.RawMessage, requestedBy string, now time.Time) (*Approval, error) {
+	id := "apr_" + caseShortHash(caseID+action+now.Format(time.RFC3339Nano))
+	if len(params) == 0 {
+		params = json.RawMessage(`{}`)
+	}
+	a := &Approval{ID: id, CaseID: caseID, Action: action, Params: params, Status: "pending", RequestedBy: requestedBy, CreatedAt: now, UpdatedAt: now}
+	if _, err := s.pool.Exec(ctx, `INSERT INTO approval_request (id, case_id, action, params, status, requested_by, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`,
+		a.ID, a.CaseID, a.Action, a.Params, a.Status, a.RequestedBy, now); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// DecideApproval 原子审批；状态不是 pending 时拒绝。
+func (s *CaseStore) DecideApproval(ctx context.Context, id, status, actor, result string, now time.Time) (*Approval, bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE approval_request SET status=$2, approved_by=$3, result=$4, updated_at=$5 WHERE id=$1 AND status='pending'`, id, status, actor, result, now)
+	if err != nil {
+		return nil, false, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, false, nil
+	}
+	a, err := s.GetApproval(ctx, id)
+	return a, true, err
+}
+
+// SetApprovalResult 写入执行结果。
+func (s *CaseStore) SetApprovalResult(ctx context.Context, id, result string, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE approval_request SET result=$2, updated_at=$3 WHERE id=$1`, id, result, now)
+	return err
+}
+
+// GetApproval 读取审批。
+func (s *CaseStore) GetApproval(ctx context.Context, id string) (*Approval, error) {
+	a := &Approval{}
+	err := s.pool.QueryRow(ctx, `SELECT id, case_id, action, params, status, requested_by, approved_by, result, created_at, updated_at FROM approval_request WHERE id=$1`, id).
+		Scan(&a.ID, &a.CaseID, &a.Action, &a.Params, &a.Status, &a.RequestedBy, &a.ApprovedBy, &a.Result, &a.CreatedAt, &a.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return a, err
+}
+
+// ListApprovals 返回案件审批。
+func (s *CaseStore) ListApprovals(ctx context.Context, caseID string) ([]*Approval, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, case_id, action, params, status, requested_by, approved_by, result, created_at, updated_at FROM approval_request WHERE case_id=$1 ORDER BY created_at DESC`, caseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Approval
+	for rows.Next() {
+		a := &Approval{}
+		if err := rows.Scan(&a.ID, &a.CaseID, &a.Action, &a.Params, &a.Status, &a.RequestedBy, &a.ApprovedBy, &a.Result, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // AddFeedback 记录案件反馈。

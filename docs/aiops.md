@@ -174,6 +174,14 @@ AGENTHUB_LOKI_TOKEN=
 - 只读拉起技术支持诊断；
 - 管理台工作台统一查看。
 
+### 2.10 审批与受控动作
+
+- 案件详情可创建 `k8s_scale` / `k8s_restart` 审批；
+- 审批通过后由 `internal/action` 执行；
+- namespace allowlist（`AGENTHUB_K8S_NAMESPACES`）、replicas 1–20、只支持 scale/restart；
+- 所有动作写审计和案件时间线；
+- 未配置 `AGENTHUB_K8S_ENABLED` 时只记录审批，不执行。
+
 ## 3. 距离生产级 AIOps 还缺什么
 
 当前是**可用的 SRE 数字员工 MVP**，不是自动处置平台：

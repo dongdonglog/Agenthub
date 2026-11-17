@@ -10,7 +10,8 @@ type CaseItem = {
 type Event = { id: number; kind: string; actor: string; text: string; created_at: string };
 type Feedback = { id: number; verdict: string; note: string; actor: string; created_at: string };
 type Stats = { employee_id: string; cases: number; resolved: number; useful: number; not_useful: number; avg_resolve_ms: number };
-type Detail = { case: CaseItem; events: Event[]; feedback?: Feedback[] };
+type Approval = { id: string; case_id: string; action: string; params: unknown; status: string; requested_by: string; approved_by: string; result: string; created_at: string };
+type Detail = { case: CaseItem; events: Event[]; feedback?: Feedback[]; approvals?: Approval[] };
 
 const statusKind = (status: string) => status === "resolved" || status === "closed" ? "ok" : status === "waiting_human" ? "warn" : "danger";
 
@@ -26,6 +27,30 @@ export function Workbench() {
   const [stats, setStats] = useState<Stats | null>(null);
   const loadStats = async (employeeID: string) => {
     try { setStats(await api<Stats>(`/employees/${encodeURIComponent(employeeID)}/stats`)); } catch { setStats(null); }
+  };
+
+  const decide = async (id: string, action: "approve" | "reject") => {
+    try {
+      await api(`/approvals/${encodeURIComponent(id)}/${action}`, { method: "POST", body: JSON.stringify({ actor: "admin" }) });
+      show(action === "approve" ? "已批准" : "已拒绝");
+      detail.reload();
+    } catch (err) { show((err as Error).message, true); }
+  };
+
+  const requestScale = async () => {
+    if (!selected) return;
+    const namespace = window.prompt("namespace");
+    const deployment = window.prompt("deployment");
+    const replicas = Number(window.prompt("replicas (1-20)"));
+    if (!namespace || !deployment || !replicas) return;
+    try {
+      await api(`/cases/${encodeURIComponent(selected)}/approvals`, {
+        method: "POST",
+        body: JSON.stringify({ action: "k8s_scale", params: { namespace, deployment, replicas }, actor: "admin" }),
+      });
+      show("已提交审批");
+      detail.reload();
+    } catch (err) { show((err as Error).message, true); }
   };
 
   const act = async (path: string, success: string, body?: Record<string, string>) => {
@@ -115,7 +140,36 @@ export function Workbench() {
                   } catch (err) { show((err as Error).message, true); }
                 }}>生成复盘</Button>
                 <Button className="danger" onClick={() => act("resolve", "案件已关闭")}>关闭案件</Button>
+                <Button onClick={requestScale}>申请扩容审批</Button>
               </div>
+              {detail.data.approvals?.length ? (
+                <div>
+                  <div className="muted small" style={{ marginBottom: 6 }}>动作审批</div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>动作</th><th>状态</th><th>申请人</th><th>结果</th><th /></tr></thead>
+                      <tbody>
+                        {detail.data.approvals.map((approval) => (
+                          <tr key={approval.id}>
+                            <td className="mono">{approval.action}</td>
+                            <td><Badge kind={approval.status === "approved" ? "ok" : approval.status === "rejected" ? "danger" : "warn"}>{approval.status}</Badge></td>
+                            <td>{approval.requested_by}</td>
+                            <td className="muted" style={{ maxWidth: 360, wordBreak: "break-all" }}>{approval.result || "—"}</td>
+                            <td className="nowrap">
+                              {approval.status === "pending" ? (
+                                <>
+                                  <Button className="link" onClick={() => decide(approval.id, "approve")}>批准</Button>
+                                  <Button className="link danger-text" onClick={() => decide(approval.id, "reject")}>拒绝</Button>
+                                </>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>时间</th><th>类型</th><th>操作者</th><th>内容</th></tr></thead>

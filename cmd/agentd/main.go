@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/moying/agenthub/internal/action"
 	"github.com/moying/agenthub/internal/admin"
 	"github.com/moying/agenthub/internal/agent"
 	"github.com/moying/agenthub/internal/agent/pi"
@@ -453,16 +454,30 @@ func run() int {
 			logger.Warn("seed default profile failed", "error", err)
 		}
 	}
+	var actionExecutor func(ctx context.Context, approval *store.Approval) (string, error)
+	if cfg.Observability.K8sEnabled {
+		kubectl := cfg.Observability.KubectlBin
+		if kubectl == "" {
+			kubectl = "kubectl"
+		}
+		namespaces := make(map[string]bool, len(cfg.Observability.K8sNamespaces))
+		for _, ns := range cfg.Observability.K8sNamespaces {
+			namespaces[ns] = true
+		}
+		executor := &action.Executor{Kubectl: kubectl, Namespaces: namespaces}
+		actionExecutor = executor.Execute
+	}
 	adminSrv := admin.New(cfg, engine, adminStore, admin.Options{
-		Version:      version.Version,
-		FeishuStatus: feishuStatus,
-		Agent:        runner,
-		Tools:        nil,
-		Runtime:      "pi",
-		PiVersion:    piVersion,
-		Profiles:     profiles,
-		Incidents:    incidentStore,
-		Cases:        caseStore,
+		Version:       version.Version,
+		FeishuStatus:  feishuStatus,
+		Agent:         runner,
+		Tools:         nil,
+		Runtime:       "pi",
+		PiVersion:     piVersion,
+		Profiles:      profiles,
+		Incidents:     incidentStore,
+		Cases:         caseStore,
+		ExecuteAction: actionExecutor,
 		History: func(ctx context.Context) ([]store.Generation, error) {
 			if journal == nil {
 				return nil, nil

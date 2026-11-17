@@ -77,20 +77,21 @@ type SupportConfig struct {
 
 // ObservabilityConfig 是只读观测工具连接配置。
 type ObservabilityConfig struct {
-	PrometheusURL      string `yaml:"prometheus_url"`
-	PrometheusToken    string `yaml:"prometheus_token"`
-	PrometheusUser     string `yaml:"prometheus_user"`
-	PrometheusPassword string `yaml:"prometheus_password"`
-	LokiURL            string `yaml:"loki_url"`
-	LokiToken          string `yaml:"loki_token"`
-	LokiUser           string `yaml:"loki_user"`
-	LokiPassword       string `yaml:"loki_password"`
-	TempoURL           string `yaml:"tempo_url"`
-	TempoToken         string `yaml:"tempo_token"`
-	TempoUser          string `yaml:"tempo_user"`
-	TempoPassword      string `yaml:"tempo_password"`
-	K8sEnabled         bool   `yaml:"k8s_enabled"`
-	KubectlBin         string `yaml:"kubectl_bin"`
+	PrometheusURL      string   `yaml:"prometheus_url"`
+	PrometheusToken    string   `yaml:"prometheus_token"`
+	PrometheusUser     string   `yaml:"prometheus_user"`
+	PrometheusPassword string   `yaml:"prometheus_password"`
+	LokiURL            string   `yaml:"loki_url"`
+	LokiToken          string   `yaml:"loki_token"`
+	LokiUser           string   `yaml:"loki_user"`
+	LokiPassword       string   `yaml:"loki_password"`
+	TempoURL           string   `yaml:"tempo_url"`
+	TempoToken         string   `yaml:"tempo_token"`
+	TempoUser          string   `yaml:"tempo_user"`
+	TempoPassword      string   `yaml:"tempo_password"`
+	K8sEnabled         bool     `yaml:"k8s_enabled"`
+	KubectlBin         string   `yaml:"kubectl_bin"`
+	K8sNamespaces      []string `yaml:"k8s_namespaces"`
 	// OpsMCPBin 是内置 ops MCP server 路径；为空时自动查找可执行文件旁。
 	OpsMCPBin string `yaml:"ops_mcp_bin"`
 }
@@ -351,6 +352,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Observability.TempoPassword, "AGENTHUB_TEMPO_PASSWORD")
 	setBool(&cfg.Observability.K8sEnabled, "AGENTHUB_K8S_ENABLED")
 	setStr(&cfg.Observability.KubectlBin, "AGENTHUB_KUBECTL_BIN")
+	setList(&cfg.Observability.K8sNamespaces, "AGENTHUB_K8S_NAMESPACES")
 	setStr(&cfg.Observability.OpsMCPBin, "AGENTHUB_OPS_MCP_BIN")
 	setInt(&cfg.AIOps.MaxAlerts, "AGENTHUB_AIOPS_MAX_ALERTS")
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
