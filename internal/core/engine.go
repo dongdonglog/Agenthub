@@ -52,6 +52,7 @@ type Engine struct {
 	events      map[string][]RunEvent
 	artifacts   map[string]*Artifact
 	artifactDir string
+	reportSink  func(ctx context.Context, caseID string, raw []byte) error
 	// artifactMaxBytes / artifactMaxCount / artifactMaxTotal 限制单次产物交付。
 	artifactMaxBytes int64
 	artifactMaxCount int
@@ -207,6 +208,11 @@ func (e *Engine) SetNow(fn func() time.Time) {
 	if fn != nil {
 		e.now = fn
 	}
+}
+
+// SetReportSink 设置 pi 处置报告回写钩子。
+func (e *Engine) SetReportSink(fn func(ctx context.Context, caseID string, raw []byte) error) {
+	e.reportSink = fn
 }
 
 // SetConcurrency 限制跨会话并发运行数；n <= 0 表示不限制。
@@ -403,6 +409,7 @@ func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 	msg := &Message{
 		ID:             fmt.Sprintf("msg_%s_%d", conv, e.seq[conv]),
 		ConversationID: conv,
+		CaseID:         in.CaseID,
 		ChatID:         in.Chat.ID,
 		Role:           "user",
 		Generation:     e.generation(conv),

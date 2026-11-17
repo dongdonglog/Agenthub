@@ -131,6 +131,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		RunID:          run.ID,
 		ReadOnly:       batch[0].ReadOnly,
 		ToolAllow:      batch[0].ToolAllow,
+		CaseID:         batch[0].CaseID,
 		ConversationID: conv,
 		Generation:     batch[0].Generation,
 		Progress:       progress,
@@ -247,6 +248,12 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	e.deliveries[delivery.IdempotencyKey] = delivery
 	alreadySent := e.sent[delivery.IdempotencyKey]
 	e.mu.Unlock()
+
+	if run.State == "completed" && len(out.Report) > 0 && batch[0].CaseID != "" {
+		if err := e.saveReport(ctx, batch[0].CaseID, out.Report); err != nil {
+			e.log.Warn("save pi report failed", "case", batch[0].CaseID, "error", err)
+		}
+	}
 
 	e.projectReaction(batch[0], run.State)
 	var artifactDeliveries []*Delivery
@@ -419,4 +426,11 @@ func replyTarget(m *Message) string {
 		return ""
 	}
 	return m.ExternalID
+}
+
+func (e *Engine) saveReport(ctx context.Context, caseID string, raw []byte) error {
+	if e.reportSink == nil {
+		return nil
+	}
+	return e.reportSink(ctx, caseID, raw)
 }

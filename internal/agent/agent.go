@@ -32,6 +32,8 @@ type Input struct {
 	TraceID string
 	// RunID 是本次运行的标识。
 	RunID string
+	// CaseID 是本次运行关联的案件，用于回写处置报告。
+	CaseID string
 	// ReadOnly 表示本次运行禁止写操作。
 	ReadOnly bool
 	// ToolAllow 是本次运行允许的工具；空表示使用运行时配置。
@@ -57,8 +59,9 @@ type Usage struct {
 
 // Output 是一次运行的产出。
 type Output struct {
-	Text  string
-	Usage Usage
+	Text   string
+	Report []byte
+	Usage  Usage
 	// Artifacts 是本次运行写入工作区 outbox 的产物。
 	Artifacts []channel.Artifact
 }

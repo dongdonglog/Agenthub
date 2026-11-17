@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -297,7 +298,7 @@ func run() int {
 	skillDirs := []string{}
 	promptDirs := []string{}
 	if piPackageDir != "" {
-		for _, name := range []string{"agenthub-guard.ts", "agenthub-redact.ts", "agenthub-compaction.ts", "agenthub-subagent.ts"} {
+		for _, name := range []string{"agenthub-guard.ts", "agenthub-redact.ts", "agenthub-compaction.ts", "agenthub-subagent.ts", "agenthub-report.ts"} {
 			if _, err := os.Stat(filepath.Join(piPackageDir, "extensions", name)); err == nil {
 				extensions = append(extensions, filepath.Join(piPackageDir, "extensions", name))
 			}
@@ -392,6 +393,25 @@ func run() int {
 		}, time.Now()); err != nil {
 			logger.Warn("seed support employee failed", "error", err)
 		}
+	}
+	if caseStore != nil {
+		engine.SetReportSink(func(ctx context.Context, caseID string, raw []byte) error {
+			var report store.CaseReport
+			if err := json.Unmarshal(raw, &report); err != nil {
+				return err
+			}
+			report.CaseID = caseID
+			if report.Status == "" {
+				report.Status = "draft"
+			}
+			if report.Problem == "" {
+				return fmt.Errorf("pi 报告缺少 problem")
+			}
+			if err := caseStore.SaveCaseReport(ctx, report, time.Now()); err != nil {
+				return err
+			}
+			return caseStore.AddCaseEvent(ctx, caseID, "report", "pi", "pi 已提交处置报告草稿", time.Now())
+		})
 	}
 	if knowledgeStore != nil {
 		knowledgeDir := cfg.Support.KnowledgeDir

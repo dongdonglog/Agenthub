@@ -147,6 +147,11 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 		return agent.Output{}, fmt.Errorf("同步 Skill 可执行文件失败: %w", err)
 	}
 	started := time.Now()
+	reportDir := filepath.Join(ws, "reports")
+	if err := os.MkdirAll(reportDir, 0o755); err != nil {
+		return agent.Output{}, err
+	}
+	_ = os.Remove(filepath.Join(reportDir, "report.json"))
 	if err := prepareRunOutbox(ws, in.RunID); err != nil {
 		return agent.Output{}, err
 	}
@@ -195,6 +200,9 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	}
 	if err == nil {
 		out.Artifacts = collectRunArtifacts(ws, in.RunID, started)
+		if raw, readErr := os.ReadFile(filepath.Join(reportDir, "report.json")); readErr == nil {
+			out.Report = raw
+		}
 	}
 	return out, err
 }
@@ -301,6 +309,7 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 		"PATH="+pathValue,
 		"PI_CODING_AGENT_DIR="+filepath.Join(ws, ".agenthub-agent"),
 		"AGENTHUB_OUTBOX_DIR="+filepath.Join(ws, "outbox"),
+		"AGENTHUB_REPORT_DIR="+filepath.Join(ws, "reports"),
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()

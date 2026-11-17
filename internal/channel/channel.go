@@ -55,6 +55,8 @@ type Inbound struct {
 	ToolAllow []string
 	// ConversationKey 覆盖默认会话键；为空时按 Tenant:ChatID:Sender 计算。
 	ConversationKey string
+	// CaseID 关联的案件，用于回写处置报告。
+	CaseID string
 	// NoReply 为 true 时投递不回挂消息（用于定时任务等没有平台消息 ID 的来源）。
 	NoReply      bool
 	Attachments  []Attachment

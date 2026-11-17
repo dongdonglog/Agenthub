@@ -140,7 +140,13 @@ func (i *Ingestor) HandleEvent(ctx context.Context, payload *alerting.Event) (in
 		return accepted, nil
 	}
 	i.syncCase(ctx, incident, "in_progress", payload.Source, now)
-	if err := i.submitDiagnosis(ctx, incident, payload); err != nil {
+	caseID := ""
+	if i.cases != nil {
+		if c, _ := i.cases.FindCaseBySource(ctx, payload.Source, incident.ID); c != nil {
+			caseID = c.ID
+		}
+	}
+	if err := i.submitDiagnosis(ctx, incident, payload, caseID); err != nil {
 		i.log.Error("submit aiops diagnosis failed", "incident", incident.ID, "error", err)
 		return accepted, err
 	}
@@ -176,7 +182,7 @@ func (i *Ingestor) syncCase(ctx context.Context, incident *store.Incident, statu
 	}
 }
 
-func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident, payload *alerting.Event) error {
+func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident, payload *alerting.Event, caseID string) error {
 	prompt := i.buildPrompt(incident, payload)
 	toolAllow := []string{}
 	if i.cases != nil {

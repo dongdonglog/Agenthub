@@ -16,6 +16,7 @@ type Message struct {
 	Generation     int
 	TraceID        string
 	ConversationID string
+	CaseID         string
 	ChatID         string
 	ChatKind       string
 	ExternalID     string
@@ -37,6 +38,7 @@ type Message struct {
 type Run struct {
 	ID             string
 	ConversationID string
+	CaseID         string
 	ChatID         string
 	// Round 是同一群（或私聊）内按运行递增的轮次编号。
 	Round        int
@@ -117,6 +119,7 @@ type RunEvent struct {
 // Presentation 描述一次运行对应的可更新输出。
 type Presentation struct {
 	ConversationID string
+	CaseID         string
 	ChatID         string
 	ReplyTo        string
 	RunID          string
