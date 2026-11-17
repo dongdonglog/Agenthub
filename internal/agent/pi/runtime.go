@@ -67,6 +67,21 @@ func New(cfg Config) *Runtime {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	for i, path := range cfg.Extensions {
+		if abs, err := filepath.Abs(path); err == nil {
+			cfg.Extensions[i] = abs
+		}
+	}
+	for i, path := range cfg.Skills {
+		if abs, err := filepath.Abs(path); err == nil {
+			cfg.Skills[i] = abs
+		}
+	}
+	for i, path := range cfg.Prompts {
+		if abs, err := filepath.Abs(path); err == nil {
+			cfg.Prompts[i] = abs
+		}
+	}
 	for _, key := range []string{"AgentDir", "SessionDir", "WorkspaceDir"} {
 		var value string
 		switch key {

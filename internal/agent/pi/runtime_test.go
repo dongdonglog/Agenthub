@@ -250,3 +250,16 @@ func TestRuntimeRealPiUsage(t *testing.T) {
 	}
 	t.Logf("text=%q usage=%+v", out.Text, out.Usage)
 }
+
+func TestRuntimeNormalizesResourcePaths(t *testing.T) {
+	dir := t.TempDir()
+	rt := New(Config{
+		AgentDir: dir, SessionDir: dir, WorkspaceDir: dir,
+		Extensions: []string{"pi-package/extensions/agenthub-guard.ts"},
+		Skills:     []string{"pi-package/skills"},
+		Prompts:    []string{"pi-package/prompts"},
+	})
+	if !filepath.IsAbs(rt.cfg.Extensions[0]) || !filepath.IsAbs(rt.cfg.Skills[0]) || !filepath.IsAbs(rt.cfg.Prompts[0]) {
+		t.Fatalf("paths = %+v %+v %+v", rt.cfg.Extensions, rt.cfg.Skills, rt.cfg.Prompts)
+	}
+}
