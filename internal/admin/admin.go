@@ -85,6 +85,8 @@ type Options struct {
 	NotifyApproval func(ctx context.Context, approval *store.Approval) error
 	// CreateTicket 手动创建支持工单。
 	CreateTicket func(ctx context.Context, title, summary, service, environment, priority, requester string) (string, error)
+	// SendReport 把处置报告发到案件群。
+	SendReport func(ctx context.Context, caseID, text string) error
 }
 
 // Server 提供管理页面与管理 API。
@@ -139,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/cases/{id}/report", s.handleCaseReportGet)
 	mux.HandleFunc("PUT /admin/api/v1/cases/{id}/report", s.handleCaseReportPut)
 	mux.HandleFunc("GET /admin/api/v1/reports", s.handleReports)
+	mux.HandleFunc("POST /admin/api/v1/cases/{id}/report/send", s.handleCaseReportSend)
 	mux.HandleFunc("POST /admin/api/v1/cases", s.handleCaseCreate)
 	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
 	mux.HandleFunc("PUT /admin/api/v1/employees/{id}", s.handleEmployeeUpdate)
@@ -1078,6 +1081,35 @@ func (s *Server) handleCaseReportPut(rw http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "case.report", c.ID, body.Status)
 	writeJSON(rw, http.StatusOK, body)
+}
+
+func (s *Server) handleCaseReportSend(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil || s.opts.SendReport == nil {
+		writeError(rw, http.StatusServiceUnavailable, "报告发送未启用")
+		return
+	}
+	c, err := s.opts.Cases.GetCase(r.Context(), r.PathValue("id"))
+	if err != nil || c == nil {
+		writeError(rw, http.StatusNotFound, "案件不存在")
+		return
+	}
+	report, _ := s.opts.Cases.GetCaseReport(r.Context(), c.ID)
+	if report == nil {
+		report = s.draftReport(r.Context(), c)
+	}
+	text := s.renderReport(c, report)
+	if err := s.opts.SendReport(r.Context(), c.ID, text); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "report", "admin", "处置报告已发送到群", time.Now())
+	s.audit(r, "case.report.send", c.ID, "")
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) renderReport(c *store.Case, report *store.CaseReport) string {
+	return fmt.Sprintf("# %s\n\n案件：%s\n影响：%s\n\n## 问题\n%s\n\n## 证据\n%s\n\n## 根因\n%s\n\n## 动作\n%s\n\n## 验证\n%s\n\n## 后续改进\n%s\n",
+		c.Title, c.ID, report.Impact, report.Problem, report.Evidence, report.RootCause, report.Actions, report.Verification, report.Prevention)
 }
 
 func (s *Server) handleReports(rw http.ResponseWriter, r *http.Request) {

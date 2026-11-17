@@ -65,7 +65,7 @@ export function CaseReport() {
     <div className="stack">
       <Breadcrumbs items={[{ label: "案件", to: "/cases" }, { label: id, to: `/cases/${id}` }, { label: "处置报告" }]} />
       <PageHeader title="处置报告" description={<span>{data.data?.case.title} · <span className="mono">{id}</span> · <Badge kind={report.status === "final" ? "ok" : "warn"}>{report.status}</Badge></span>}
-        actions={<div className="row"><Button onClick={download}>下载 Markdown</Button><Button onClick={() => save("draft")} disabled={busy}>保存草稿</Button><Button className="primary" onClick={() => save("final")} disabled={busy}>定稿并关闭案件</Button></div>} />
+        actions={<div className="row"><Button onClick={download}>下载 Markdown</Button><Button onClick={async () => { try { await api(`/cases/${encodeURIComponent(id)}/report/send`, { method: "POST" }); show("报告已发送到飞书"); } catch (err) { show((err as Error).message, true); } }}>发送到飞书</Button><Button onClick={() => save("draft")} disabled={busy}>保存草稿</Button><Button className="primary" onClick={() => save("final")} disabled={busy}>定稿并关闭案件</Button></div>} />
       <Card title="报告内容">
         <div className="form-grid">
           {FIELDS.map((field) => (

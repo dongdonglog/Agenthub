@@ -567,6 +567,21 @@ func run() int {
 				Service: service, Environment: environment, Priority: priority, Requester: requester, Source: "manual",
 			})
 		},
+		SendReport: func(ctx context.Context, caseID, text string) error {
+			fc, ok := ch.(*feishu.Channel)
+			if !ok {
+				return fmt.Errorf("当前通道不支持发送报告")
+			}
+			if caseStore == nil {
+				return fmt.Errorf("案件存储未接入")
+			}
+			c, err := caseStore.GetCase(ctx, caseID)
+			if err != nil || c == nil || c.ChatID == "" {
+				return fmt.Errorf("案件没有绑定群")
+			}
+			_, err = fc.Client().SendText(ctx, c.ChatID, "", text)
+			return err
+		},
 		NotifyApproval: func(ctx context.Context, approval *store.Approval) error {
 			fc, ok := ch.(*feishu.Channel)
 			if !ok || caseStore == nil {
