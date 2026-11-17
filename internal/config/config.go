@@ -5,6 +5,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -60,12 +61,13 @@ type Config struct {
 
 // AIOpsConfig 是 Prometheus Alertmanager 告警接入配置。
 type AIOpsConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	Token          string `yaml:"token"`
-	ChatID         string `yaml:"chat_id"`
-	RunbookDir     string `yaml:"runbook_dir"`
-	ServiceCatalog string `yaml:"service_catalog"`
-	MaxAlerts      int    `yaml:"max_alerts"`
+	Enabled        bool              `yaml:"enabled"`
+	Token          string            `yaml:"token"`
+	ChatID         string            `yaml:"chat_id"`
+	RunbookDir     string            `yaml:"runbook_dir"`
+	ServiceCatalog string            `yaml:"service_catalog"`
+	MaxAlerts      int               `yaml:"max_alerts"`
+	SourceTokens   map[string]string `yaml:"source_tokens"`
 }
 
 // HAConfig 是单活入口选主配置。
@@ -373,6 +375,9 @@ func applyEnv(cfg *Config) {
 	setList(&cfg.Observability.K8sNamespaces, "AGENTHUB_K8S_NAMESPACES")
 	setStr(&cfg.Observability.OpsMCPBin, "AGENTHUB_OPS_MCP_BIN")
 	setInt(&cfg.AIOps.MaxAlerts, "AGENTHUB_AIOPS_MAX_ALERTS")
+	if raw := os.Getenv("AGENTHUB_AIOPS_SOURCE_TOKENS"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg.AIOps.SourceTokens)
+	}
 	setStr(&cfg.Agent.BaseURL, "AGENTHUB_AGENT_BASE_URL")
 	setStr(&cfg.Agent.FallbackModel, "AGENTHUB_AGENT_FALLBACK_MODEL")
 	setStr(&cfg.Agent.VisionModel, "AGENTHUB_AGENT_VISION_MODEL")

@@ -437,7 +437,9 @@ func run() int {
 				logger.Warn("load service catalog failed", "error", err, "path", catalogPath)
 			}
 			ingestor.SetCases(caseStore, "sre-oncall")
-			srv.SetAlertHandler(aiops.NewHandler(ingestor, cfg.AIOps.Token))
+			alertHandler := aiops.NewHandler(ingestor, cfg.AIOps.Token)
+			alertHandler.SetSourceTokens(cfg.AIOps.SourceTokens)
+			srv.SetAlertHandler(alertHandler)
 			logger.Info("aiops alert webhook enabled", "chat", cfg.AIOps.ChatID, "runbook_dir", cfg.AIOps.RunbookDir)
 		}
 	}

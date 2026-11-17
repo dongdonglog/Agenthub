@@ -69,7 +69,7 @@ func (s *Server) Handler() http.Handler {
 		s.metrics.Handler().ServeHTTP(rw, r)
 	})
 	if s.alertHandler != nil {
-		mux.Handle("POST /api/v1/alerts/alertmanager", s.alertHandler)
+		mux.Handle("POST /api/v1/alerts/{source}", s.alertHandler)
 	}
 	if s.ticketHandler != nil {
 		mux.Handle("POST /api/v1/tickets", s.ticketHandler)

@@ -3,7 +3,6 @@ package aiops
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moying/agenthub/internal/alerting"
 	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/store"
@@ -61,37 +61,25 @@ func (i *Ingestor) SetCases(cases *store.CaseStore, employeeID string) {
 	i.employee = employeeID
 }
 
-// AlertmanagerPayload 是 Alertmanager webhook v4 的最小字段。
-type AlertmanagerPayload struct {
-	Version           string            `json:"version"`
-	GroupKey          string            `json:"groupKey"`
-	Status            string            `json:"status"`
-	Receiver          string            `json:"receiver"`
-	GroupLabels       map[string]string `json:"groupLabels"`
-	CommonLabels      map[string]string `json:"commonLabels"`
-	CommonAnnotations map[string]string `json:"commonAnnotations"`
-	ExternalURL       string            `json:"externalURL"`
-	Alerts            []Alert           `json:"alerts"`
-}
+// AlertmanagerPayload 是 Alertmanager/Grafana 兼容事件。
+type AlertmanagerPayload = alerting.Event
 
-// Alert 是 Alertmanager 单条告警。
-type Alert struct {
-	Status       string            `json:"status"`
-	Labels       map[string]string `json:"labels"`
-	Annotations  map[string]string `json:"annotations"`
-	StartsAt     time.Time         `json:"startsAt"`
-	EndsAt       time.Time         `json:"endsAt"`
-	GeneratorURL string            `json:"generatorURL"`
-	Fingerprint  string            `json:"fingerprint"`
-}
+// Alert 是归一化单条告警。
+type Alert = alerting.Alert
 
-// Handle 处理一份 webhook；返回处理的告警数。
+// Handle 处理 Alertmanager 原始 webhook；保留旧入口兼容。
 func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
-	var payload AlertmanagerPayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return 0, fmt.Errorf("解析告警失败: %w", err)
+	event, err := alerting.Alertmanager{}.Decode(raw)
+	if err != nil {
+		return 0, err
 	}
-	if len(payload.Alerts) == 0 {
+	alerting.Normalize(event, "alertmanager")
+	return i.HandleEvent(ctx, event)
+}
+
+// HandleEvent 处理归一化告警事件；返回处理的告警数。
+func (i *Ingestor) HandleEvent(ctx context.Context, payload *alerting.Event) (int, error) {
+	if payload == nil || len(payload.Alerts) == 0 {
 		return 0, nil
 	}
 	groupKey := strings.TrimSpace(payload.GroupKey)
@@ -99,7 +87,7 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 		groupKey = payload.Alerts[0].Fingerprint
 	}
 	if groupKey == "" {
-		groupKey = groupKeyOf(payload.Alerts[0])
+		groupKey = alerting.GroupKey(payload.Alerts[0])
 	}
 	now := i.now()
 
@@ -110,7 +98,7 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 		}
 		if ok && inc != nil {
 			_ = i.store.AddEvent(ctx, inc.ID, "resolved", "alertmanager", "告警组已恢复", now)
-			i.syncCase(ctx, inc, "resolved", now)
+			i.syncCase(ctx, inc, "resolved", payload.Source, now)
 			if i.metrics != nil {
 				i.metrics.Inc("agenthub_incidents_total", map[string]string{"status": "resolved"})
 			}
@@ -151,7 +139,7 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 		_ = i.store.AddEvent(ctx, incident.ID, "alert", "alertmanager", "告警组新增事件", now)
 		return accepted, nil
 	}
-	i.syncCase(ctx, incident, "in_progress", now)
+	i.syncCase(ctx, incident, "in_progress", payload.Source, now)
 	if err := i.submitDiagnosis(ctx, incident, payload); err != nil {
 		i.log.Error("submit aiops diagnosis failed", "incident", incident.ID, "error", err)
 		return accepted, err
@@ -162,11 +150,14 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (int, error) {
 	return accepted, nil
 }
 
-func (i *Ingestor) syncCase(ctx context.Context, incident *store.Incident, status string, now time.Time) {
+func (i *Ingestor) syncCase(ctx context.Context, incident *store.Incident, status, source string, now time.Time) {
 	if i.cases == nil || incident == nil {
 		return
 	}
-	c, created, err := i.cases.EnsureCase(ctx, i.employee, "incident", "alertmanager", incident.ID,
+	if source == "" {
+		source = "alertmanager"
+	}
+	c, created, err := i.cases.EnsureCase(ctx, i.employee, "incident", source, incident.ID,
 		incident.Title, incident.Summary, incident.Severity, incident.Service, incident.Environment, incident.ChatID, now)
 	if err != nil {
 		i.log.Warn("sync case failed", "incident", incident.ID, "error", err)
@@ -174,18 +165,18 @@ func (i *Ingestor) syncCase(ctx context.Context, incident *store.Incident, statu
 	}
 	if status == "resolved" {
 		_ = i.cases.SetCaseStatus(ctx, c.ID, "resolved", now)
-		_ = i.cases.AddCaseEvent(ctx, c.ID, "resolved", "alertmanager", "告警组恢复，案件关闭", now)
+		_ = i.cases.AddCaseEvent(ctx, c.ID, "resolved", source, "告警组恢复，案件关闭", now)
 		return
 	}
 	_ = i.cases.SetCaseStatus(ctx, c.ID, "in_progress", now)
 	if created {
-		_ = i.cases.AddCaseEvent(ctx, c.ID, "created", "alertmanager", "由告警创建案件", now)
+		_ = i.cases.AddCaseEvent(ctx, c.ID, "created", source, "由告警创建案件", now)
 	} else {
-		_ = i.cases.AddCaseEvent(ctx, c.ID, "updated", "alertmanager", "案件收到新告警", now)
+		_ = i.cases.AddCaseEvent(ctx, c.ID, "updated", source, "案件收到新告警", now)
 	}
 }
 
-func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident, payload AlertmanagerPayload) error {
+func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident, payload *alerting.Event) error {
 	prompt := i.buildPrompt(incident, payload)
 	toolAllow := []string{}
 	if i.cases != nil {
@@ -197,7 +188,7 @@ func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident
 		Channel: "aiops", Tenant: "aiops",
 		ExternalID: "incident:" + incident.ID + ":firing",
 		SentAt:     i.now(),
-		Sender:     channel.Sender{OpenID: "alertmanager", Name: "Alertmanager"},
+		Sender:     channel.Sender{OpenID: payload.Source, Name: payload.Source},
 		Chat:       channel.Chat{ID: i.cfg.ChatID, Kind: "group", Name: "运维告警"},
 		Text:       prompt,
 		MsgType:    "text",
@@ -208,7 +199,7 @@ func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident
 	return err
 }
 
-func (i *Ingestor) buildPrompt(incident *store.Incident, payload AlertmanagerPayload) string {
+func (i *Ingestor) buildPrompt(incident *store.Incident, payload *alerting.Event) string {
 	var b strings.Builder
 	b.WriteString("【运维告警诊断】\n\n")
 	b.WriteString("请以 SRE 只读诊断模式处理这次告警：先判断影响面，再列证据、根因假设和建议动作；不要执行写操作或变更。\n\n")
@@ -248,7 +239,7 @@ func (i *Ingestor) buildPrompt(incident *store.Incident, payload AlertmanagerPay
 	return b.String()
 }
 
-func (i *Ingestor) runbookFor(incident *store.Incident, payload AlertmanagerPayload) string {
+func (i *Ingestor) runbookFor(incident *store.Incident, payload *alerting.Event) string {
 	if i.cfg.RunbookDir == "" {
 		return ""
 	}
@@ -277,7 +268,7 @@ func (i *Ingestor) runbookFor(incident *store.Incident, payload AlertmanagerPayl
 	return ""
 }
 
-func seedOf(payload AlertmanagerPayload) store.IncidentSeed {
+func seedOf(payload *alerting.Event) store.IncidentSeed {
 	labels := payload.CommonLabels
 	annotations := payload.CommonAnnotations
 	if len(labels) == 0 && len(payload.Alerts) > 0 {
@@ -307,19 +298,7 @@ func recordOf(alert Alert, seed store.IncidentSeed) store.AlertRecord {
 	}
 }
 
-func groupKeyOf(alert Alert) string {
-	keys := []string{"alertname", "service", "job", "instance", "cluster", "namespace"}
-	var parts []string
-	for _, key := range keys {
-		if value := alert.Labels[key]; value != "" {
-			parts = append(parts, key+"="+value)
-		}
-	}
-	if len(parts) == 0 {
-		return alert.Fingerprint
-	}
-	return strings.Join(parts, "|")
-}
+func groupKeyOf(alert Alert) string { return alerting.GroupKey(alert) }
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {

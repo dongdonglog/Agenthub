@@ -32,12 +32,12 @@ func TestSeedAndPrompt(t *testing.T) {
 			Annotations: map[string]string{"summary": "错误率过高", "description": "5xx 超过 5%"},
 			StartsAt:    time.Now(), Fingerprint: "fp1"}},
 	}
-	seed := seedOf(payload)
+	seed := seedOf(&payload)
 	if seed.Service != "api" || seed.Severity != "critical" || seed.Title != "错误率过高" {
 		t.Fatalf("seed = %+v", seed)
 	}
 	i := &Ingestor{cfg: Config{MaxAlerts: 10}, now: time.Now}
-	prompt := i.buildPrompt(&store.Incident{ID: "inc_1", Title: seed.Title, Severity: seed.Severity, Service: seed.Service}, payload)
+	prompt := i.buildPrompt(&store.Incident{ID: "inc_1", Title: seed.Title, Severity: seed.Severity, Service: seed.Service}, &payload)
 	if !strings.Contains(prompt, "HighErrorRate") || !strings.Contains(prompt, "只读诊断") {
 		t.Fatalf("prompt = %s", prompt)
 	}
