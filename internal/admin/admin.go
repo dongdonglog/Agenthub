@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -181,19 +182,19 @@ func (s *Server) Handler() http.Handler {
 
 // withAuth 在配置了 Token 时校验管理面访问。
 //
-// @remarks 支持 Bearer 头与登录 Cookie；写操作额外要求 X-Requested-With 头，降低 CSRF 风险。
+// @remarks 支持 admin / operator / view 三种令牌；写操作需要 operator/admin，
+// 并额外要求 X-Requested-With 头，降低 CSRF 风险。
 func (s *Server) withAuth(next http.Handler) http.Handler {
-	token := s.cfg.Admin.Token
+	if s.cfg.Admin.Token == "" && s.cfg.Admin.OperatorToken == "" && s.cfg.Admin.ViewToken == "" {
+		return next
+	}
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		if token == "" {
-			next.ServeHTTP(rw, r)
-			return
-		}
 		if r.URL.Path == "/admin/login" {
 			s.handleLogin(rw, r)
 			return
 		}
-		if !s.authorized(r, token) {
+		role, ok := s.authorized(r)
+		if !ok {
 			rw.Header().Set("WWW-Authenticate", `Bearer realm="agenthub"`)
 			writeError(rw, http.StatusUnauthorized, "未授权")
 			return
@@ -201,6 +202,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 		default:
+			if role == "viewer" {
+				writeError(rw, http.StatusForbidden, "只读令牌不能执行写操作")
+				return
+			}
 			if r.Header.Get("X-Requested-With") != "agenthub" {
 				writeError(rw, http.StatusForbidden, "缺少 CSRF 头")
 				return
@@ -210,24 +215,46 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) authorized(r *http.Request, token string) bool {
-	if r.Header.Get("Authorization") == "Bearer "+token {
-		return true
+func (s *Server) authorized(r *http.Request) (string, bool) {
+	token := ""
+	if header := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); header != "" && header != r.Header.Get("Authorization") {
+		token = header
 	}
-	if cookie, err := r.Cookie("agenthub_admin"); err == nil && cookie.Value == token {
-		return true
+	if token == "" {
+		if cookie, err := r.Cookie("agenthub_admin"); err == nil {
+			token = cookie.Value
+		}
+	}
+	switch {
+	case token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.Admin.Token)) == 1:
+		return "admin", true
+	case token != "" && s.cfg.Admin.OperatorToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.Admin.OperatorToken)) == 1:
+		return "operator", true
+	case token != "" && s.cfg.Admin.ViewToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.Admin.ViewToken)) == 1:
+		return "viewer", true
+	default:
+		return "", false
+	}
+}
+
+func (s *Server) loginToken(token string) bool {
+	for _, candidate := range []string{s.cfg.Admin.Token, s.cfg.Admin.OperatorToken, s.cfg.Admin.ViewToken} {
+		if candidate != "" && subtle.ConstantTimeCompare([]byte(token), []byte(candidate)) == 1 {
+			return true
+		}
 	}
 	return false
 }
 
 func (s *Server) handleLogin(rw http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("token") != s.cfg.Admin.Token {
+	raw := r.URL.Query().Get("token")
+	if !s.loginToken(raw) {
 		writeError(rw, http.StatusUnauthorized, "token 不正确")
 		return
 	}
 	http.SetCookie(rw, &http.Cookie{
 		Name:     "agenthub_admin",
-		Value:    s.cfg.Admin.Token,
+		Value:    raw,
 		Path:     "/admin",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,

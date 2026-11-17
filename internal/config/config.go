@@ -108,6 +108,10 @@ type AdminConfig struct {
 	Addr string `yaml:"addr"`
 	// Token 非空时管理面要求 Bearer Token 或登录 Cookie；为空表示不鉴权。
 	Token string `yaml:"token"`
+	// OperatorToken 是可执行写操作（重置、审批、动作）的操作员令牌。
+	OperatorToken string `yaml:"operator_token"`
+	// ViewToken 是只读令牌。
+	ViewToken string `yaml:"view_token"`
 }
 
 // DBConfig 是 PostgreSQL 连接配置。
@@ -287,6 +291,8 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.HTTP.Addr, "AGENTHUB_HTTP_ADDR")
 	setStr(&cfg.Admin.Addr, "AGENTHUB_ADMIN_ADDR")
 	setStr(&cfg.Admin.Token, "AGENTHUB_ADMIN_TOKEN")
+	setStr(&cfg.Admin.OperatorToken, "AGENTHUB_ADMIN_OPERATOR_TOKEN")
+	setStr(&cfg.Admin.ViewToken, "AGENTHUB_ADMIN_VIEW_TOKEN")
 	setStr(&cfg.DB.URL, "AGENTHUB_DB_URL")
 	setInt32(&cfg.DB.MaxConns, "AGENTHUB_DB_MAX_CONNS")
 	setStr(&cfg.Storage.Dir, "AGENTHUB_DATA_DIR")
