@@ -99,7 +99,7 @@ pi 固定 1.4.0、会话文件 v3，升级要回归；`bash` 的安全边界由�
 
 ## 界面
 
-![运行概览](images/admin-overview.png)
+![工作台](images/admin-workbench.png)
 
 ## 进一步阅读
 

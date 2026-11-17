@@ -14,7 +14,7 @@ AgentHub 把告警接成案件，让 [pi](https://github.com/earendil-works/pi) 
 > It turns alerts into evidence-backed cases and incident reports, with
 > human-approved actions, one Go binary and PostgreSQL.
 
-![管理台](docs/images/admin-overview.png)
+![工作台](docs/images/admin-workbench.png)
 
 > 截图来自开发版，实际界面以当前版本为准。
 
@@ -158,7 +158,11 @@ React + TypeScript + Vite，构建产物嵌入 Go 二进制；浅色/深色切�
 | 报告 | pi 自动草稿，人工定稿、下载、发飞书 |
 | 系统 | 运行概览、会话、Skill、MCP、定时任务、审计、设置 |
 
-![技能管理](docs/images/admin-skills.png)
+![案件详情](docs/images/admin-case.png)
+
+![事故详情](docs/images/admin-incident.png)
+
+![处置报告](docs/images/admin-report.png)
 
 ## 扩展方式
 
