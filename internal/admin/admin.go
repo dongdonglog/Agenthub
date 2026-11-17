@@ -144,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/incidents", s.handleIncidents)
 	mux.HandleFunc("GET /admin/api/v1/incidents/{id}", s.handleIncident)
 	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/ack", s.handleIncidentAck)
+	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/resolve", s.handleIncidentResolve)
 	mux.HandleFunc("GET /admin/api/v1/queue", s.handleQueue)
 	mux.HandleFunc("GET /admin/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("POST /admin/api/v1/tasks", s.handleTasks)
@@ -900,7 +901,13 @@ func (s *Server) handleCases(rw http.ResponseWriter, r *http.Request) {
 		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
 		return
 	}
-	items, err := s.opts.Cases.ListCases(r.Context(), 100)
+	limit := queryInt(r, "limit", 50)
+	offset := queryInt(r, "offset", 0)
+	items, total, err := s.opts.Cases.ListCasesFiltered(r.Context(), store.CaseFilter{
+		Status: r.URL.Query().Get("status"), Type: r.URL.Query().Get("type"),
+		Source: r.URL.Query().Get("source"), Query: r.URL.Query().Get("q"),
+		Limit: limit, Offset: offset,
+	})
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
@@ -908,7 +915,7 @@ func (s *Server) handleCases(rw http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []*store.Case{}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
 }
 
 func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
@@ -1193,7 +1200,12 @@ func (s *Server) handleIncidents(rw http.ResponseWriter, r *http.Request) {
 		writeJSON(rw, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
 		return
 	}
-	items, err := s.opts.Incidents.ListIncidents(r.Context(), 100)
+	limit := queryInt(r, "limit", 50)
+	offset := queryInt(r, "offset", 0)
+	items, total, err := s.opts.Incidents.ListIncidentsFiltered(r.Context(), store.IncidentFilter{
+		Status: r.URL.Query().Get("status"), Service: r.URL.Query().Get("service"),
+		Query: r.URL.Query().Get("q"), Limit: limit, Offset: offset,
+	})
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
@@ -1201,7 +1213,7 @@ func (s *Server) handleIncidents(rw http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []*store.Incident{}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(rw, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
 }
 
 func (s *Server) handleIncident(rw http.ResponseWriter, r *http.Request) {
@@ -1223,7 +1235,15 @@ func (s *Server) handleIncident(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"incident": inc, "events": events})
+	var linked *store.Case
+	if s.opts.Cases != nil {
+		linked, _ = s.opts.Cases.FindCaseBySource(r.Context(), "alertmanager", inc.ID)
+	}
+	var run any
+	if linked != nil && s.opts.Journal != nil {
+		run, _ = s.opts.Journal.LatestRunForConversation(r.Context(), "aiops:"+inc.ID)
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"incident": inc, "events": events, "case": linked, "run": run})
 }
 
 func (s *Server) handleIncidentAck(rw http.ResponseWriter, r *http.Request) {
@@ -1246,6 +1266,46 @@ func (s *Server) handleIncidentAck(rw http.ResponseWriter, r *http.Request) {
 	_ = s.opts.Incidents.AddEvent(r.Context(), id, "acknowledged", body.Actor, "管理台认领", time.Now())
 	s.audit(r, "incident.ack", id, body.Actor)
 	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleIncidentResolve(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Incidents == nil {
+		writeError(rw, http.StatusServiceUnavailable, "AIOps 未接入")
+		return
+	}
+	var body struct {
+		Actor string `json:"actor"`
+	}
+	_ = decode(r, &body)
+	if body.Actor == "" {
+		body.Actor = "admin"
+	}
+	id := r.PathValue("id")
+	inc, ok, err := s.opts.Incidents.ResolveIncidentByID(r.Context(), id, body.Actor, time.Now())
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeError(rw, http.StatusConflict, "事故不存在或已恢复")
+		return
+	}
+	if s.opts.Cases != nil {
+		if c, _ := s.opts.Cases.FindCaseBySource(r.Context(), "alertmanager", id); c != nil {
+			_ = s.opts.Cases.SetCaseStatus(r.Context(), c.ID, "resolved", time.Now())
+			_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "resolved", body.Actor, "事故手动恢复，案件关闭", time.Now())
+		}
+	}
+	s.audit(r, "incident.resolve", inc.ID, body.Actor)
+	writeJSON(rw, http.StatusOK, inc)
+}
+
+func queryInt(r *http.Request, key string, fallback int) int {
+	value, err := strconv.Atoi(r.URL.Query().Get(key))
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
 }
 
 func (s *Server) handleRuns(rw http.ResponseWriter, _ *http.Request) {

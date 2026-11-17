@@ -449,3 +449,52 @@ func caseShortHash(value string) string {
 	sum := sha1.Sum([]byte(value))
 	return hex.EncodeToString(sum[:])[:16]
 }
+
+// CaseFilter 是案件查询条件。
+type CaseFilter struct {
+	Status, Type, Source, Query string
+	Limit, Offset               int
+}
+
+// ListCasesFiltered 返回过滤后的案件和总数。
+func (s *CaseStore) ListCasesFiltered(ctx context.Context, f CaseFilter) ([]*Case, int, error) {
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	const where = `($1='' OR status=$1) AND ($2='' OR type=$2) AND ($3='' OR source=$3)
+		AND ($4='' OR title ILIKE '%'||$4||'%' OR summary ILIKE '%'||$4||'%' OR service ILIKE '%'||$4||'%')`
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM case_item WHERE `+where, f.Status, f.Type, f.Source, f.Query).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, employee_id, type, source, source_id, title, summary, severity, status, requester, service, environment, chat_id, sla_due_at, created_at, updated_at, resolved_at
+		FROM case_item WHERE `+where+` ORDER BY updated_at DESC LIMIT $5 OFFSET $6`, f.Status, f.Type, f.Source, f.Query, f.Limit, f.Offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []*Case
+	for rows.Next() {
+		c, err := scanCase(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, c)
+	}
+	return out, total, rows.Err()
+}
+
+// FindCaseBySource 按来源和外部 ID 查找案件。
+func (s *CaseStore) FindCaseBySource(ctx context.Context, source, sourceID string) (*Case, error) {
+	c, err := scanCase(s.pool.QueryRow(ctx, `
+		SELECT id, employee_id, type, source, source_id, title, summary, severity, status, requester, service, environment, chat_id, sla_due_at, created_at, updated_at, resolved_at
+		FROM case_item WHERE source=$1 AND source_id=$2`, source, sourceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return c, err
+}

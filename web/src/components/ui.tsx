@@ -113,7 +113,7 @@ export function Breadcrumbs({ items }: { items: { label: string; to?: string }[]
   );
 }
 
-export function Card({ title, actions, children }: { title?: string; actions?: ReactNode; children: ReactNode }) {
+export function Card({ title, actions, children }: { title?: ReactNode; actions?: ReactNode; children: ReactNode }) {
   return (
     <section className="card">
       {title || actions ? (
@@ -190,6 +190,20 @@ export function Empty({ icon = "🗂", text, action }: { icon?: string; text: st
       <div className="empty-icon">{icon}</div>
       <div>{text}</div>
       {action ? <div style={{ marginTop: 14 }}>{action}</div> : null}
+    </div>
+  );
+}
+
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="modal-mask" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3>{title}</h3>
+          <Button className="link" onClick={onClose}>关闭</Button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }

@@ -261,3 +261,73 @@ func nullIncidentTime(t time.Time) any {
 	}
 	return t
 }
+
+// IncidentFilter 是事故查询条件。
+type IncidentFilter struct {
+	Status, Service, Query string
+	Limit, Offset          int
+}
+
+// ListIncidentsFiltered 返回过滤后的事故和总数。
+func (s *IncidentStore) ListIncidentsFiltered(ctx context.Context, f IncidentFilter) ([]*Incident, int, error) {
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	const where = `($1='' OR status=$1) AND ($2='' OR service=$2) AND ($3='' OR title ILIKE '%'||$3||'%' OR summary ILIKE '%'||$3||'%' OR service ILIKE '%'||$3||'%')`
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM incident WHERE `+where, f.Status, f.Service, f.Query).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, fingerprint, status, severity, title, summary, service, environment, chat_id,
+			alert_count, acknowledged_by, acknowledged_at, resolved_at, created_at, updated_at
+		FROM incident WHERE `+where+` ORDER BY updated_at DESC LIMIT $4 OFFSET $5`, f.Status, f.Service, f.Query, f.Limit, f.Offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []*Incident
+	for rows.Next() {
+		inc, err := scanIncident(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, inc)
+	}
+	return out, total, rows.Err()
+}
+
+// ResolveIncidentByID 手动解决指定事故。
+func (s *IncidentStore) ResolveIncidentByID(ctx context.Context, id, actor string, now time.Time) (*Incident, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	inc, err := scanIncident(tx.QueryRow(ctx, `
+		SELECT id, fingerprint, status, severity, title, summary, service, environment, chat_id,
+			alert_count, acknowledged_by, acknowledged_at, resolved_at, created_at, updated_at
+		FROM incident WHERE id=$1 AND status <> 'resolved' FOR UPDATE`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE incident SET status='resolved', resolved_at=$2, updated_at=$2 WHERE id=$1`, id, now); err != nil {
+		return nil, false, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO incident_event (incident_id, kind, actor, text, created_at) VALUES ($1,'resolved',$2,'管理台手动恢复',$3)`, id, actor, now); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, err
+	}
+	inc.Status = "resolved"
+	inc.ResolvedAt = &now
+	inc.UpdatedAt = now
+	return inc, true, nil
+}
