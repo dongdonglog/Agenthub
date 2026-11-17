@@ -277,8 +277,10 @@ func run() int {
 	skillDirs := []string{}
 	promptDirs := []string{}
 	if piPackageDir != "" {
-		if _, err := os.Stat(filepath.Join(piPackageDir, "extensions", "agenthub-guard.ts")); err == nil {
-			extensions = append(extensions, filepath.Join(piPackageDir, "extensions", "agenthub-guard.ts"))
+		for _, name := range []string{"agenthub-guard.ts", "agenthub-redact.ts", "agenthub-compaction.ts", "agenthub-subagent.ts"} {
+			if _, err := os.Stat(filepath.Join(piPackageDir, "extensions", name)); err == nil {
+				extensions = append(extensions, filepath.Join(piPackageDir, "extensions", name))
+			}
 		}
 		if _, err := os.Stat(filepath.Join(piPackageDir, "skills")); err == nil {
 			skillDirs = append(skillDirs, filepath.Join(piPackageDir, "skills"))

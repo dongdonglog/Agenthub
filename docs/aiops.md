@@ -129,6 +129,9 @@ services:
 `pi-package/` 随镜像加载：
 
 - `extensions/agenthub-guard.ts`：`tool_call` 拦截 `edit/write` 和高风险 bash；`before_agent_start` 注入只读诊断约束；
+- `extensions/agenthub-redact.ts`：`tool_result` 脱敏 token/密码/私钥并截断超大输出；
+- `extensions/agenthub-compaction.ts`：事故上下文压缩保留影响面、证据、假设和未闭环动作；
+- `extensions/agenthub-subagent.ts`：`ops_investigate` 并行启动 metrics/logs/changes/traces 只读调查，每个子调查独立上下文；
 - `skills/sre-oncall`：SRE 诊断流程；
 - `skills/tech-support`：技术支持流程；
 - `prompts/diagnose.md`、`handoff.md`、`postmortem.md`。

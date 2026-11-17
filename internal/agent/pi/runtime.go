@@ -262,7 +262,14 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = ws
-	env := []string{}
+	env := []string{
+		"PI_PROVIDER=" + provider,
+		"PI_MODEL=" + model,
+		"PI_BIN=" + r.cfg.Bin,
+	}
+	if len(r.cfg.Extensions) > 0 {
+		env = append(env, "AGENTHUB_GUARD_EXTENSION="+r.cfg.Extensions[0])
+	}
 	if in.ReadOnly {
 		env = append(env, "AGENTHUB_READONLY=1")
 	}

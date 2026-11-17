@@ -7,7 +7,7 @@
 
 ### Added
 
-- pi 原生 SRE 包：guard 扩展、sre/tech-support skills、diagnose/handoff/postmortem prompts；
+- pi 原生 SRE 包：guard/redact/compaction/subagent 扩展、sre/tech-support skills、diagnose/handoff/postmortem prompts；
 - 数字员工/统一案件/工作台/交接/复盘草稿；服务目录；Prometheus/Loki 只读 MCP 自动注册并接入 pi；
 - AIOps：Alertmanager webhook、事故/告警事件/时间线、只读诊断、管理台事故页；
 - 镜像工具链：git/git-lfs/gh/glab/ssh/jq/yq/rg/fd/tree/sqlite3/zip 等；pi 增加 `edit`/`write` 工具；
