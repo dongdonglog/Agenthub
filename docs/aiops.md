@@ -175,7 +175,19 @@ AGENTHUB_LOKI_TOKEN=
 - 只读拉起技术支持诊断；
 - 管理台工作台统一查看。
 
-### 2.10 审批与受控动作
+### 2.10 验证样例
+
+2026-11-17 用真实模型 + 本地 fake Prometheus/Loki HTTP 服务跑通：
+
+- Alertmanager webhook → 案件 → `run_4`；
+- 运行状态 `completed`，输入约 33k tokens，输出约 1.7k tokens；
+- 诊断输出包含：影响面、证据表、根因候选、建议动作；
+- 工具查询到 `up{job="checkout"}=0` 和 `checkout 500` 日志，并指出时间窗/指标不匹配；
+- 全程只读，未执行变更。
+
+这是第一个“真实模型 + 告警 + 案件 + 观测工具”的端到端诊断样例，但仍使用 fake 观测端点；真实 Prom/Loki/Tempo/K8s 需部署方联调。
+
+### 2.11 审批与受控动作
 
 - 案件详情可创建 `k8s_scale` / `k8s_restart` 审批；
 - 审批通过后由 `internal/action` 执行；
