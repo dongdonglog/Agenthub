@@ -219,6 +219,13 @@ Tempo 已在本地 2.6 容器验证：
 - 所有动作写审计和案件时间线；
 - 未配置 `AGENTHUB_K8S_ENABLED` 时只记录审批，不执行。
 
+2026-11-17 在 minikube 上验证了完整链路：
+
+- 案件 → `POST /cases/{id}/approvals`；
+- 审批人 `POST /approvals/{id}/approve`；
+- 执行器把 `agenthub-test/nginx` 从 2 副本扩到 3；
+- 审批状态 `approved`，结果写入案件时间线。
+
 ## 3. 距离生产级 AIOps 还缺什么
 
 当前是**可用的 SRE 数字员工 MVP**，不是自动处置平台：
