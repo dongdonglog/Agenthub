@@ -3,7 +3,7 @@
  *
  * Go 侧读取 AGENTHUB_REPORT_DIR/report.json，保存到案件报告；不在 Go 里重新分析。
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -34,4 +34,21 @@ const submitReport = defineTool({
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool(submitReport);
+  let nudged = false;
+  pi.on("agent_before_settle", async () => {
+    const dir = process.env.AGENTHUB_REPORT_DIR;
+    if (!dir || !process.env.AGENTHUB_CASE_ID || nudged) return;
+    const file = join(dir, "report.json");
+    if (existsSync(file)) return;
+    nudged = true;
+    return {
+      entries: [{
+        type: "custom_message" as const,
+        customType: "agenthub-report-gate",
+        content: "诊断已完成，但还没有提交处置报告。请调用 submit_report 工具；没有证据的字段写“未验证”，不要省略。",
+        display: true,
+      }],
+      continue: true,
+    };
+  });
 }

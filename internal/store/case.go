@@ -131,6 +131,7 @@ func (s *CaseStore) EnsureDefaultEmployee(ctx context.Context, chatID string, no
 		ID: "sre-oncall", Name: "SRE 值班员", Title: "SRE 数字同事", Role: "sre-oncall",
 		Mission: "接住运维告警，查证据、做诊断、写时间线、完成交接，不执行未经审批的写操作。",
 		Status:  "active", ChatID: chatID,
+		AllowedTools: []string{"read", "bash", "grep", "find", "ls", "tool_search", "ops_investigate", "submit_report"},
 	}, now)
 }
 

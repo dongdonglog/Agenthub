@@ -197,6 +197,7 @@ func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident
 		SentAt:          i.now(),
 		Sender:          channel.Sender{OpenID: payload.Source, Name: payload.Source},
 		Chat:            channel.Chat{ID: i.cfg.ChatID, Kind: "group", Name: "运维告警"},
+		CaseID:          caseID,
 		Text:            prompt,
 		MsgType:         "text",
 		ReadOnly:        true,

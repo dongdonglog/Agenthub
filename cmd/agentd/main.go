@@ -390,6 +390,7 @@ func run() int {
 			ID: "tech-support", Name: "技术支持", Title: "技术支持数字同事", Role: "tech-support",
 			Mission: "接住支持工单，查知识/历史工单，给出可执行步骤，无法解决时升级人工。",
 			Status:  "active", ChatID: cfg.Support.ChatID,
+			AllowedTools: []string{"read", "bash", "grep", "find", "ls", "tool_search", "ops_investigate", "submit_report"},
 		}, time.Now()); err != nil {
 			logger.Warn("seed support employee failed", "error", err)
 		}

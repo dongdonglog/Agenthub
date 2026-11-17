@@ -202,6 +202,12 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 		out.Artifacts = collectRunArtifacts(ws, in.RunID, started)
 		if raw, readErr := os.ReadFile(filepath.Join(reportDir, "report.json")); readErr == nil {
 			out.Report = raw
+		} else if strings.TrimSpace(out.Text) != "" && in.CaseID != "" {
+			out.Report, _ = json.Marshal(map[string]string{
+				"problem":    "诊断已完成，待人工确认报告",
+				"evidence":   out.Text,
+				"root_cause": "",
+			})
 		}
 	}
 	return out, err
@@ -310,6 +316,7 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 		"PI_CODING_AGENT_DIR="+filepath.Join(ws, ".agenthub-agent"),
 		"AGENTHUB_OUTBOX_DIR="+filepath.Join(ws, "outbox"),
 		"AGENTHUB_REPORT_DIR="+filepath.Join(ws, "reports"),
+		"AGENTHUB_CASE_ID="+in.CaseID,
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
