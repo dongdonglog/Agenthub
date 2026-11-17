@@ -171,6 +171,7 @@ AGENTHUB_LOKI_TOKEN=
 
 - 鉴权：`Authorization: Bearer <AGENTHUB_SUPPORT_TOKEN>`；
 - 自动创建 `tech-support` 员工案件；
+- 从 `<data>/knowledge/*.md` 检索知识库并注入 prompt（带来源）；
 - 只读拉起技术支持诊断；
 - 管理台工作台统一查看。
 

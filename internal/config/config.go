@@ -69,10 +69,11 @@ type AIOpsConfig struct {
 
 // SupportConfig 是技术支持工单入口配置。
 type SupportConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	Token      string `yaml:"token"`
-	ChatID     string `yaml:"chat_id"`
-	EmployeeID string `yaml:"employee_id"`
+	Enabled      bool   `yaml:"enabled"`
+	Token        string `yaml:"token"`
+	ChatID       string `yaml:"chat_id"`
+	EmployeeID   string `yaml:"employee_id"`
+	KnowledgeDir string `yaml:"knowledge_dir"`
 }
 
 // ObservabilityConfig 是只读观测工具连接配置。
@@ -340,6 +341,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Support.Token, "AGENTHUB_SUPPORT_TOKEN")
 	setStr(&cfg.Support.ChatID, "AGENTHUB_SUPPORT_CHAT_ID")
 	setStr(&cfg.Support.EmployeeID, "AGENTHUB_SUPPORT_EMPLOYEE_ID")
+	setStr(&cfg.Support.KnowledgeDir, "AGENTHUB_KNOWLEDGE_DIR")
 	setStr(&cfg.AIOps.Token, "AGENTHUB_AIOPS_TOKEN")
 	setStr(&cfg.AIOps.ChatID, "AGENTHUB_AIOPS_CHAT_ID")
 	setStr(&cfg.AIOps.RunbookDir, "AGENTHUB_AIOPS_RUNBOOK_DIR")

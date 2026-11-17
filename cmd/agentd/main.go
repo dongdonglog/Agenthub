@@ -26,6 +26,7 @@ import (
 	"github.com/moying/agenthub/internal/config"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/httpapi"
+	"github.com/moying/agenthub/internal/knowledge"
 	"github.com/moying/agenthub/internal/modelcfg"
 	"github.com/moying/agenthub/internal/modelrouter"
 	"github.com/moying/agenthub/internal/obs"
@@ -362,9 +363,11 @@ func run() int {
 	srv := httpapi.New(cfg, logger, metrics, db, version.Version)
 	var incidentStore *store.IncidentStore
 	var caseStore *store.CaseStore
+	var knowledgeStore *store.KnowledgeStore
 	if db != nil {
 		incidentStore = store.NewIncidentStore(db)
 		caseStore = store.NewCaseStore(db)
+		knowledgeStore = store.NewKnowledgeStore(db)
 		if _, err := caseStore.EnsureDefaultEmployee(ctx, cfg.AIOps.ChatID, time.Now()); err != nil {
 			logger.Warn("seed default employee failed", "error", err)
 		}
@@ -376,11 +379,23 @@ func run() int {
 			logger.Warn("seed support employee failed", "error", err)
 		}
 	}
+	if knowledgeStore != nil {
+		knowledgeDir := cfg.Support.KnowledgeDir
+		if knowledgeDir == "" {
+			knowledgeDir = filepath.Join(cfg.Storage.Dir, "knowledge")
+		}
+		if count, err := knowledge.IngestDir(ctx, knowledgeStore, knowledgeDir); err != nil {
+			logger.Warn("ingest knowledge failed", "error", err, "dir", knowledgeDir)
+		} else if count > 0 {
+			logger.Info("knowledge ingested", "docs", count, "dir", knowledgeDir)
+		}
+	}
 	if cfg.Support.Enabled {
 		if caseStore == nil {
 			logger.Error("support enabled without database; webhook disabled")
 		} else {
 			ingestor := support.New(caseStore, engine, support.Config{ChatID: cfg.Support.ChatID, EmployeeID: cfg.Support.EmployeeID}, logger)
+			ingestor.SetKnowledge(knowledgeStore)
 			srv.SetTicketHandler(support.NewHandler(ingestor, cfg.Support.Token))
 			logger.Info("support ticket webhook enabled", "chat", cfg.Support.ChatID)
 		}

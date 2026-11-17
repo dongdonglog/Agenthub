@@ -99,6 +99,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_SUPPORT_TOKEN` | 空 | 工单 webhook token |
 | `AGENTHUB_SUPPORT_CHAT_ID` | 空 | 支持案件投递群 |
 | `AGENTHUB_SUPPORT_EMPLOYEE_ID` | `tech-support` | 支持数字员工 ID |
+| `AGENTHUB_KNOWLEDGE_DIR` | `<data>/knowledge` | 技术支持知识库目录 |
 | `AGENTHUB_AIOPS_MAX_ALERTS` | `20` | 单次 webhook 最多处理告警数 |
 | `AGENTHUB_PROMETHEUS_URL` | 空 | Prometheus 只读地址；配置后启用 ops MCP |
 | `AGENTHUB_PROMETHEUS_TOKEN/USER/PASSWORD` | 空 | Prometheus 认证 |
