@@ -408,7 +408,7 @@ func run() int {
 		if caseStore == nil {
 			logger.Error("support enabled without database; webhook disabled")
 		} else {
-			ingestor := support.New(caseStore, engine, support.Config{ChatID: cfg.Support.ChatID, EmployeeID: cfg.Support.EmployeeID}, logger)
+			ingestor := support.New(caseStore, engine, support.Config{ChatID: cfg.Support.ChatID, EmployeeID: cfg.Support.EmployeeID, Team: cfg.Support.Team}, logger)
 			ingestor.SetKnowledge(knowledgeStore)
 			srv.SetTicketHandler(support.NewHandler(ingestor, cfg.Support.Token))
 			logger.Info("support ticket webhook enabled", "chat", cfg.Support.ChatID)

@@ -39,8 +39,12 @@ func IngestDir(ctx context.Context, st *store.KnowledgeStore, dir string) (int, 
 		if first := strings.TrimSpace(strings.SplitN(string(raw), "\n", 2)[0]); strings.HasPrefix(first, "#") {
 			title = strings.TrimSpace(strings.TrimPrefix(first, "#"))
 		}
+		team := ""
+		if parts := strings.Split(filepath.ToSlash(rel), "/"); len(parts) > 1 {
+			team = parts[0]
+		}
 		if err := st.Upsert(ctx, store.KnowledgeDoc{
-			Title: title, Content: string(raw), Source: rel, UpdatedAt: time.Now(),
+			Title: title, Content: string(raw), Source: rel, Team: team, UpdatedAt: time.Now(),
 		}); err != nil {
 			return err
 		}

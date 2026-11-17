@@ -16,6 +16,7 @@ type KnowledgeDoc struct {
 	Title     string    `json:"title"`
 	Content   string    `json:"content"`
 	Source    string    `json:"source"`
+	Team      string    `json:"team"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -40,16 +41,16 @@ func (s *KnowledgeStore) Upsert(ctx context.Context, doc KnowledgeDoc) error {
 		doc.UpdatedAt = time.Now()
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO knowledge_doc (id, title, content, source, updated_at)
-		VALUES ($1,$2,$3,$4,$5)
+		INSERT INTO knowledge_doc (id, title, content, source, team, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6)
 		ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, content=EXCLUDED.content,
-			source=EXCLUDED.source, updated_at=EXCLUDED.updated_at`,
-		doc.ID, doc.Title, doc.Content, doc.Source, doc.UpdatedAt)
+			source=EXCLUDED.source, team=EXCLUDED.team, updated_at=EXCLUDED.updated_at`,
+		doc.ID, doc.Title, doc.Content, doc.Source, doc.Team, doc.UpdatedAt)
 	return err
 }
 
 // Search 返回匹配文档；中文按整句匹配，英文按空格分词。
-func (s *KnowledgeStore) Search(ctx context.Context, query string, limit int) ([]KnowledgeDoc, error) {
+func (s *KnowledgeStore) Search(ctx context.Context, query, team string, limit int) ([]KnowledgeDoc, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
@@ -62,15 +63,20 @@ func (s *KnowledgeStore) Search(ctx context.Context, query string, limit int) ([
 		terms = []string{query}
 	}
 	where := make([]string, 0, len(terms))
-	args := make([]any, 0, len(terms)+1)
+	args := make([]any, 0, len(terms)+2)
 	for _, term := range terms {
 		args = append(args, "%"+term+"%")
 		where = append(where, "(title ILIKE $"+itoa(len(args))+" OR content ILIKE $"+itoa(len(args))+")")
 	}
+	filter := "(" + strings.Join(where, " OR ") + ")"
+	if team != "" {
+		args = append(args, team)
+		filter += " AND (team = '' OR team = $" + itoa(len(args)) + ")"
+	}
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, content, source, updated_at FROM knowledge_doc
-		WHERE `+strings.Join(where, " OR ")+`
+		SELECT id, title, content, source, team, updated_at FROM knowledge_doc
+		WHERE `+filter+`
 		ORDER BY updated_at DESC LIMIT $`+itoa(len(args)), args...)
 	if err != nil {
 		return nil, err
@@ -79,7 +85,7 @@ func (s *KnowledgeStore) Search(ctx context.Context, query string, limit int) ([
 	var out []KnowledgeDoc
 	for rows.Next() {
 		var doc KnowledgeDoc
-		if err := rows.Scan(&doc.ID, &doc.Title, &doc.Content, &doc.Source, &doc.UpdatedAt); err != nil {
+		if err := rows.Scan(&doc.ID, &doc.Title, &doc.Content, &doc.Source, &doc.Team, &doc.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if len(doc.Content) > 4000 {

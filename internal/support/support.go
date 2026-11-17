@@ -18,6 +18,7 @@ import (
 type Config struct {
 	ChatID     string
 	EmployeeID string
+	Team       string
 }
 
 // Ticket 是外部工单。
@@ -86,7 +87,7 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (string, error) {
 	_ = i.store.AddCaseEvent(ctx, c.ID, "created", "support", "由工单创建案件", now)
 	var docs []store.KnowledgeDoc
 	if i.knowledge != nil {
-		docs, _ = i.knowledge.Search(ctx, ticket.Title+" "+ticket.Description, 5)
+		docs, _ = i.knowledge.Search(ctx, ticket.Title+" "+ticket.Description, i.cfg.Team, 5)
 	}
 	prompt := buildPrompt(ticket, docs)
 	if _, err := i.engine.Submit(ctx, channel.Inbound{

@@ -80,6 +80,7 @@ type SupportConfig struct {
 	ChatID       string `yaml:"chat_id"`
 	EmployeeID   string `yaml:"employee_id"`
 	KnowledgeDir string `yaml:"knowledge_dir"`
+	Team         string `yaml:"team"`
 }
 
 // ObservabilityConfig 是只读观测工具连接配置。
@@ -350,6 +351,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Support.ChatID, "AGENTHUB_SUPPORT_CHAT_ID")
 	setStr(&cfg.Support.EmployeeID, "AGENTHUB_SUPPORT_EMPLOYEE_ID")
 	setStr(&cfg.Support.KnowledgeDir, "AGENTHUB_KNOWLEDGE_DIR")
+	setStr(&cfg.Support.Team, "AGENTHUB_SUPPORT_TEAM")
 	setStr(&cfg.AIOps.Token, "AGENTHUB_AIOPS_TOKEN")
 	setStr(&cfg.AIOps.ChatID, "AGENTHUB_AIOPS_CHAT_ID")
 	setStr(&cfg.AIOps.RunbookDir, "AGENTHUB_AIOPS_RUNBOOK_DIR")
