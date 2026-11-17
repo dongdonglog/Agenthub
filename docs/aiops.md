@@ -196,7 +196,15 @@ AGENTHUB_LOKI_TOKEN=
 - 真实查到 Prometheus 当前告警为空、业务指标缺失，并在诊断中明确区分“观测缺口”和“业务恢复”；
 - 未执行任何变更。
 
-真实 Prom/Loki 已跑通；Tempo/K8s 仍需目标环境联调。
+真实 Prom/Loki 已跑通；K8s 已在本地 minikube 验证：
+
+- `k8s_get` 读取 `agenthub-test` Pod；
+- `k8s_logs` 读取 nginx 日志；
+- 受控动作 `k8s_scale` 把副本从 1 扩到 2；
+- `k8s_restart` 触发滚动重启；
+- 全部经 kubectl，只读/动作边界和审批由 AgentHub 控制。
+
+Tempo 仍需目标环境联调。
 
 ### 2.11 审批与受控动作
 

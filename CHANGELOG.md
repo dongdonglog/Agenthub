@@ -8,7 +8,7 @@
 ### Added
 
 - pi 原生 SRE 包：guard（含证据门禁）/redact/compaction/subagent 扩展、sre/tech-support skills、diagnose/handoff/postmortem prompts；
-- 员工级工具授权与知识团队隔离；PostgreSQL advisory lock 多实例单活入口；管理台 admin/operator/view RBAC；审批与受控 K8s scale/restart 动作；技术支持工单入口与 tech-support 员工；案件反馈与员工绩效；Tempo trace 与 K8s 只读工具；数字员工/统一案件/工作台/交接/复盘草稿；服务目录；Prometheus/Loki 只读 MCP 自动注册并接入 pi；
+- K8s 只读工具与受控 scale/restart 真实集群验证；员工级工具授权与知识团队隔离；PostgreSQL advisory lock 多实例单活入口；管理台 admin/operator/view RBAC；审批与受控 K8s scale/restart 动作；技术支持工单入口与 tech-support 员工；案件反馈与员工绩效；Tempo trace 与 K8s 只读工具；数字员工/统一案件/工作台/交接/复盘草稿；服务目录；Prometheus/Loki 只读 MCP 自动注册并接入 pi；
 - AIOps：Alertmanager webhook、事故/告警事件/时间线、只读诊断、管理台事故页；
 - 镜像工具链：git/git-lfs/gh/glab/ssh/jq/yq/rg/fd/tree/sqlite3/zip 等；pi 增加 `edit`/`write` 工具；
 - 投递租约：`claimed/calling` 阶段、租约令牌、过期恢复扫描；结果不明标记 `ambiguous` 并停止自动重试；
