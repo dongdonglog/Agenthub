@@ -275,7 +275,8 @@ POST /api/v1/alerts/{source}
 - 全局 token：`AGENTHUB_AIOPS_TOKEN`；
 - 按来源 token：`AGENTHUB_AIOPS_SOURCE_TOKENS='{"grafana":"..."}'`；
 - 兼容旧入口 `/api/v1/alerts/alertmanager`；
-- 未知 source 返回 400，不会静默接收。
+- 未知 source 返回 400，不会静默接收；
+- 每个 source 独立 token bucket（`AGENTHUB_AIOPS_RATE_PER_MIN`，默认 120/min），超限返回 429。
 
 ## 3. 距离生产级 AIOps 还缺什么
 
