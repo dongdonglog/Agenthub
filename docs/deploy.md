@@ -50,7 +50,7 @@ AGENTHUB_HA_ENABLED=true
 - 只有 leader 启动飞书长连接，standby 保持 HTTP/管理面待命；
 - leader 退出或数据库连接丢失后，standby 在数秒内接管；
 - 投递租约在数据库层保证不会因接管重复发送；
-- 目前只覆盖飞书入口；钉钉多实例仍需单独验证。
+- 飞书与钉钉入口都由同一个 leader 锁保护；standby 不建立任何长连接。
 
 ## 管理员干预
 

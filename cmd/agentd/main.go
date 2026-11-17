@@ -475,14 +475,39 @@ func run() int {
 		}
 	}
 	if dt != nil {
-		go func() {
-			if err := dt.Start(workCtx); err != nil {
-				logger.Error("dingtalk stream stopped", "error", err)
-				stop()
-			}
-		}()
-		setFeishuStatus(func() string { return "connected" })
 		srv.RegisterCheck("dingtalk", func() (bool, string) { return true, "stream" })
+		if cfg.HA.Enabled && db != nil {
+			leader := ha.New(db, logger)
+			go func() {
+				err := leader.Run(ctx,
+					func(leaderCtx context.Context) {
+						setFeishuStatus(func() string { return "connected" })
+						go func() {
+							if err := dt.Start(leaderCtx); err != nil && leaderCtx.Err() == nil {
+								logger.Error("dingtalk stream stopped", "error", err)
+								stop()
+							}
+						}()
+					},
+					func() { setFeishuStatus(func() string { return "standby" }) },
+				)
+				if err != nil && ctx.Err() == nil {
+					logger.Error("ha leader stopped", "error", err)
+					stop()
+				}
+			}()
+		} else {
+			if cfg.HA.Enabled {
+				logger.Warn("ha enabled without database; starting dingtalk connector locally")
+			}
+			setFeishuStatus(func() string { return "connected" })
+			go func() {
+				if err := dt.Start(workCtx); err != nil {
+					logger.Error("dingtalk stream stopped", "error", err)
+					stop()
+				}
+			}()
+		}
 	}
 
 	adminStore, err := admin.NewStoreWithSkills(cfg.Storage.Dir, filepath.Join(piAgentDir, "skills"))
