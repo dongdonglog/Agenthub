@@ -3,12 +3,29 @@
  *
  * 每个 lane 是独立 pi 进程，拥有隔离上下文；主 agent 只接收摘要和证据。
  */
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const execFileAsync = promisify(execFile);
+function runPi(bin: string, args: string[], env: NodeJS.ProcessEnv, timeout: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`子调查超时（${timeout}ms）`));
+    }, timeout);
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(stdout);
+      else reject(new Error(`exit ${code}: ${stderr.slice(0, 2000)}`));
+    });
+  });
+}
 
 type Lane = "metrics" | "logs" | "changes" | "traces";
 
@@ -47,20 +64,20 @@ const investigate = defineTool({
     const model = process.env.PI_MODEL || "";
     const tasks = requested.map(async (lane) => {
       const args = ["-p", "--mode", "text", "--no-context-files", "--no-session", "--no-extensions", "--no-skills", "--no-prompt-templates",
-        "--tools", lanes[lane].tools, "--append-system-prompt", lanes[lane].prompt];
+        "--no-approve", "--tools", lanes[lane].tools, "--append-system-prompt", lanes[lane].prompt];
       if (process.env.AGENTHUB_GUARD_EXTENSION) {
         args.push("--extension", process.env.AGENTHUB_GUARD_EXTENSION);
       }
       if (provider) args.push("--provider", provider);
       if (model) args.push("--model", model);
       args.push(params.question);
-      const { stdout } = await execFileAsync(bin, args, {
-        env: { ...process.env, AGENTHUB_READONLY: "1" },
-        signal,
-        timeout: 90_000,
-        maxBuffer: 512 * 1024,
-      });
-      return `### ${lane}\n${stdout.trim().slice(0, 20_000)}`;
+      try {
+        const stdout = await runPi(bin, args, { ...process.env, AGENTHUB_READONLY: "1" }, 240_000);
+        return `### ${lane}\n${stdout.trim().slice(0, 20_000)}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `### ${lane}\n调查失败：${message}`.slice(0, 4000);
+      }
     });
     const results = await Promise.all(tasks);
     return {
