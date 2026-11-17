@@ -202,6 +202,7 @@ func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident
 		Text:       prompt,
 		MsgType:    "text",
 		ReadOnly:   true,
+		NoReply:    true,
 		ToolAllow:  toolAllow,
 	})
 	return err

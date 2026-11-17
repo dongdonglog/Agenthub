@@ -79,7 +79,7 @@ func TestIngestCreatesIncidentAndDiagnosisRun(t *testing.T) {
 		t.Fatalf("incidents = %+v err=%v", items, err)
 	}
 	msgs := engine.Messages("aiops:oc_ops:alertmanager")
-	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "错误率过高") {
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "错误率过高") || !msgs[0].NoReply {
 		t.Fatalf("messages = %+v", msgs)
 	}
 

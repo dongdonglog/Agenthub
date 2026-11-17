@@ -61,7 +61,7 @@ func TestTicketCreatesCaseAndSupportRun(t *testing.T) {
 		t.Fatalf("cases = %+v err=%v", cases, err)
 	}
 	msgs := engine.Messages("support:oc_support:ticket")
-	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "无法登录") || !msgs[0].ReadOnly || !strings.Contains(msgs[0].Text, "登录 500") || !strings.Contains(msgs[0].Text, "kb/login.md") {
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "无法登录") || !msgs[0].ReadOnly || !msgs[0].NoReply || !strings.Contains(msgs[0].Text, "登录 500") || !strings.Contains(msgs[0].Text, "kb/login.md") {
 		t.Fatalf("messages = %+v", msgs)
 	}
 	if len(msgs[0].ToolAllow) != 2 || msgs[0].ToolAllow[0] != "read" {
