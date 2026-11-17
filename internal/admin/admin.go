@@ -81,6 +81,8 @@ type Options struct {
 	Cases *store.CaseStore
 	// ExecuteAction 执行已批准动作；为空表示只记录审批。
 	ExecuteAction func(ctx context.Context, approval *store.Approval) (string, error)
+	// NotifyApproval 把审批卡片发到案件群；为空表示不发送。
+	NotifyApproval func(ctx context.Context, approval *store.Approval) error
 }
 
 // Server 提供管理页面与管理 API。
@@ -1060,6 +1062,11 @@ func (s *Server) handleCaseApprovalCreate(rw http.ResponseWriter, r *http.Reques
 		return
 	}
 	_ = s.opts.Cases.AddCaseEvent(r.Context(), id, "approval", body.Actor, "申请动作 "+body.Action, time.Now())
+	if s.opts.NotifyApproval != nil {
+		if err := s.opts.NotifyApproval(r.Context(), a); err != nil {
+			s.log.Warn("notify approval failed", "approval", a.ID, "error", err)
+		}
+	}
 	s.audit(r, "approval.create", a.ID, body.Action)
 	writeJSON(rw, http.StatusOK, a)
 }

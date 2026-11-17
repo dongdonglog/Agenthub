@@ -450,6 +450,19 @@ func run() int {
 		})
 	}
 
+	var actionExecutor func(ctx context.Context, approval *store.Approval) (string, error)
+	if cfg.Observability.K8sEnabled {
+		kubectl := cfg.Observability.KubectlBin
+		if kubectl == "" {
+			kubectl = "kubectl"
+		}
+		namespaces := make(map[string]bool, len(cfg.Observability.K8sNamespaces))
+		for _, ns := range cfg.Observability.K8sNamespaces {
+			namespaces[ns] = true
+		}
+		executor := &action.Executor{Kubectl: kubectl, Namespaces: namespaces}
+		actionExecutor = executor.Execute
+	}
 	if cfg.Channel == config.ChannelFeishu {
 		if cfg.HA.Enabled && db != nil {
 			leader := ha.New(db, logger)
@@ -457,7 +470,7 @@ func run() int {
 				err := leader.Run(ctx,
 					func(leaderCtx context.Context) {
 						setFeishuStatus(func() string { return "connecting" })
-						fn := startFeishu(leaderCtx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal)
+						fn := startFeishu(leaderCtx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal, caseStore, actionExecutor)
 						setFeishuStatus(fn)
 					},
 					func() { setFeishuStatus(func() string { return "standby" }) },
@@ -471,7 +484,7 @@ func run() int {
 			if cfg.HA.Enabled {
 				logger.Warn("ha enabled without database; starting feishu connector locally")
 			}
-			setFeishuStatus(startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal))
+			setFeishuStatus(startFeishu(ctx, cfg, logger, stop, srv, engine, ch, attachmentsDir, journal, caseStore, actionExecutor))
 		}
 	}
 	if dt != nil {
@@ -528,19 +541,6 @@ func run() int {
 		if err := profiles.PutProfile(store.Profile{Name: "default", Description: "默认档案", Skills: names}); err != nil {
 			logger.Warn("seed default profile failed", "error", err)
 		}
-	}
-	var actionExecutor func(ctx context.Context, approval *store.Approval) (string, error)
-	if cfg.Observability.K8sEnabled {
-		kubectl := cfg.Observability.KubectlBin
-		if kubectl == "" {
-			kubectl = "kubectl"
-		}
-		namespaces := make(map[string]bool, len(cfg.Observability.K8sNamespaces))
-		for _, ns := range cfg.Observability.K8sNamespaces {
-			namespaces[ns] = true
-		}
-		executor := &action.Executor{Kubectl: kubectl, Namespaces: namespaces}
-		actionExecutor = executor.Execute
 	}
 	adminSrv := admin.New(cfg, engine, adminStore, admin.Options{
 		Version:       version.Version,
@@ -710,7 +710,7 @@ func migrationsDir() string {
 	return "migrations"
 }
 
-func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server, engine *core.Engine, ch channel.Channel, attachmentsDir string, journal *store.Journal) func() string {
+func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, stop context.CancelFunc, health *httpapi.Server, engine *core.Engine, ch channel.Channel, attachmentsDir string, journal *store.Journal, cases *store.CaseStore, executeAction func(context.Context, *store.Approval) (string, error)) func() string {
 	var client *feishu.Client
 	if fc, ok := ch.(*feishu.Channel); ok {
 		client = fc.Client()
@@ -809,7 +809,9 @@ func startFeishu(ctx context.Context, cfg *config.Config, logger *slog.Logger, s
 		health.RegisterCheck("feishu", func() (bool, string) { return true, "webhook" })
 	}
 	if cfg.Feishu.CardActionEnabled {
-		mux.Handle("/feishu/card", feishu.NewCardAction(engine, cfg.Feishu.VerificationToken, cfg.Feishu.EncryptKey, logger))
+		cardAction := feishu.NewCardAction(engine, cfg.Feishu.VerificationToken, cfg.Feishu.EncryptKey, logger)
+		cardAction.SetApprovalHandler(cases, executeAction, cfg.Feishu.AdminUsers)
+		mux.Handle("/feishu/card", cardAction)
 		logger.Info("card action endpoint enabled", "path", "/feishu/card")
 	}
 	if cfg.Feishu.Transport == "webhook" || cfg.Feishu.CardActionEnabled {

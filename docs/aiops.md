@@ -215,7 +215,8 @@ Tempo 已在本地 2.6 容器验证：
 
 ### 2.11 审批与受控动作
 
-- 案件详情可创建 `k8s_scale` / `k8s_restart` 审批；
+- 案件详情可创建 `k8s_scale` / `k8s_restart` 审批；创建后向案件群发送飞书审批卡片（需 `CARD_ACTION_ENABLED` 和 `ADMIN_USERS`）；
+- 飞书卡片批准/拒绝与工作台共用审批状态机；
 - 审批通过后由 `internal/action` 执行；
 - namespace allowlist（`AGENTHUB_K8S_NAMESPACES`）、replicas 1–20、只支持 scale/restart；
 - 所有动作写审计和案件时间线；
