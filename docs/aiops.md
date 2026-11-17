@@ -240,6 +240,40 @@ Tempo 已在本地 2.6 容器验证：
 - 执行器把 `agenthub-test/nginx` 从 2 副本扩到 3；
 - 审批状态 `approved`，结果写入案件时间线。
 
+### 2.13 告警适配层
+
+入口统一为：
+
+```text
+POST /api/v1/alerts/{source}
+```
+
+已内置：
+
+| source | 用途 |
+|---|---|
+| `alertmanager` | Prometheus Alertmanager v4 |
+| `grafana` | Grafana Alerting（Alertmanager 兼容字段 + title） |
+| `generic` | AgentHub 通用告警 schema |
+| `pagerduty` | PagerDuty v3 incident webhook |
+
+所有来源归一化为同一事件模型，再进入事故/案件/诊断流程。
+
+2026-11-17 用真实 Alertmanager 0.27 验证：
+
+- `POST /api/v2/alerts` 注入 20 条不同服务告警；
+- Alertmanager 分组后 webhook 到 AgentHub；
+- AgentHub 创建 20 个 incident、20 个 case；
+- 同会话合并为 1 个 run（20 inputs），completed；
+- 发送 1 条 resolved 后，对应 incident/case 变为 resolved；
+- `generic` 来源单独创建案件成功；
+- 真实模型 + Alertmanager → 飞书投递成功，消息 ID `om_x100b608a8c72cc88b08952ddb1c691f`。
+
+- 全局 token：`AGENTHUB_AIOPS_TOKEN`；
+- 按来源 token：`AGENTHUB_AIOPS_SOURCE_TOKENS='{"grafana":"..."}'`；
+- 兼容旧入口 `/api/v1/alerts/alertmanager`；
+- 未知 source 返回 400，不会静默接收。
+
 ## 3. 距离生产级 AIOps 还缺什么
 
 当前是**可用的 SRE 数字员工 MVP**，不是自动处置平台：

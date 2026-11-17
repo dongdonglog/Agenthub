@@ -64,6 +64,21 @@ SSH 密钥放在 `/data/home/.ssh`，不要把宿主机个人 `~/.ssh` 整体挂
 - `bash` 能访问容器网络；需要出站白名单时由部署层网络策略限制；
 - 工具会继承容器环境变量，接入凭据应只放容器环境或 `/data` 卷，不要写入技能/日志。
 
+## MCP 工具网关
+
+`agenthub-ops-mcp` 是统一工具网关，不是每个数据源一个 server：
+
+- 内置 Prometheus/Loki/Tempo/K8s 工具；
+- 通过 `AGENTHUB_MCP_UPSTREAMS` 聚合上游 MCP server；
+- 工具名自动加前缀（如 `datadog__query_metrics`），避免冲突；
+- `read_only=false` 的上游默认跳过，只有 `AGENTHUB_MCP_ALLOW_WRITE=true` 才装载；
+- 网关统一超时、错误隔离和 stderr 审计；单个上游启动失败不影响内置工具。
+
+```bash
+AGENTHUB_MCP_UPSTREAMS='[{"name":"demo","command":"npx","args":["-y","@demo/mcp"],"prefix":"demo","read_only":true}]' \
+  /app/agenthub-ops-mcp
+```
+
 ## 推荐 MCP
 
 常用 MCP 配方（filesystem、playwright、fetch、brave-search、github、gitlab、postgres、memory）见

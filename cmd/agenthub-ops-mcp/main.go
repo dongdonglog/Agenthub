@@ -57,6 +57,7 @@ type server struct {
 	kubectl   string
 	http      *http.Client
 	tools     []tool
+	upstreams []*upstream
 }
 
 func main() {
@@ -70,6 +71,7 @@ func main() {
 		kubectl:   os.Getenv("AGENTHUB_KUBECTL_BIN"),
 		http:      &http.Client{Timeout: 20 * time.Second},
 	}
+	s.startUpstreams()
 	s.tools = s.listTools()
 	log.SetOutput(os.Stderr)
 	log.Printf("ops-mcp ready: prometheus=%v loki=%v tools=%d", s.promURL != "", s.lokiURL != "", len(s.tools))
@@ -133,6 +135,11 @@ func (s *server) call(raw json.RawMessage) (any, error) {
 	args := map[string]any{}
 	if len(params.Arguments) > 0 {
 		_ = json.Unmarshal(params.Arguments, &args)
+	}
+	for _, u := range s.upstreams {
+		if strings.HasPrefix(params.Name, u.prefix()+"__") {
+			return u.call(params.Name, params.Arguments)
+		}
 	}
 	text, err := s.runTool(params.Name, args)
 	if err != nil {
@@ -336,6 +343,9 @@ func (s *server) listTools() []tool {
 				"namespace": map[string]any{"type": "string"},
 			}, nil)},
 		)
+	}
+	for _, u := range s.upstreams {
+		out = append(out, u.tools...)
 	}
 	if s.lokiURL != "" {
 		out = append(out,
