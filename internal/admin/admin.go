@@ -132,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/feedback", s.handleCaseFeedback)
 	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
+	mux.HandleFunc("PUT /admin/api/v1/employees/{id}", s.handleEmployeeUpdate)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/approvals", s.handleCaseApprovalCreate)
 	mux.HandleFunc("POST /admin/api/v1/approvals/{id}/approve", s.handleApprovalDecide)
 	mux.HandleFunc("POST /admin/api/v1/approvals/{id}/reject", s.handleApprovalDecide)
@@ -1094,6 +1095,30 @@ func (s *Server) handleApprovalDecide(rw http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "approval."+status, id, body.Actor)
 	writeJSON(rw, http.StatusOK, map[string]string{"status": status})
+}
+
+func (s *Server) handleEmployeeUpdate(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	var body store.Employee
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	body.ID = r.PathValue("id")
+	if body.ID == "" {
+		writeError(rw, http.StatusBadRequest, "员工 ID 不能为空")
+		return
+	}
+	emp, err := s.opts.Cases.EnsureEmployee(r.Context(), body, time.Now())
+	if err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.audit(r, "employee.update", emp.ID, strings.Join(emp.AllowedTools, ","))
+	writeJSON(rw, http.StatusOK, emp)
 }
 
 func (s *Server) handleEmployeeStats(rw http.ResponseWriter, r *http.Request) {

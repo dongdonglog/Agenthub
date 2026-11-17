@@ -14,15 +14,16 @@ import (
 
 // Employee 是一个数字员工。
 type Employee struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Title     string    `json:"title"`
-	Role      string    `json:"role"`
-	Mission   string    `json:"mission"`
-	Status    string    `json:"status"`
-	ChatID    string    `json:"chat_id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Title        string    `json:"title"`
+	Role         string    `json:"role"`
+	Mission      string    `json:"mission"`
+	Status       string    `json:"status"`
+	ChatID       string    `json:"chat_id"`
+	AllowedTools []string  `json:"allowed_tools"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Case 是一个统一工作项：事故、工单或任务。
@@ -116,11 +117,12 @@ func (s *CaseStore) EnsureEmployee(ctx context.Context, e Employee, now time.Tim
 		e.Status = "active"
 	}
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO employee (id, name, title, role, mission, status, chat_id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
+		INSERT INTO employee (id, name, title, role, mission, status, chat_id, allowed_tools, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
 		ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, title=EXCLUDED.title, role=EXCLUDED.role,
-			mission=EXCLUDED.mission, status=EXCLUDED.status, chat_id=EXCLUDED.chat_id, updated_at=EXCLUDED.updated_at`,
-		e.ID, e.Name, e.Title, e.Role, e.Mission, e.Status, e.ChatID, now); err != nil {
+			mission=EXCLUDED.mission, status=EXCLUDED.status, chat_id=EXCLUDED.chat_id,
+			allowed_tools=EXCLUDED.allowed_tools, updated_at=EXCLUDED.updated_at`,
+		e.ID, e.Name, e.Title, e.Role, e.Mission, e.Status, e.ChatID, mustJSON(e.AllowedTools), now); err != nil {
 		return nil, err
 	}
 	return s.GetEmployee(ctx, e.ID)
@@ -128,15 +130,15 @@ func (s *CaseStore) EnsureEmployee(ctx context.Context, e Employee, now time.Tim
 
 // ListEmployees 返回数字员工。
 func (s *CaseStore) ListEmployees(ctx context.Context) ([]*Employee, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, title, role, mission, status, chat_id, created_at, updated_at FROM employee ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, title, role, mission, status, chat_id, allowed_tools, created_at, updated_at FROM employee ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*Employee
 	for rows.Next() {
-		e := &Employee{}
-		if err := rows.Scan(&e.ID, &e.Name, &e.Title, &e.Role, &e.Mission, &e.Status, &e.ChatID, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := scanEmployee(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -146,9 +148,7 @@ func (s *CaseStore) ListEmployees(ctx context.Context) ([]*Employee, error) {
 
 // GetEmployee 读取员工。
 func (s *CaseStore) GetEmployee(ctx context.Context, id string) (*Employee, error) {
-	e := &Employee{}
-	err := s.pool.QueryRow(ctx, `SELECT id, name, title, role, mission, status, chat_id, created_at, updated_at FROM employee WHERE id = $1`, id).
-		Scan(&e.ID, &e.Name, &e.Title, &e.Role, &e.Mission, &e.Status, &e.ChatID, &e.CreatedAt, &e.UpdatedAt)
+	e, err := scanEmployee(s.pool.QueryRow(ctx, `SELECT id, name, title, role, mission, status, chat_id, allowed_tools, created_at, updated_at FROM employee WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -360,6 +360,23 @@ func (s *CaseStore) getCaseBySource(ctx context.Context, source, sourceID string
 		return nil, nil
 	}
 	return c, err
+}
+
+type employeeScanner interface{ Scan(dest ...any) error }
+
+func scanEmployee(row employeeScanner) (*Employee, error) {
+	e := &Employee{}
+	var tools []byte
+	if err := row.Scan(&e.ID, &e.Name, &e.Title, &e.Role, &e.Mission, &e.Status, &e.ChatID, &tools, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal(tools, &e.AllowedTools)
+	return e, nil
+}
+
+func mustJSON(v any) []byte {
+	raw, _ := json.Marshal(v)
+	return raw
 }
 
 type caseScanner interface{ Scan(dest ...any) error }

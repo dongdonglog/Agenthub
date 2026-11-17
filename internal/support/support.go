@@ -90,11 +90,17 @@ func (i *Ingestor) Handle(ctx context.Context, raw []byte) (string, error) {
 		docs, _ = i.knowledge.Search(ctx, ticket.Title+" "+ticket.Description, i.cfg.Team, 5)
 	}
 	prompt := buildPrompt(ticket, docs)
+	toolAllow := []string{}
+	if i.store != nil {
+		if emp, _ := i.store.GetEmployee(ctx, i.cfg.EmployeeID); emp != nil {
+			toolAllow = emp.AllowedTools
+		}
+	}
 	if _, err := i.engine.Submit(ctx, channel.Inbound{
 		Channel: "support", Tenant: "support", ExternalID: "ticket:" + ticket.ID,
 		SentAt: now, Sender: channel.Sender{OpenID: "ticket", Name: "工单系统"},
 		Chat: channel.Chat{ID: i.cfg.ChatID, Kind: "group", Name: "技术支持"},
-		Text: prompt, MsgType: "text", ReadOnly: true,
+		Text: prompt, MsgType: "text", ReadOnly: true, ToolAllow: toolAllow,
 	}); err != nil {
 		i.log.Warn("submit support run failed", "ticket", ticket.ID, "error", err)
 		return c.ID, err

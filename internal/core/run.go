@@ -130,6 +130,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 		TraceID:        run.TraceID,
 		RunID:          run.ID,
 		ReadOnly:       batch[0].ReadOnly,
+		ToolAllow:      batch[0].ToolAllow,
 		ConversationID: conv,
 		Generation:     batch[0].Generation,
 		Progress:       progress,

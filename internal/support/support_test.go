@@ -39,7 +39,7 @@ func TestTicketCreatesCaseAndSupportRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	caseStore := store.NewCaseStore(db)
-	if _, err := caseStore.EnsureEmployee(ctx, store.Employee{ID: "tech-support", Name: "技术支持"}, time.Now()); err != nil {
+	if _, err := caseStore.EnsureEmployee(ctx, store.Employee{ID: "tech-support", Name: "技术支持", AllowedTools: []string{"read", "bash"}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -63,5 +63,8 @@ func TestTicketCreatesCaseAndSupportRun(t *testing.T) {
 	msgs := engine.Messages("support:oc_support:ticket")
 	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "无法登录") || !msgs[0].ReadOnly || !strings.Contains(msgs[0].Text, "登录 500") || !strings.Contains(msgs[0].Text, "kb/login.md") {
 		t.Fatalf("messages = %+v", msgs)
+	}
+	if len(msgs[0].ToolAllow) != 2 || msgs[0].ToolAllow[0] != "read" {
+		t.Fatalf("tool allow = %+v", msgs[0].ToolAllow)
 	}
 }

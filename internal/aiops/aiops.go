@@ -187,6 +187,12 @@ func (i *Ingestor) syncCase(ctx context.Context, incident *store.Incident, statu
 
 func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident, payload AlertmanagerPayload) error {
 	prompt := i.buildPrompt(incident, payload)
+	toolAllow := []string{}
+	if i.cases != nil {
+		if emp, _ := i.cases.GetEmployee(ctx, i.employee); emp != nil {
+			toolAllow = emp.AllowedTools
+		}
+	}
 	_, err := i.engine.Submit(ctx, channel.Inbound{
 		Channel: "aiops", Tenant: "aiops",
 		ExternalID: "incident:" + incident.ID + ":firing",
@@ -196,6 +202,7 @@ func (i *Ingestor) submitDiagnosis(ctx context.Context, incident *store.Incident
 		Text:       prompt,
 		MsgType:    "text",
 		ReadOnly:   true,
+		ToolAllow:  toolAllow,
 	})
 	return err
 }

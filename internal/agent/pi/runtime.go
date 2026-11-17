@@ -260,7 +260,11 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 	if model != "" {
 		args = append(args, "--provider", provider, "--model", model)
 	}
-	args = append(args, "--mode", "rpc", "--session", session, "--tools", r.cfg.Tools,
+	tools := r.cfg.Tools
+	if len(in.ToolAllow) > 0 {
+		tools = strings.Join(in.ToolAllow, ",")
+	}
+	args = append(args, "--mode", "rpc", "--session", session, "--tools", tools,
 		"--no-context-files", "--append-system-prompt", agentsMD)
 	for _, extension := range r.cfg.Extensions {
 		args = append(args, "--extension", extension)

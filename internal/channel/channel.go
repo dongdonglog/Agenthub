@@ -51,6 +51,8 @@ type Inbound struct {
 	TargetConversation string
 	// ReadOnly 表示本次运行只读（运维诊断等场景）。
 	ReadOnly bool
+	// ToolAllow 是本次运行允许的 pi 工具；空表示使用全局配置。
+	ToolAllow []string
 	// NoReply 为 true 时投递不回挂消息（用于定时任务等没有平台消息 ID 的来源）。
 	NoReply      bool
 	Attachments  []Attachment

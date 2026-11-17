@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, type Paged } from "../api/client";
 import { Badge, Button, Card, PageHeader, Skeleton, useAsync, useToast } from "../components/ui";
 
-type Employee = { id: string; name: string; title: string; role: string; mission: string; status: string; chat_id: string };
+type Employee = { id: string; name: string; title: string; role: string; mission: string; status: string; chat_id: string; allowed_tools?: string[] };
 type CaseItem = {
   id: string; employee_id: string; type: string; source: string; source_id: string; title: string; summary: string;
   severity: string; status: string; service: string; environment: string; created_at: string; updated_at: string;
@@ -79,6 +79,7 @@ export function Workbench() {
               <div className="cell-main">{employee.name} <Badge kind="ok">{employee.status}</Badge></div>
               <div className="cell-sub">{employee.title} · {employee.role}</div>
               <div className="muted small" style={{ marginTop: 4 }}>{employee.mission}</div>
+              {employee.allowed_tools?.length ? <div className="muted small">工具：{employee.allowed_tools.join(", ")}</div> : null}
               <Button className="link" onClick={() => loadStats(employee.id)}>绩效</Button>
             </div>
             <span className="mono muted small">{employee.chat_id || "未绑定群"}</span>

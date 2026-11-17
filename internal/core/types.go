@@ -23,6 +23,7 @@ type Message struct {
 	// SentByAdmin 表示这条消息来自管理员跨会话干预。
 	SentByAdmin  bool
 	ReadOnly     bool
+	ToolAllow    []string
 	SenderOpenID string
 	SenderName   string
 	Text         string
