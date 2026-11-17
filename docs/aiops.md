@@ -185,7 +185,16 @@ AGENTHUB_LOKI_TOKEN=
 - 工具查询到 `up{job="checkout"}=0` 和 `checkout 500` 日志，并指出时间窗/指标不匹配；
 - 全程只读，未执行变更。
 
-这是第一个“真实模型 + 告警 + 案件 + 观测工具”的端到端诊断样例，但仍使用 fake 观测端点；真实 Prom/Loki/Tempo/K8s 需部署方联调。
+这是第一个“真实模型 + 告警 + 案件 + 观测工具”的端到端诊断样例。
+
+随后用真实 Prometheus 2.54 + Loki 3.2 容器复跑：
+
+- `run_2` completed，输入约 30k tokens，输出约 1.6k tokens；
+- 真实查到 Loki 的 `checkout 500 path=/pay` 日志；
+- 真实查到 Prometheus 当前告警为空、业务指标缺失，并在诊断中明确区分“观测缺口”和“业务恢复”；
+- 未执行任何变更。
+
+真实 Prom/Loki 已跑通；Tempo/K8s 仍需目标环境联调。
 
 ### 2.11 审批与受控动作
 
