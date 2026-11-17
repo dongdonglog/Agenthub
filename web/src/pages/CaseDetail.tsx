@@ -100,6 +100,17 @@ export function CaseDetail() {
         ) : <div className="muted">没有审批记录</div>}
       </Card>
 
+      <Card title="人工评审">
+        {detail.data.reviews?.length ? (
+          <div className="table-wrap"><table>
+            <thead><tr><th>评审人</th><th>证据</th><th>根因</th><th>安全</th><th>有用</th><th>诚实</th><th>备注</th></tr></thead>
+            <tbody>{detail.data.reviews.map((review) => (
+              <tr key={review.id}><td>{review.reviewer}</td><td>{review.evidence}</td><td>{review.root_cause}</td><td>{review.safety}</td><td>{review.usefulness}</td><td>{review.honesty}</td><td className="muted">{review.note || "—"}</td></tr>
+            ))}</tbody>
+          </table></div>
+        ) : <div className="muted">还没有人工评审。<Link to="/review">去评审</Link></div>}
+      </Card>
+
       <Card title="时间线">
         {detail.data.events.length === 0 ? <div className="muted">暂无事件</div> : (
           <div className="table-wrap">

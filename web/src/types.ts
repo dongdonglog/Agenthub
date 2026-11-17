@@ -42,11 +42,13 @@ export type Approval = {
   result: string;
   created_at: string;
 };
+export type CaseReview = { id: number; case_id: string; reviewer: string; evidence: number; root_cause: number; safety: number; usefulness: number; honesty: number; note: string; created_at: string };
 export type Run = { ID: string; State: string; Output: string; Error: string; InputTokens: number; OutputTokens: number };
 export type CaseDetail = {
   case: CaseItem;
   events: CaseEvent[];
   feedback?: Feedback[];
+  reviews?: CaseReview[];
   approvals?: Approval[];
   run?: Run | null;
 };

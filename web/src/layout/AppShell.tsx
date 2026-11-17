@@ -5,19 +5,12 @@ import { useAsync } from "../components/ui";
 import { useTheme } from "../theme";
 
 const NAV = [
-  { to: "/", label: "运行概览", icon: "📊", end: true },
-  { to: "/workbench", label: "值班工作台", icon: "🗂️" },
+  { to: "/", label: "值班台", icon: "🏠", end: true },
   { to: "/cases", label: "案件", icon: "📁" },
-  { to: "/employees", label: "数字员工", icon: "👤" },
-  { to: "/incidents", label: "运维事故", icon: "🚨" },
-  { to: "/review", label: "人工评审", icon: "📝" },
-  { to: "/sessions", label: "在线会话", icon: "💬" },
-  { to: "/history", label: "历史会话", icon: "🗂️" },
-  { to: "/skills", label: "Skill", icon: "🧩" },
-  { to: "/mcps", label: "MCP", icon: "🔌" },
-  { to: "/tasks", label: "定时任务", icon: "⏰" },
-  { to: "/audits", label: "审计", icon: "📜" },
-  { to: "/settings", label: "设置", icon: "⚙️" },
+  { to: "/incidents", label: "事故", icon: "🚨" },
+  { to: "/employees", label: "团队", icon: "👤" },
+  { to: "/review", label: "评审", icon: "📝" },
+  { to: "/system", label: "系统", icon: "⚙️" },
 ];
 
 export function AppShell() {

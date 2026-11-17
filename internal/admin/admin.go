@@ -135,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/resolve", s.handleCaseResolve)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
 	mux.HandleFunc("POST /admin/api/v1/cases/{id}/feedback", s.handleCaseFeedback)
+	mux.HandleFunc("POST /admin/api/v1/cases/{id}/review", s.handleCaseReview)
 	mux.HandleFunc("POST /admin/api/v1/cases", s.handleCaseCreate)
 	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
 	mux.HandleFunc("PUT /admin/api/v1/employees/{id}", s.handleEmployeeUpdate)
@@ -938,6 +939,7 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	feedback, _ := s.opts.Cases.ListFeedback(r.Context(), c.ID, 50)
+	reviews, _ := s.opts.Cases.ListReviews(r.Context(), c.ID)
 	approvals, _ := s.opts.Cases.ListApprovals(r.Context(), c.ID)
 	var run any
 	if s.opts.Journal != nil {
@@ -952,7 +954,7 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 			run, _ = s.opts.Journal.LatestRunForConversation(r.Context(), conv)
 		}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "approvals": approvals, "run": run})
+	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "reviews": reviews, "approvals": approvals, "run": run})
 }
 
 func (s *Server) handleCaseHandoff(rw http.ResponseWriter, r *http.Request) {
@@ -1019,6 +1021,44 @@ func (s *Server) handleCasePostmortem(rw http.ResponseWriter, r *http.Request) {
 	_ = s.opts.Cases.AddCaseEvent(r.Context(), c.ID, "postmortem", "admin", "生成复盘草稿", time.Now())
 	s.audit(r, "case.postmortem", c.ID, "")
 	writeJSON(rw, http.StatusOK, map[string]any{"status": "ok", "markdown": text})
+}
+
+func (s *Server) handleCaseReview(rw http.ResponseWriter, r *http.Request) {
+	if s.opts.Cases == nil {
+		writeError(rw, http.StatusServiceUnavailable, "案件存储未接入")
+		return
+	}
+	var body struct {
+		Reviewer   string `json:"reviewer"`
+		Evidence   int    `json:"evidence"`
+		RootCause  int    `json:"root_cause"`
+		Safety     int    `json:"safety"`
+		Usefulness int    `json:"usefulness"`
+		Honesty    int    `json:"honesty"`
+		Note       string `json:"note"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	for _, score := range []int{body.Evidence, body.RootCause, body.Safety, body.Usefulness, body.Honesty} {
+		if score < 0 || score > 3 {
+			writeError(rw, http.StatusBadRequest, "评分必须在 0-3")
+			return
+		}
+	}
+	if body.Reviewer == "" {
+		body.Reviewer = "admin"
+	}
+	id := r.PathValue("id")
+	review := store.CaseReview{CaseID: id, Reviewer: body.Reviewer, Evidence: body.Evidence, RootCause: body.RootCause, Safety: body.Safety, Usefulness: body.Usefulness, Honesty: body.Honesty, Note: body.Note}
+	if err := s.opts.Cases.AddReview(r.Context(), review, time.Now()); err != nil {
+		writeError(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.opts.Cases.AddCaseEvent(r.Context(), id, "review", body.Reviewer, "提交人工评审", time.Now())
+	s.audit(r, "case.review", id, body.Reviewer)
+	writeJSON(rw, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleCaseCreate(rw http.ResponseWriter, r *http.Request) {

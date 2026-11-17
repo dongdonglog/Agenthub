@@ -19,7 +19,7 @@ func TestCaseAndIncidentFilters(t *testing.T) {
 	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Pool().Exec(ctx, `TRUNCATE case_item, case_event, incident, incident_event, employee`); err != nil {
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE case_item, case_event, case_review, incident, incident_event, alert_event, employee`); err != nil {
 		t.Fatal(err)
 	}
 	cases := store.NewCaseStore(db)
@@ -33,6 +33,18 @@ func TestCaseAndIncidentFilters(t *testing.T) {
 	items, total, err := cases.ListCasesFiltered(ctx, store.CaseFilter{Type: "ticket", Query: "登录", Limit: 10})
 	if err != nil || total != 1 || len(items) != 1 || items[0].Type != "ticket" {
 		t.Fatalf("items=%+v total=%d err=%v", items, total, err)
+	}
+
+	if err := cases.AddReview(ctx, store.CaseReview{CaseID: items[0].ID, Reviewer: "alice", Evidence: 2, RootCause: 1, Safety: 3, Usefulness: 2, Honesty: 3}, now); err != nil {
+		t.Fatal(err)
+	}
+	reviews, err := cases.ListReviews(ctx, items[0].ID)
+	if err != nil || len(reviews) != 1 || reviews[0].Evidence != 2 {
+		t.Fatalf("reviews=%+v err=%v", reviews, err)
+	}
+	stats, err := cases.EmployeeStats(ctx, "tech-support")
+	if err != nil || stats.Reviews != 1 || stats.AvgSafety != 3 {
+		t.Fatalf("stats=%+v err=%v", stats, err)
 	}
 
 	incidents := store.NewIncidentStore(db)

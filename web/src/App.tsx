@@ -2,7 +2,6 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ConfirmProvider, ToastProvider } from "./components/ui";
 import { AppShell } from "./layout/AppShell";
 import { ThemeProvider } from "./theme";
-import { Overview } from "./pages/Overview";
 import { Sessions } from "./pages/Sessions";
 import { SessionDetail } from "./pages/SessionDetail";
 import { History, HistoryDetail } from "./pages/History";
@@ -17,6 +16,7 @@ import { CaseDetail } from "./pages/CaseDetail";
 import { Employees } from "./pages/Employees";
 import { Review } from "./pages/Review";
 import { Workbench } from "./pages/Workbench";
+import { System } from "./pages/System";
 import { Settings } from "./pages/Settings";
 
 export function App() {
@@ -27,8 +27,8 @@ export function App() {
           <HashRouter>
             <Routes>
               <Route element={<AppShell />}>
-                <Route path="/" element={<Overview />} />
-                <Route path="/workbench" element={<Workbench />} />
+                <Route path="/" element={<Workbench />} />
+                <Route path="/workbench" element={<Navigate to="/" replace />} />
                 <Route path="/cases" element={<Cases />} />
                 <Route path="/cases/:id" element={<CaseDetail />} />
                 <Route path="/employees" element={<Employees />} />
@@ -46,6 +46,7 @@ export function App() {
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/tasks/:id" element={<TaskDetail />} />
                 <Route path="/audits" element={<Audits />} />
+                <Route path="/system" element={<System />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

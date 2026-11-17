@@ -1,15 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type Paged } from "../api/client";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Skeleton, useAsync, useToast } from "../components/ui";
 import type { Employee } from "../types";
 
-type Stats = { employee_id: string; cases: number; resolved: number; useful: number; not_useful: number; avg_resolve_ms: number; csat: number };
+type Stats = { employee_id: string; cases: number; resolved: number; useful: number; not_useful: number; avg_resolve_ms: number; csat: number; reviews: number; avg_evidence: number; avg_root_cause: number; avg_safety: number; avg_usefulness: number; avg_honesty: number };
 
 export function Employees() {
   const employees = useAsync<Paged<Employee>>(() => api("/employees"), []);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [allStats, setAllStats] = useState<Record<string, Stats>>({});
   const { show } = useToast();
+
+  useEffect(() => {
+    const items = employees.data?.items ?? [];
+    if (items.length === 0) return;
+    Promise.all(items.map((employee) => api<Stats>(`/employees/${encodeURIComponent(employee.id)}/stats`).catch(() => null)))
+      .then((values) => {
+        const map: Record<string, Stats> = {};
+        values.forEach((value) => { if (value) map[value.employee_id] = value; });
+        setAllStats(map);
+      });
+  }, [employees.data]);
 
   const loadStats = async (id: string) => {
     try { setStats(await api<Stats>(`/employees/${encodeURIComponent(id)}/stats`)); } catch (err) { show((err as Error).message, true); }
@@ -34,6 +46,23 @@ export function Employees() {
           </Card>
         ))}
       </div>
+      {Object.keys(allStats).length ? (
+        <Card title="绩效对比">
+          <div className="table-wrap"><table>
+            <thead><tr><th>员工</th><th>案件</th><th>解决</th><th>采纳率</th><th>CSAT</th><th>评审数</th><th>证据</th><th>根因</th><th>安全</th><th>有用</th><th>诚实</th></tr></thead>
+            <tbody>{Object.values(allStats).map((item) => {
+              const totalFeedback = item.useful + item.not_useful;
+              return <tr key={item.employee_id}>
+                <td className="mono">{item.employee_id}</td><td>{item.cases}</td><td>{item.resolved}</td>
+                <td>{totalFeedback ? `${Math.round((item.useful / totalFeedback) * 100)}%` : "—"}</td>
+                <td>{item.csat ? item.csat.toFixed(1) : "—"}</td><td>{item.reviews}</td>
+                <td>{item.avg_evidence ? item.avg_evidence.toFixed(1) : "—"}</td><td>{item.avg_root_cause ? item.avg_root_cause.toFixed(1) : "—"}</td>
+                <td>{item.avg_safety ? item.avg_safety.toFixed(1) : "—"}</td><td>{item.avg_usefulness ? item.avg_usefulness.toFixed(1) : "—"}</td><td>{item.avg_honesty ? item.avg_honesty.toFixed(1) : "—"}</td>
+              </tr>;
+            })}</tbody>
+          </table></div>
+        </Card>
+      ) : null}
       {employees.data?.items.length === 0 ? <Card><div className="muted">还没有数字员工</div></Card> : null}
       {stats ? (
         <Card title={`绩效 · ${stats.employee_id}`} actions={<Button className="link" onClick={() => setStats(null)}>关闭</Button>}>
@@ -43,6 +72,9 @@ export function Employees() {
             <Stat label="有用 / 无用" value={`${stats.useful} / ${stats.not_useful}`} />
             <Stat label="平均解决" value={`${Math.round(stats.avg_resolve_ms / 1000)}s`} />
             <Stat label="CSAT" value={stats.csat ? stats.csat.toFixed(1) : "—"} />
+            <Stat label="评审" value={`${stats.reviews} 条`} />
+            <Stat label="证据 / 根因" value={`${stats.avg_evidence.toFixed(1)} / ${stats.avg_root_cause.toFixed(1)}`} />
+            <Stat label="安全 / 有用 / 诚实" value={`${stats.avg_safety.toFixed(1)} / ${stats.avg_usefulness.toFixed(1)} / ${stats.avg_honesty.toFixed(1)}`} />
           </div>
         </Card>
       ) : null}

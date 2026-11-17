@@ -69,6 +69,20 @@ type CaseFeedback struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// CaseReview 是人工五维评审。
+type CaseReview struct {
+	ID         int64     `json:"id"`
+	CaseID     string    `json:"case_id"`
+	Reviewer   string    `json:"reviewer"`
+	Evidence   int       `json:"evidence"`
+	RootCause  int       `json:"root_cause"`
+	Safety     int       `json:"safety"`
+	Usefulness int       `json:"usefulness"`
+	Honesty    int       `json:"honesty"`
+	Note       string    `json:"note"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 // EmployeeStats 是员工绩效快照。
 type EmployeeStats struct {
 	EmployeeID   string  `json:"employee_id"`
@@ -78,6 +92,12 @@ type EmployeeStats struct {
 	NotUseful    int     `json:"not_useful"`
 	AvgResolveMS float64 `json:"avg_resolve_ms"`
 	CSAT         float64 `json:"csat"`
+	Reviews      int     `json:"reviews"`
+	AvgEvidence  float64 `json:"avg_evidence"`
+	AvgRootCause float64 `json:"avg_root_cause"`
+	AvgSafety    float64 `json:"avg_safety"`
+	AvgUseful    float64 `json:"avg_usefulness"`
+	AvgHonesty   float64 `json:"avg_honesty"`
 }
 
 // Approval 是一次受控动作审批。
@@ -307,6 +327,11 @@ func (s *CaseStore) EmployeeStats(ctx context.Context, employeeID string) (Emplo
 	_ = s.pool.QueryRow(ctx, `
 		SELECT COALESCE(AVG(f.csat) FILTER (WHERE f.csat > 0),0)
 		FROM case_feedback f JOIN case_item c ON c.id=f.case_id WHERE c.employee_id=$1`, employeeID).Scan(&stats.CSAT)
+	_ = s.pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(AVG(r.evidence),0), COALESCE(AVG(r.root_cause),0),
+		       COALESCE(AVG(r.safety),0), COALESCE(AVG(r.usefulness),0), COALESCE(AVG(r.honesty),0)
+		FROM case_review r JOIN case_item c ON c.id=r.case_id WHERE c.employee_id=$1`, employeeID).
+		Scan(&stats.Reviews, &stats.AvgEvidence, &stats.AvgRootCause, &stats.AvgSafety, &stats.AvgUseful, &stats.AvgHonesty)
 	return stats, nil
 }
 
@@ -339,6 +364,39 @@ func (s *CaseStore) GetCase(ctx context.Context, id string) (*Case, error) {
 		return nil, nil
 	}
 	return c, err
+}
+
+// AddReview 保存或更新一次人工评审。
+func (s *CaseStore) AddReview(ctx context.Context, review CaseReview, now time.Time) error {
+	if review.Reviewer == "" {
+		review.Reviewer = "admin"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO case_review (case_id, reviewer, evidence, root_cause, safety, usefulness, honesty, note, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (case_id, reviewer) DO UPDATE SET evidence=EXCLUDED.evidence, root_cause=EXCLUDED.root_cause,
+			safety=EXCLUDED.safety, usefulness=EXCLUDED.usefulness, honesty=EXCLUDED.honesty,
+			note=EXCLUDED.note, created_at=EXCLUDED.created_at`,
+		review.CaseID, review.Reviewer, review.Evidence, review.RootCause, review.Safety, review.Usefulness, review.Honesty, review.Note, now)
+	return err
+}
+
+// ListReviews 返回案件人工评审。
+func (s *CaseStore) ListReviews(ctx context.Context, caseID string) ([]CaseReview, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, case_id, reviewer, evidence, root_cause, safety, usefulness, honesty, note, created_at FROM case_review WHERE case_id=$1 ORDER BY created_at DESC`, caseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CaseReview
+	for rows.Next() {
+		var item CaseReview
+		if err := rows.Scan(&item.ID, &item.CaseID, &item.Reviewer, &item.Evidence, &item.RootCause, &item.Safety, &item.Usefulness, &item.Honesty, &item.Note, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 // EscalateOverdue 把超过 SLA 的未结案件升级为等待人工，返回升级的案件 ID。
