@@ -41,14 +41,12 @@ func TestReactionStatesFollowRun(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		ch.mu.Lock()
-		hasDone := false
+		seen := map[string]bool{}
 		for _, state := range ch.states {
-			if state == "completed" {
-				hasDone = true
-			}
+			seen[state] = true
 		}
 		ch.mu.Unlock()
-		if hasDone {
+		if seen["completed"] && seen["processing"] {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
