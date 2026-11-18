@@ -28,7 +28,7 @@ func (a *blockingAgent) Run(ctx context.Context, _ agent.Input) (agent.Output, e
 	return agent.Output{}, ctx.Err()
 }
 
-func startRun(t *testing.T) (*core.Engine, *blockingAgent, chan struct{}) {
+func startRun(t *testing.T) (*core.Engine, *blockingAgent, chan struct{}, string) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	a := &blockingAgent{started: make(chan struct{})}
@@ -47,7 +47,12 @@ func startRun(t *testing.T) (*core.Engine, *blockingAgent, chan struct{}) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("运行未启动")
 	}
-	return engine, a, done
+	// 运行 ID 带随机后缀，测试必须用实际值而不是写死 run_1。
+	runs := engine.Runs()
+	if len(runs) != 1 {
+		t.Fatalf("运行数 = %d, want 1", len(runs))
+	}
+	return engine, a, done, runs[0].ID
 }
 
 func postCard(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
@@ -58,10 +63,10 @@ func postCard(t *testing.T, h http.Handler, body string) *httptest.ResponseRecor
 }
 
 func TestCardStopByOwner(t *testing.T) {
-	engine, _, done := startRun(t)
+	engine, _, done, runID := startRun(t)
 	h := feishu.NewCardAction(engine, "vt", "", nil)
 
-	body := `{"header":{"token":"vt"},"event":{"operator":{"open_id":"ou_owner"},"action":{"value":{"action":"stop","run_id":"run_1"}}}}`
+	body := `{"header":{"token":"vt"},"event":{"operator":{"open_id":"ou_owner"},"action":{"value":{"action":"stop","run_id":"` + runID + `"}}}}`
 	rec := postCard(t, h, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
@@ -78,10 +83,10 @@ func TestCardStopByOwner(t *testing.T) {
 }
 
 func TestCardStopRejectsOthers(t *testing.T) {
-	engine, _, done := startRun(t)
+	engine, _, done, runID := startRun(t)
 	h := feishu.NewCardAction(engine, "vt", "", nil)
 
-	body := `{"header":{"token":"vt"},"event":{"operator":{"open_id":"ou_other"},"action":{"value":{"action":"stop","run_id":"run_1"}}}}`
+	body := `{"header":{"token":"vt"},"event":{"operator":{"open_id":"ou_other"},"action":{"value":{"action":"stop","run_id":"` + runID + `"}}}}`
 	rec := postCard(t, h, body)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -97,9 +102,9 @@ func TestCardStopRejectsOthers(t *testing.T) {
 }
 
 func TestCardStopRejectsBadToken(t *testing.T) {
-	engine, _, done := startRun(t)
+	engine, _, done, runID := startRun(t)
 	h := feishu.NewCardAction(engine, "vt", "", nil)
-	body := `{"header":{"token":"bad"},"event":{"operator":{"open_id":"ou_owner"},"action":{"value":{"action":"stop","run_id":"run_1"}}}}`
+	body := `{"header":{"token":"bad"},"event":{"operator":{"open_id":"ou_owner"},"action":{"value":{"action":"stop","run_id":"` + runID + `"}}}}`
 	rec := postCard(t, h, body)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)

@@ -61,7 +61,7 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 	e.rounds[batch[0].ChatID]++
 	run := &Run{
 		TraceID:        batch[0].TraceID,
-		ID:             fmt.Sprintf("run_%d", e.runSeq),
+		ID:             newRunID(e.runSeq),
 		ConversationID: conv,
 		ChatID:         batch[0].ChatID,
 		Round:          e.rounds[batch[0].ChatID],

@@ -441,7 +441,11 @@ func TestRunEventsRecorded(t *testing.T) {
 	if err := eng.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	events := eng.RunEvents("run_1")
+	runs := eng.Runs()
+	if len(runs) != 1 {
+		t.Fatalf("运行数 = %d, want 1", len(runs))
+	}
+	events := eng.RunEvents(runs[0].ID)
 	if len(events) != 2 {
 		t.Fatalf("events = %d, want 2", len(events))
 	}

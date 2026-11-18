@@ -159,7 +159,11 @@ func TestRunDetail(t *testing.T) {
 	}
 	h := admin.New(cfg, engine, store, admin.Options{Version: "test", Agent: agent.Echo{}}, logger).Handler()
 
-	rec := do(t, h, http.MethodGet, "/admin/api/v1/runs/run_1", "")
+	runs := engine.Runs()
+	if len(runs) != 1 {
+		t.Fatalf("运行数 = %d, want 1", len(runs))
+	}
+	rec := do(t, h, http.MethodGet, "/admin/api/v1/runs/"+runs[0].ID, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}

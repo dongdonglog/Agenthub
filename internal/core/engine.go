@@ -398,6 +398,20 @@ func newTraceID() string {
 	return "tr_" + hex.EncodeToString(b[:])
 }
 
+// newRunID 生成本实例内唯一、跨实例也不冲突的运行 ID。
+//
+// @remarks 序号只用于日志可读性，真正的唯一性来自随机后缀。
+// 只用自增序号时，两个共用同一个数据库的实例会生成相同的 run_N，
+// SaveRun 的 upsert 会互相覆写——没有卡片通道的实例一写，
+// 就会把 card_handle 冲成空，那张卡从此没人能关闭。
+func newRunID(seq int64) string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("run_%d_%d", seq, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("run_%d_%s", seq, hex.EncodeToString(b[:]))
+}
+
 func (e *Engine) Submit(ctx context.Context, in channel.Inbound) (bool, error) {
 	if in.ExternalID == "" {
 		return false, errors.New("缺少外部消息 ID")

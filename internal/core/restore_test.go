@@ -109,7 +109,12 @@ func TestRunEventsSurviveRestart(t *testing.T) {
 	if err := eng.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(eng.RunEvents("run_1")); got != 2 {
+	runs := eng.Runs()
+	if len(runs) != 1 {
+		t.Fatalf("运行数 = %d, want 1", len(runs))
+	}
+	runID := runs[0].ID
+	if got := len(eng.RunEvents(runID)); got != 2 {
 		t.Fatalf("首次事件数 = %d", got)
 	}
 
@@ -118,7 +123,7 @@ func TestRunEventsSurviveRestart(t *testing.T) {
 	if err := restored.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
-	events := restored.RunEvents("run_1")
+	events := restored.RunEvents(runID)
 	if len(events) != 2 {
 		t.Fatalf("重启后事件数 = %d", len(events))
 	}
