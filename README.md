@@ -180,7 +180,7 @@ AgentHub 的分工是：
 
 ## 生产边界
 
-当前主线是 **`v0.4.0` 之后的开发版**，适合内网或受控环境的小团队试用；生产发布以 GitHub Releases 为准。
+当前版本 **`v0.5.0`**，适合内网或受控环境的小团队试用；生产发布以 GitHub Releases 为准。
 
 - 默认只读，写操作审批；K8s 动作仅支持 allowlist 内的 scale/restart；
 - 飞书/钉钉长连接由 PostgreSQL advisory lock 选主，单活入口；会话执行另有数据库租约，多实例不会重复跑同一会话；

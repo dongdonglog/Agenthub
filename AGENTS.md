@@ -295,7 +295,7 @@ data/
 | `docs/deploy.md` | 部署与飞书配置 |
 | `docs/architecture.md` | 已按当前实现重写；与代码冲突时以代码为准 |
 | `docs/openapi.yaml` | HTTP 接口规范；**有测试守着**（`internal/admin/routes_test.go`） |
-| `CHANGELOG.md` | 到 `0.4.0`，`Unreleased` 段落后于代码 |
+| `CHANGELOG.md` | 到 `0.5.0`；`Unreleased` 段落只记尚未发布的改动 |
 
 判断「代码现在怎么做」时，**以 `cmd/agentd/main.go` + 本文件为准**。
 历史上存在过 `PRD.md` / `roadmap.md` / `comparison.md` / `intro.md`，描述的是

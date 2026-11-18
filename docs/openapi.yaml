@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: AgentHub API
   summary: 飞书/钉钉里的 AI SRE 数字同事 — HTTP 接口
-  version: 0.4.0
+  version: 0.5.0
   description: |
     AgentHub 在一个 Go 二进制里对外暴露两个 HTTP 面，端口不同、信任边界也不同：
 
@@ -84,7 +84,7 @@ paths:
                   active_profile: { type: string, description: 当前生效的 Profile 名称，可为空 }
                   runtime: { type: string, example: pi }
                   pi_version: { type: string, example: "1.4.0" }
-                  version: { type: string, example: "0.4.0" }
+                  version: { type: string, example: "0.5.0" }
                   channel: { type: string, enum: [feishu, dingtalk, off] }
                   transport: { type: string, description: 飞书通道形态：long_conn 或 webhook }
                   feishu: { type: string, enum: [connected, reconnecting, connecting, unknown] }

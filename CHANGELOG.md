@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-18
+
+**升级注意**：`AGENTHUB_ENV=production` 现在必须配置管理面令牌，否则进程以退出码 2
+拒绝启动。这是有意为之——此前生产环境下管理面可能完全裸奔。升级前先确认
+`AGENTHUB_ADMIN_TOKEN`（或 operator/view 任一）已配置。
+
 ### Added
 
 - `request_approval` 扩展：pi 可申请受控动作（K8s scale/restart），Go 校验形状后创建 `approval_request`
@@ -34,7 +40,9 @@
 - `docs/openapi.yaml`：覆盖接入面与管理面全部接口，并由 `internal/admin/routes_test.go`
   双向校验规范与路由表一致（加了路由忘写文档、或文档留着已删接口都会失败）；
 - 零凭据演示链路：`scripts/demo.sh` 起实例、`scripts/verify.sh` 推告警走完全流程，
-  无模型凭据时自动回退回显执行器。
+  无模型凭据时自动回退回显执行器；
+- 定时任务执行路径测试：`Run`/`tick`/`execute`/`submit` 此前覆盖率为 0，包覆盖率 13.1% → 72.1%；
+- 接入面 webhook 测试：告警与工单 handler 覆盖鉴权三路分支、按来源 token、限流、非法载荷与 503。
 
 ### Changed
 
@@ -54,7 +62,9 @@
 - 被停用（`.disabled/`）或归档（`.archived/`）的技能仍被注入会话工作区；
 - `AGENTHUB_READONLY` 从未真正传给 pi（`cmd.Env` 被整体覆盖），只读 guard 长期哑火；
 - guard 扩展按切片位置取值，装配顺序一变子调查就脱离约束；
-- `.gitignore` 的 `skills/` 误伤 `pi-package/skills`，核心 SOP 未进入版本库与镜像。
+- `.gitignore` 的 `skills/` 误伤 `pi-package/skills`，核心 SOP 未进入版本库与镜像；
+- `TestCollectRecoversStaleOutbox` 依赖文件系统时间戳精度，在 overlayfs 上随机失败，
+  导致 CI（以及发布门禁）偶发红灯；改为显式固定 mtime，并补一条回收时间边界的用例。
 
 ## [0.4.0] - 2026-11-13
 
@@ -96,7 +106,8 @@
 - 管理台 Skill / MCP / 审计 / 队列；
 - Docker 多架构镜像与 tag 自动发布。
 
-[Unreleased]: https://github.com/dongdonglog/Agenthub/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/dongdonglog/Agenthub/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/dongdonglog/Agenthub/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dongdonglog/Agenthub/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dongdonglog/Agenthub/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dongdonglog/Agenthub/releases/tag/v0.2.0

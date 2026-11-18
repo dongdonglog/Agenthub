@@ -198,7 +198,7 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 ```json
 {
   "status": "ok",
-  "version": "0.4.0-dev",
+  "version": "0.5.0-dev",
   "checks": { "config": "ok", "db": "ok" }
 }
 ```
