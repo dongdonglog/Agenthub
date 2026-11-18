@@ -52,9 +52,13 @@ func (j *Journal) SetMessageStatus(ctx context.Context, ids []string, status str
 
 // SaveRun 新建或更新运行。
 //
-// @remarks 卡片相关字段是单调的：card_handle 只做「从空到有」的补写，
-// card_closed 只做「从 false 到 true」的推进。运行状态更新绝不能把它们
-// 冲回空/false，否则那张卡会永远停在「处理中」且再也没人能关闭。
+// @remarks 两个必须守住的性质：
+//
+//  1. 时间列写入 NULL 而不是 Go 零值。零值会被写成 0001-01-01，而保留期清理是
+//     `ended_at IS NOT NULL AND ended_at < cutoff`——正在运行的行会被当成过期数据
+//     删掉，卡片的句柄随之消失，那张卡就永远停在「处理中」且没人能关。
+//  2. 卡片字段单调：card_handle 只做「从空到有」的补写，card_closed 只做
+//     false→true。运行状态更新绝不能把它们冲回空/false。
 func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 	inputs, _ := json.Marshal(r.InputIDs)
 	_, err := j.pool.Exec(ctx, `
@@ -64,14 +68,15 @@ func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 			state = EXCLUDED.state,
 			output = EXCLUDED.output,
 			error = EXCLUDED.error,
-			ended_at = EXCLUDED.ended_at,
+			ended_at = COALESCE(EXCLUDED.ended_at, run_state.ended_at),
 			input_tokens = EXCLUDED.input_tokens,
 			output_tokens = EXCLUDED.output_tokens,
 			trace_id = EXCLUDED.trace_id,
 			heartbeat_at = COALESCE(EXCLUDED.heartbeat_at, run_state.heartbeat_at),
 			card_handle = COALESCE(NULLIF(EXCLUDED.card_handle, ''), run_state.card_handle),
 			card_closed = run_state.card_closed OR EXCLUDED.card_closed`,
-		r.ID, r.ConversationID, r.ChatID, r.Round, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt,
+		r.ID, r.ConversationID, r.ChatID, r.Round, r.State, inputs, r.Output, r.Error,
+		nullTime(r.StartedAt), nullTime(r.EndedAt),
 		r.InputTokens, r.OutputTokens, r.TraceID, nullTime(r.HeartbeatAt), r.CardHandle, r.CardClosed)
 	return err
 }
