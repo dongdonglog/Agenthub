@@ -288,16 +288,18 @@ data/
 | 文档 | 状态 |
 |---|---|
 | `README.md` | 对外定位与快速开始，大致可用 |
-| `docs/runbook.md` | 配置表与排障，**较准**；缺少数个新增变量 |
+| `docs/runbook.md` | 配置表与排障，**较准** |
 | `docs/aiops.md` | AIOps 设计与接口，可用 |
 | `docs/tools.md` | 镜像工具链与 MCP 网关，可用 |
 | `docs/best-practices.md` | 上线顺序与验收口径，可用 |
-| `docs/architecture.md` | **部分过期**：仍写 templ+htmx、River 队列、自研 Go loop、沙箱容器、`core/ingress` 等旧设计 |
-| `docs/roadmap.md`、`docs/PRD.md` | 历史规划，不代表当前实现 |
+| `docs/deploy.md` | 部署与飞书配置 |
+| `docs/architecture.md` | 已按当前实现重写；与代码冲突时以代码为准 |
 | `CHANGELOG.md` | 到 `0.4.0`，`Unreleased` 段落后于代码 |
 
-判断「代码现在怎么做」时，**以 `cmd/agentd/main.go` + 本文件为准**，不要以
-`docs/architecture.md` 的 ADR 为准。修文档时优先修 architecture.md 的组件图与 ADR-002/003/005。
+判断「代码现在怎么做」时，**以 `cmd/agentd/main.go` + 本文件为准**。
+历史上存在过 `PRD.md` / `roadmap.md` / `comparison.md` / `intro.md`，描述的是
+已废弃的设计（River、templ+htmx、自研 Go loop、沙箱容器），已删除；
+不要在别处重新引入这些概念。
 
 ---
 

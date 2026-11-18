@@ -210,7 +210,6 @@ AgentHub 的分工是：
 - [架构设计](docs/architecture.md)
 - [运维手册](docs/runbook.md)
 - [飞书能力实测](docs/feishu-capabilities.md)
-- [路线图](docs/roadmap.md)
 - [CHANGELOG](CHANGELOG.md)
 
 ## 开发
