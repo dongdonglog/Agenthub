@@ -571,19 +571,6 @@ func (e *Engine) Flush(ctx context.Context) error {
 
 // Messages 返回某个会话的消息快照（按创建时间排序）。
 
-// Conversation 是管理面使用的会话摘要。
-type Conversation struct {
-	ID          string    `json:"id"`
-	ChatID      string    `json:"chat_id"`
-	Sender      string    `json:"sender"`
-	Messages    int       `json:"messages"`
-	Queued      int       `json:"queued"`
-	ActiveRunID string    `json:"active_run_id,omitempty"`
-	LastActive  time.Time `json:"last_active"`
-}
-
-// Conversations 返回全部会话摘要，按最近活跃排序。
-
 // Runs 返回全部运行的快照。
 
 // Deliveries 返回全部投递记录。

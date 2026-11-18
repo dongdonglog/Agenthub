@@ -510,7 +510,8 @@ func TestPruneBoundsMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng.Prune()
-	if got := len(eng.Conversations()); got != 1 {
+	// 用生产路径 SessionInfos 观察裁剪结果：旧会话应已被淘汰。
+	if got := len(eng.SessionInfos()); got != 1 {
 		t.Fatalf("会话数未裁剪: %d", got)
 	}
 }

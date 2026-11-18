@@ -147,37 +147,6 @@ func (e *Engine) Messages(conv string) []*Message {
 	return copies
 }
 
-func (e *Engine) Conversations() []Conversation {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	index := make(map[string]*Conversation)
-	for _, m := range e.messages {
-		c, ok := index[m.ConversationID]
-		if !ok {
-			c = &Conversation{ID: m.ConversationID, ChatID: m.ChatID, Sender: m.SenderOpenID}
-			index[m.ConversationID] = c
-		}
-		c.Messages++
-		if m.Status == "queued" {
-			c.Queued++
-		}
-		if m.CreatedAt.After(c.LastActive) {
-			c.LastActive = m.CreatedAt
-		}
-	}
-	for conv, runID := range e.active {
-		if c, ok := index[conv]; ok {
-			c.ActiveRunID = runID
-		}
-	}
-	out := make([]Conversation, 0, len(index))
-	for _, c := range index {
-		out = append(out, *c)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
-	return out
-}
-
 func (e *Engine) Runs() []*Run {
 	e.mu.Lock()
 	defer e.mu.Unlock()
