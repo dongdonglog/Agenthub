@@ -102,7 +102,7 @@ CI（`.github/workflows/ci.yml`）另外跑 `go test -race ./...` 与 `CGO_ENABL
 | `scheduler` | 5 段 cron 定时任务，20s 轮询、`FOR UPDATE SKIP LOCKED` 抢占 | `scheduler.go` |
 | `ha` | PostgreSQL advisory lock 单活入口选主（多实例只有一个收长连接） | `leader.go` |
 | `httpapi` | `/healthz`、`/metrics`、`/api/v1/alerts/{source}`、`/api/v1/tickets` | `server.go`、`health.go`、`serve.go` |
-| `admin` | 管理台静态资源（`embed static`）+ `/admin/api/v1/*`（约 60 条路由）+ RBAC | `admin.go`、`store.go`、`import.go` |
+| `admin` | 管理台静态资源（`embed static`）+ `/admin/api/v1/*`（60 余条路由）+ RBAC | `admin.go`（装配与鉴权）、`routes.go`（**路由表**）、`handlers_*.go`（按资源拆分）、`store.go`、`import.go` |
 | `modelcfg` | 多供应商模型配置 v2（providers/models/routes）与 v1 迁移 | `config.go` |
 | `modelrouter` | 回环 OpenAI 兼容主备路由：候选选择、重试、熔断、流式 | `router.go`、`circuit.go` |
 | `mcp` | **目前未被主程序引用**：通用 MCP stdio 客户端（pi 已原生支持 MCP）。改主链路时不用管它 | `client.go`、`manager.go` |
@@ -294,6 +294,7 @@ data/
 | `docs/best-practices.md` | 上线顺序与验收口径，可用 |
 | `docs/deploy.md` | 部署与飞书配置 |
 | `docs/architecture.md` | 已按当前实现重写；与代码冲突时以代码为准 |
+| `docs/openapi.yaml` | HTTP 接口规范；**有测试守着**（`internal/admin/routes_test.go`） |
 | `CHANGELOG.md` | 到 `0.4.0`，`Unreleased` 段落后于代码 |
 
 判断「代码现在怎么做」时，**以 `cmd/agentd/main.go` + 本文件为准**。

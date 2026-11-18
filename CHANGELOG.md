@@ -30,7 +30,31 @@
 - 管理台“应用当前配置”：同步工作区并把 Profile 绑定刷新到已有会话代；
 - 产物交付：工作区 `submit/` → 文件/图片回传；多文档 ZIP（UTF-8 文件名）；
 - 单文件/数量/总量上限与超限说明；飞书文件与图片上传；
-- 管理台运行详情查看、下载产物。
+- 管理台运行详情查看、下载产物；
+- `docs/openapi.yaml`：覆盖接入面与管理面全部接口，并由 `internal/admin/routes_test.go`
+  双向校验规范与路由表一致（加了路由忘写文档、或文档留着已删接口都会失败）；
+- 零凭据演示链路：`scripts/demo.sh` 起实例、`scripts/verify.sh` 推告警走完全流程，
+  无模型凭据时自动回退回显执行器。
+
+### Changed
+
+- 管理面路由收进 `internal/admin/routes.go` 的 `apiRoutes` 表，`Handler()` 只做装配；
+- `admin.go` 按资源拆分为 `handlers_*.go`（1873 行 → 342 行，纯文件移动）；
+- 删除 `internal/mcp` 包、`agent/skills.go`、`agent/settings.go` 等无引用代码，累计约 1200 行；
+- 管理面 `production` 未配置令牌时拒绝启动（退出码 2）。
+
+### Fixed
+
+- **「处理中」卡片永久残留**：运行心跳回收（迁移 0038）、卡片句柄持久化
+  （`card_handle` / `card_closed`）、未关闭卡片巡检重试，三个根因一并修复；
+- **多实例重复执行同一会话**：会话执行租约（迁移 0039），任何非终态运行即占用会话，
+  另一实例领取失败直接退回队列；
+- 重启后消息语义（`case_id` / `no_reply` / `read_only` / `tool_allow`）丢失，导致重复作答；
+- 保留期清理误删仍在运行的运行行（零值时间列必须写 NULL，否则比较不到）；
+- 被停用（`.disabled/`）或归档（`.archived/`）的技能仍被注入会话工作区；
+- `AGENTHUB_READONLY` 从未真正传给 pi（`cmd.Env` 被整体覆盖），只读 guard 长期哑火；
+- guard 扩展按切片位置取值，装配顺序一变子调查就脱离约束；
+- `.gitignore` 的 `skills/` 误伤 `pi-package/skills`，核心 SOP 未进入版本库与镜像。
 
 ## [0.4.0] - 2026-11-13
 
