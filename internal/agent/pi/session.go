@@ -226,18 +226,3 @@ func appendEntry(path string, e sessionEntry) error {
 	}
 	return nil
 }
-
-func countMessages(path string) (int, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, line := range splitLines(raw) {
-		var e sessionEntry
-		if json.Unmarshal(line, &e) == nil && e.Type == "message" {
-			count++
-		}
-	}
-	return count, nil
-}
