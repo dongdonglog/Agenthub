@@ -31,12 +31,20 @@ curl -sf -X POST "$API/api/v1/alerts/alertmanager" \
          \"labels\":{\"alertname\":\"VerifyAlert\",\"service\":\"${SERVICE}\"},
          \"annotations\":{\"summary\":\"${TITLE}\"},\"fingerprint\":\"${SERVICE}\"}]}" >/dev/null
 
-AUTH=(-H "Authorization: Bearer ${AGENTHUB_ADMIN_TOKEN:?}")
+# 管理面令牌可选：开发/演示环境可能不设鉴权（生产环境启动时会强制要求）。
+# 用函数而不是数组，避免 set -u 下展开空数组报 unbound variable。
+curl_admin() {
+  if [ -n "${AGENTHUB_ADMIN_TOKEN:-}" ]; then
+    curl -sf -H "Authorization: Bearer ${AGENTHUB_ADMIN_TOKEN}" "$@"
+  else
+    curl -sf "$@"
+  fi
+}
 
 echo "==> 3/4 确认事故与案件已创建"
-INCIDENT=$(curl -sf "${AUTH[@]}" "$ADMIN/admin/api/v1/incidents?service=${SERVICE}" | jq -r '.items[0].id // empty')
+INCIDENT=$(curl_admin "$ADMIN/admin/api/v1/incidents?service=${SERVICE}" | jq -r '.items[0].id // empty')
 [ -n "$INCIDENT" ] || { echo "没有生成事故" >&2; exit 1; }
-CASE=$(curl -sf "${AUTH[@]}" "$ADMIN/admin/api/v1/cases?q=${SERVICE}" | jq -r '.items[0].id // empty')
+CASE=$(curl_admin "$ADMIN/admin/api/v1/cases?q=${SERVICE}" | jq -r '.items[0].id // empty')
 [ -n "$CASE" ] || { echo "没有生成案件" >&2; exit 1; }
 echo "    incident=${INCIDENT} case=${CASE}"
 
@@ -45,7 +53,7 @@ echo "==> 4/4 等待诊断报告（最多 5 分钟）"
 # 所以必须查 /reports（只返回已入库的 case_report），否则会误报成功。
 REPORT=""
 for _ in $(seq 1 60); do
-  REPORT=$(curl -sf "${AUTH[@]}" "$ADMIN/admin/api/v1/reports" \
+  REPORT=$(curl_admin "$ADMIN/admin/api/v1/reports" \
     | jq -r --arg case "$CASE" '.items[] | select(.report.case_id == $case) | .report.problem' | head -1)
   [ -n "$REPORT" ] && break
   sleep 5
