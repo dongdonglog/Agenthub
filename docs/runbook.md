@@ -148,7 +148,6 @@ curl -s https://open.feishu.cn/open-apis/bot/v3/info -H "Authorization: Bearer $
 | `AGENTHUB_AGENT_MODEL` | `gpt-4.1-mini` | 默认模型 |
 | `AGENTHUB_AGENT_SYSTEM_PROMPT` | 内置 | 追加技能之前的系统提示词 |
 | `AGENTHUB_AGENT_SKILLS_DIR` | `<数据目录>/skills` | Markdown 技能目录 |
-| `AGENTHUB_AGENT_MAX_RUN_SECONDS` | `1800` | 单次运行上限 |
 | `AGENTHUB_LOG_LEVEL` | `info` | debug/info/warn/error |
 | `AGENTHUB_LOG_FORMAT` | `json` | json/text |
 

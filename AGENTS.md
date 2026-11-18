@@ -208,7 +208,7 @@ modelrouter  → modelcfg
 
 已知配置债（改动时注意，不要照抄文档）：
 
-- `AGENTHUB_AGENT_MAX_RUN_SECONDS` **已解析但未生效**；真正的单次运行超时是 `PI_TIMEOUT_SECONDS`（默认 600s）。
+- 单次运行超时只有 `PI_TIMEOUT_SECONDS`（默认 600s），没有独立的 agent 侧上限。
 - `PI_ISOLATION` 代码默认 `namespace`（仅 Linux 生效），compose 默认 `process_group`。
 - `AGENTHUB_SEED_SKILLS_DIR` 默认值 `skills`（仓库根目录），但仓库里**没有**这个目录，
   所以默认种子实际为空；见 §7。

@@ -618,7 +618,6 @@ func run() int {
 		Version:       version.Version,
 		FeishuStatus:  feishuStatus,
 		Agent:         executor,
-		Tools:         nil,
 		Runtime:       "pi",
 		PiVersion:     piVersion,
 		Profiles:      profiles,

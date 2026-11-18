@@ -44,20 +44,20 @@ func TestSkillStatusMovesAndLoaderSkips(t *testing.T) {
 	if err != nil || skill.Status != "disabled" {
 		t.Fatalf("停用后 status = %+v err=%v", skill, err)
 	}
-	loaded, err := agent.LoadSkills(dir + "/skills")
-	if err != nil {
-		t.Fatal(err)
+	// 停用即挪出技能目录：pi 只扫描 <data>/pi/agent/skills 下的可见项，
+	// 放进 .disabled 就等于不再暴露给它。
+	if _, err := os.Stat(filepath.Join(dir, "skills", "demo")); !os.IsNotExist(err) {
+		t.Fatalf("停用后不应留在技能目录, err=%v", err)
 	}
-	if len(loaded) != 0 {
-		t.Fatalf("停用技能不应被加载: %+v", loaded)
+	if _, err := os.Stat(filepath.Join(dir, "skills", ".disabled", "demo", "SKILL.md")); err != nil {
+		t.Fatalf("停用技能应在 .disabled 下: %v", err)
 	}
 
 	if err := store.SetSkillStatus("demo", "active"); err != nil {
 		t.Fatal(err)
 	}
-	loaded, _ = agent.LoadSkills(dir + "/skills")
-	if len(loaded) != 1 {
-		t.Fatalf("启用后应加载 1 个，实际 %d", len(loaded))
+	if _, err := os.Stat(filepath.Join(dir, "skills", "demo", "SKILL.md")); err != nil {
+		t.Fatalf("启用后应回到技能目录: %v", err)
 	}
 }
 
@@ -488,10 +488,11 @@ func TestFlatSkillFilesAndArchive(t *testing.T) {
 	if !found {
 		t.Fatalf("归档后的扁平技能应出现在列表: %+v", list)
 	}
-	loaded, _ := agent.LoadSkills(skillsDir)
-	for _, sk := range loaded {
-		if sk.Name == "flat" {
-			t.Fatal("归档技能不应被加载")
-		}
+	// 归档即挪出技能目录：pi 只扫描该目录的可见项，不会读到归档技能。
+	if _, err := os.Stat(filepath.Join(skillsDir, "flat.md")); !os.IsNotExist(err) {
+		t.Fatalf("归档后不应留在技能目录, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, ".archived", "flat.md")); err != nil {
+		t.Fatalf("归档技能应在 .archived 下: %v", err)
 	}
 }

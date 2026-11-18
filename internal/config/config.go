@@ -214,8 +214,6 @@ type AgentConfig struct {
 	SystemPrompt string `yaml:"system_prompt"`
 	// SkillsDir 是 Markdown 技能目录。
 	SkillsDir string `yaml:"skills_dir"`
-	// MaxRunSeconds 是单次运行上限。
-	MaxRunSeconds int `yaml:"max_run_seconds"`
 }
 
 // LogConfig 是日志配置。
@@ -288,10 +286,9 @@ func defaults() Config {
 			RequireMention: true,
 		},
 		Agent: AgentConfig{
-			Provider:      "openai",
-			Model:         "gpt-4.1-mini",
-			BaseURL:       "https://api.openai.com/v1",
-			MaxRunSeconds: 1800,
+			Provider: "openai",
+			Model:    "gpt-4.1-mini",
+			BaseURL:  "https://api.openai.com/v1",
 		},
 		Log: LogConfig{Level: "info", Format: "json"},
 	}
@@ -386,7 +383,6 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Agent.APIKey, "AGENTHUB_AGENT_API_KEY")
 	setStr(&cfg.Agent.SystemPrompt, "AGENTHUB_AGENT_SYSTEM_PROMPT")
 	setStr(&cfg.Agent.SkillsDir, "AGENTHUB_AGENT_SKILLS_DIR")
-	setInt(&cfg.Agent.MaxRunSeconds, "AGENTHUB_AGENT_MAX_RUN_SECONDS")
 	setStr(&cfg.Log.Level, "AGENTHUB_LOG_LEVEL")
 	setStr(&cfg.Log.Format, "AGENTHUB_LOG_FORMAT")
 }
@@ -485,9 +481,6 @@ func (c *Config) Validate() error {
 	}
 	if c.RetentionDays < 0 {
 		return errors.New("retention_days 不能为负数")
-	}
-	if c.Agent.MaxRunSeconds <= 0 {
-		return errors.New("agent.max_run_seconds 必须为正整数")
 	}
 	if c.AIOps.MaxAlerts <= 0 {
 		c.AIOps.MaxAlerts = 20

@@ -30,7 +30,7 @@ go build ./...
 并发相关包额外跑：
 
 ```bash
-go test -race ./internal/core ./internal/admin ./internal/agent/pi ./internal/store ./internal/mcp
+go test -race ./internal/core ./internal/admin ./internal/agent/pi ./internal/store
 ```
 
 ### 3. 前端

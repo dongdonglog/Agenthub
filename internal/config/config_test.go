@@ -173,7 +173,6 @@ func TestDingtalkChannelRequiresCredentials(t *testing.T) {
 			Storage: config.StorageConfig{Dir: t.TempDir()},
 			Webhook: config.WebhookConfig{Addr: "127.0.0.1:3"},
 			DB:      config.DBConfig{MaxConns: 4},
-			Agent:   config.AgentConfig{MaxRunSeconds: 60},
 			Log:     config.LogConfig{Level: "info", Format: "text"},
 		}
 	}

@@ -45,8 +45,6 @@ type Options struct {
 	FeishuStatus func() string
 	// Agent 用于管理台的在线试跑。
 	Agent agent.Agent
-	// Tools 是当前可用工具，用于概览展示。
-	Tools []agent.Tool
 	// Runtime 是 agent 运行时名称（当前固定 pi）。
 	Runtime string
 	// PiVersion 是检测到的 pi 版本。
@@ -518,7 +516,6 @@ func (s *Server) handleOverview(rw http.ResponseWriter, _ *http.Request) {
 			"runs":          len(runs),
 			"skills":        len(skills),
 			"mcps":          len(mcps),
-			"tools":         len(s.opts.Tools),
 		},
 	})
 }
