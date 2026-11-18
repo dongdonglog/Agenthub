@@ -12,4 +12,4 @@ test:
 
 test-db:
 	AGENTHUB_TEST_DATABASE_URL='postgres://postgres:agenthub@127.0.0.1:55433/agenthub_test?sslmode=disable' \
-		go test -p 1 ./internal/core ./internal/store ./internal/admin ./internal/support ./internal/aiops ./internal/ha -count=1
+		go test -p 1 ./internal/core ./internal/store ./internal/admin ./internal/support ./internal/aiops ./internal/ha ./internal/scheduler -count=1

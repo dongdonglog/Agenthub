@@ -48,7 +48,7 @@ COMPOSE_CHANNEL=off docker compose up -d
 
 ```bash
 AGENTHUB_TEST_DATABASE_URL='postgres://postgres:pass@127.0.0.1:5432/agenthub_test?sslmode=disable' \
-  go test -p 1 ./internal/core ./internal/store ./internal/aiops ./internal/support ./internal/ha -count=1
+  go test -p 1 ./internal/core ./internal/store ./internal/aiops ./internal/support ./internal/ha ./internal/scheduler -count=1
 ```
 
 - 必须用**独立测试库**：用例会 `TRUNCATE`；指向 `postgres` 库会 `t.Skip`。
