@@ -50,6 +50,99 @@ func (j *Journal) SetMessageStatus(ctx context.Context, ids []string, status str
 	return err
 }
 
+// ClaimMessages 原子领取一批消息：只有仍是 queued 的会被置为 processing。
+//
+// @remarks 跨实例场景下，本地队列可能持有已被别的实例处理过的消息。
+// 用一条 UPDATE ... WHERE status='queued' RETURNING 完成「检查 + 占用」，
+// 返回的才是真正归属本次运行的输入，避免同一条消息被执行两次。
+func (j *Journal) ClaimMessages(ctx context.Context, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := j.pool.Query(ctx, `
+		UPDATE message_state SET status = 'processing'
+		WHERE id = ANY($1) AND status = 'queued'
+		RETURNING id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// LoadMessageStatuses 读取一批消息的当前状态。
+//
+// @remarks 跨实例场景下，本地队列可能持有已被别的实例处理过的消息。
+// 执行前用数据库状态校准，避免重复执行。
+func (j *Journal) LoadMessageStatuses(ctx context.Context, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := j.pool.Query(ctx, `SELECT id, status FROM message_state WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string, len(ids))
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, err
+		}
+		out[id] = status
+	}
+	return out, rows.Err()
+}
+
+// TryAcquireConversationLease 尝试拿到会话执行租约。
+//
+// @remarks 租约把「谁有权执行这个会话」变成数据库事实，跨实例互斥。
+// 已过期或自己持有都可以接管；同一行上的 INSERT .. ON CONFLICT 由 PostgreSQL
+// 串行化，两个实例同时申请只有一个能拿到。
+func (j *Journal) TryAcquireConversationLease(ctx context.Context, conv, owner string, ttl time.Duration) (bool, error) {
+	var got bool
+	err := j.pool.QueryRow(ctx, `
+		INSERT INTO conversation_lease (conversation_id, owner, expires_at)
+		VALUES ($1, $2, now() + make_interval(secs => $3))
+		ON CONFLICT (conversation_id) DO UPDATE
+			SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at
+			WHERE conversation_lease.expires_at <= now() OR conversation_lease.owner = EXCLUDED.owner
+		RETURNING true`, conv, owner, ttl.Seconds()).Scan(&got)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return got, nil
+}
+
+// RenewConversationLease 续租；false 表示租约已丢失（可能被别的实例接管）。
+func (j *Journal) RenewConversationLease(ctx context.Context, conv, owner string, ttl time.Duration) (bool, error) {
+	tag, err := j.pool.Exec(ctx, `
+		UPDATE conversation_lease SET expires_at = now() + make_interval(secs => $3)
+		WHERE conversation_id = $1 AND owner = $2`, conv, owner, ttl.Seconds())
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ReleaseConversationLease 释放自己持有的会话租约；过期由清理自然接管。
+func (j *Journal) ReleaseConversationLease(ctx context.Context, conv, owner string) error {
+	_, err := j.pool.Exec(ctx, `
+		DELETE FROM conversation_lease WHERE conversation_id = $1 AND owner = $2`, conv, owner)
+	return err
+}
+
 // SaveRun 新建或更新运行。
 //
 // @remarks 两个必须守住的性质：

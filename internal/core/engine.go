@@ -69,6 +69,8 @@ type Engine struct {
 	// deliveryOwner 标识当前进程；deliveryLease 是单次发送领取的租约。
 	deliveryOwner string
 	deliveryLease time.Duration
+	// leaseTTL 是会话执行租约的持有时长，需大于单次运行的最长耗时。
+	leaseTTL time.Duration
 	// staleRunAfter 是判定「运行已失去执行者」的阈值。
 	staleRunAfter time.Duration
 	reactor       channel.Reactor
@@ -131,6 +133,8 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		reactions:          make(map[string]string),
 		deliveryOwner:      newLeaseToken(),
 		deliveryLease:      2 * time.Minute,
+		// 会话执行租约：跨实例互斥，需长于单次运行上限；运行期间由心跳续租。
+		leaseTTL: 15 * time.Minute,
 		// 按心跳判定执行者是否存活：心跳间隔 10s，超过 1 分钟没刷新即视为进程已消失。
 		// 这样卡片最迟在 1 分钟内被改成中断态，而不是一直停在「处理中」。
 		staleRunAfter: runHeartbeatTimeout,
@@ -274,6 +278,15 @@ func (e *Engine) SetDeliveryLease(lease time.Duration) {
 	e.mu.Lock()
 	if lease > 0 {
 		e.deliveryLease = lease
+	}
+	e.mu.Unlock()
+}
+
+// SetLeaseTTL 设置会话执行租约时长；应大于单次运行上限。
+func (e *Engine) SetLeaseTTL(d time.Duration) {
+	e.mu.Lock()
+	if d > 0 {
+		e.leaseTTL = d
 	}
 	e.mu.Unlock()
 }

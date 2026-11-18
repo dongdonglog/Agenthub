@@ -14,11 +14,13 @@ const heartbeatInterval = 10 * time.Second
 // 保证卡片最迟在启动后 1 分钟内被改成中断态，不会一直显示「处理中」。
 const runHeartbeatTimeout = time.Minute
 
-// startRunHeartbeat 在运行期间定期刷新心跳，返回停止函数。
+// startRunHeartbeat 在运行期间定期刷新心跳与会话租约，返回停止函数。
 //
 // @remarks 心跳是「进程还活着」的唯一信号。进程被 kill 后心跳停止，
 // 其它实例据此在 runHeartbeatTimeout 内回收该运行并把卡片改成中断态。
-func (e *Engine) startRunHeartbeat(ctx context.Context, runID string) func() {
+// 同时续租会话执行权：租约一旦丢失，说明本实例已被判定失效、可能有别的实例
+// 接手，继续跑就会重复执行，必须主动中止。
+func (e *Engine) startRunHeartbeat(ctx context.Context, runID, conv string) func() {
 	if e.journal == nil {
 		return func() {}
 	}
@@ -37,7 +39,18 @@ func (e *Engine) startRunHeartbeat(ctx context.Context, runID string) func() {
 				if err := e.journal.HeartbeatRun(hbCtx, runID, e.now()); err != nil {
 					e.log.Debug("run heartbeat failed", "run", runID, "error", err)
 				}
+				held, err := e.journal.RenewConversationLease(hbCtx, conv, e.deliveryOwner, e.leaseTTL)
 				cancel()
+				if err != nil {
+					e.log.Debug("renew conversation lease failed", "conversation", conv, "error", err)
+					continue
+				}
+				if !held {
+					e.log.Warn("conversation lease lost; aborting run to avoid double execution",
+						"run", runID, "conversation", conv)
+					e.Stop(conv)
+					return
+				}
 			}
 		}
 	}()

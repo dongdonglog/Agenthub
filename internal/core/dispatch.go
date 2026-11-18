@@ -97,15 +97,17 @@ func (e *Engine) Dispatch(ctx context.Context) {
 		if !e.acquire() {
 			return
 		}
+		// 这里只做快速判断，不预先占用 active：
+		// 「从空闲到已占用」的原子转换由 runBatch 在它自己的锁内完成，
+		// 否则 Dispatch 与 Flush 可能同时看到可执行并各自进入同一次运行。
 		e.mu.Lock()
-		if e.active[item.ConversationID] != "" {
-			e.mu.Unlock()
+		busy := e.active[item.ConversationID] != ""
+		e.mu.Unlock()
+		if busy {
 			e.release()
 			continue
 		}
-		e.active[item.ConversationID] = "pending"
 		conv := item.ConversationID
-		e.mu.Unlock()
 
 		go func() {
 			defer e.release()

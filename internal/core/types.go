@@ -177,6 +177,16 @@ type ProfileSelection struct {
 type Journal interface {
 	SaveMessage(ctx context.Context, m *Message) (bool, error)
 	SetMessageStatus(ctx context.Context, ids []string, status string) error
+	// LoadMessageStatuses 读取消息当前状态，用于执行前跨实例校准。
+	LoadMessageStatuses(ctx context.Context, ids []string) (map[string]string, error)
+	// ClaimMessages 原子领取消息：只有仍是 queued 的会被置为 processing 并返回。
+	ClaimMessages(ctx context.Context, ids []string) ([]string, error)
+	// TryAcquireConversationLease 申请会话执行租约；跨实例互斥。
+	TryAcquireConversationLease(ctx context.Context, conv, owner string, ttl time.Duration) (bool, error)
+	// RenewConversationLease 续租；false 表示租约已被别的实例接管。
+	RenewConversationLease(ctx context.Context, conv, owner string, ttl time.Duration) (bool, error)
+	// ReleaseConversationLease 释放自己持有的会话租约。
+	ReleaseConversationLease(ctx context.Context, conv, owner string) error
 	SaveGeneration(ctx context.Context, conversationID string, generation int) error
 	LoadGenerations(ctx context.Context) (map[string]int, error)
 	SaveRun(ctx context.Context, r *Run) error
