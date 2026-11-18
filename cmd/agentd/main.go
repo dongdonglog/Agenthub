@@ -325,7 +325,14 @@ func run() int {
 		Provider:     "agenthub",
 		Model:        "main",
 	})
-	engine := core.New(runner, ch, logger)
+	// 没有模型凭据时退回确定性回显执行器：本地冒烟、演示和 CI 不该因为
+	// 没配模型就启动不了，也不该静默调用一个必然失败的网关。
+	var executor agent.Agent = runner
+	if !modelConfig.HasCredentials() {
+		executor = agent.Echo{}
+		logger.Warn("no model credentials; falling back to echo executor (demo mode)")
+	}
+	engine := core.New(executor, ch, logger)
 	engine.SetGenerationCleaner(func(conv string, generation int) {
 		if err := runner.Cleanup(conv, generation); err != nil {
 			logger.Warn("cleanup generation failed", "conversation", conv, "generation", generation, "error", err)
@@ -610,7 +617,7 @@ func run() int {
 	adminSrv := admin.New(cfg, engine, adminStore, admin.Options{
 		Version:       version.Version,
 		FeishuStatus:  feishuStatus,
-		Agent:         runner,
+		Agent:         executor,
 		Tools:         nil,
 		Runtime:       "pi",
 		PiVersion:     piVersion,

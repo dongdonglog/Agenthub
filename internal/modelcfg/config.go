@@ -225,6 +225,27 @@ func (c Config) Route(name string) (Route, bool) {
 	return Route{}, false
 }
 
+// HasCredentials 报告 main 线路是否至少有一个配了密钥的候选。
+//
+// @remarks 用于「无凭据时退回回显执行器」：本地冒烟和演示不该因为没配模型
+// 就启动失败，但也不能静默调用一个必然失败的网关。
+func (c Config) HasCredentials() bool {
+	route, ok := c.Route("main")
+	if !ok {
+		return false
+	}
+	for _, id := range route.Candidates {
+		m, ok := c.Model(id)
+		if !ok {
+			continue
+		}
+		if p, ok := c.Provider(m.Provider); ok && p.APIKey != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // Model 按 id 查找模型。
 func (c Config) Model(id string) (Model, bool) {
 	for _, m := range c.Models {
