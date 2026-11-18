@@ -4,7 +4,16 @@ data/
 *.log
 coverage.out
 backups/
-skills/
+
+# 运行时业务技能（部署方提供）。只忽略仓库根目录的 skills/，
+# 不要写成 skills/：那会连带忽略 pi-package/skills 与 .claude/skills。
+/skills/
+
+# 本地构建产物（根目录曾误提交过一份）
+/agenthub-ops-mcp
+
+# 临时归档与手工备份
+/tmp/
 
 web/node_modules/
 web/dist/
