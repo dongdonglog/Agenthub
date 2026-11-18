@@ -60,7 +60,8 @@ func TestTicketCreatesCaseAndSupportRun(t *testing.T) {
 	if err != nil || len(cases) != 1 || cases[0].Type != "ticket" || cases[0].Status != "in_progress" {
 		t.Fatalf("cases = %+v err=%v", cases, err)
 	}
-	msgs := engine.Messages("support:oc_support:ticket")
+	// 会话键来自 ConversationKey：support:<工单 ID>，与派单群/来源人无关。
+	msgs := engine.Messages("support:T-1")
 	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "无法登录") || !msgs[0].ReadOnly || !msgs[0].NoReply || !strings.Contains(msgs[0].Text, "登录 500") || !strings.Contains(msgs[0].Text, "kb/login.md") {
 		t.Fatalf("messages = %+v", msgs)
 	}

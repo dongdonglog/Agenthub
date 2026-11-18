@@ -78,7 +78,7 @@ func TestIngestCreatesIncidentAndDiagnosisRun(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].Status != "firing" || items[0].AlertCount != 1 {
 		t.Fatalf("incidents = %+v err=%v", items, err)
 	}
-	msgs := engine.Messages("aiops:oc_ops:alertmanager")
+	msgs := engine.Messages("aiops:" + items[0].ID)
 	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "错误率过高") || !msgs[0].NoReply {
 		t.Fatalf("messages = %+v", msgs)
 	}
@@ -87,7 +87,7 @@ func TestIngestCreatesIncidentAndDiagnosisRun(t *testing.T) {
 	if _, err := ingestor.Handle(ctx, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(engine.Messages("aiops:oc_ops:alertmanager")); got != 1 {
+	if got := len(engine.Messages("aiops:" + items[0].ID)); got != 1 {
 		t.Fatalf("duplicate should not create run, messages=%d", got)
 	}
 

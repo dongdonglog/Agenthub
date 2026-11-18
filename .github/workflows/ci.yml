@@ -8,6 +8,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: agenthub
+          POSTGRES_DB: agenthub_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -34,6 +47,13 @@ jobs:
         run: go vet ./...
       - name: test
         run: go test ./...
+      # 上一次 go test 会跳过数据库用例；这里带着测试库串行重跑，
+      # 覆盖恢复、投递租约、定时任务恢复等只靠 PostgreSQL 才能验证的语义。
+      # 变量只作用于本步骤：这些用例会 TRUNCATE，不能让 ./... 并行跑时也命中同一个库。
+      - name: test-db
+        env:
+          AGENTHUB_TEST_DATABASE_URL: postgres://postgres:agenthub@127.0.0.1:5432/agenthub_test?sslmode=disable
+        run: go test -p 1 ./internal/core ./internal/store ./internal/support ./internal/aiops ./internal/ha -count=1
       - name: test-race
         run: go test -race ./...
       - name: build
