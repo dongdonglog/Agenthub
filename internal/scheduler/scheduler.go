@@ -61,7 +61,25 @@ func (s *Scheduler) Run(ctx context.Context) {
 }
 
 func (s *Scheduler) tick(ctx context.Context) {
-	tasks, err := s.journal.ClaimDue(ctx, time.Now())
+	now := time.Now()
+	if stale, err := s.journal.RecoverStaleClaims(ctx, now, store.ClaimStaleAfter); err != nil {
+		s.log.Error("scheduler stale claim recovery failed", "error", err)
+	} else {
+		for _, task := range stale {
+			// 任务并未真正执行：按 cron 重算下次时间，不触碰 last_run_at。
+			next, err := NextRun(task.Cron, task.Timezone, now)
+			if err != nil {
+				next = now.Add(24 * time.Hour)
+				s.log.Error("scheduler stale task next run failed", "task", task.ID, "error", err)
+			}
+			if err := s.journal.ReleaseClaim(ctx, task.ID, next, "recovered: 领取后未回填"); err != nil {
+				s.log.Error("scheduler stale task release failed", "task", task.ID, "error", err)
+				continue
+			}
+			s.log.Warn("scheduler recovered stale claim", "task", task.ID, "next_run_at", next)
+		}
+	}
+	tasks, err := s.journal.ClaimDue(ctx, now)
 	if err != nil {
 		s.log.Error("scheduler claim failed", "error", err)
 		return

@@ -78,10 +78,18 @@ func (j *Journal) DeleteTask(ctx context.Context, id string) error {
 	return err
 }
 
-// ClaimDue 抢占到期任务：置空 next_run_at 并返回，避免重复执行。
+// ClaimStaleAfter 是领取后多久仍未回填即视为僵尸领取。
+//
+// @remarks 取值远大于单次任务执行耗时上界；恢复扫描按此时长判定。
+const ClaimStaleAfter = 30 * time.Minute
+
+// ClaimDue 抢占到期任务：记录 claimed_at 并置空 next_run_at，避免重复执行。
+//
+// @remarks 领取不代表执行成功，所以不动 last_run_at；它由 {@link FinishTask} 写成。
+// 领取与回填之间进程崩溃会让任务停摆；由 {@link RecoverStaleClaims} 兜底。
 func (j *Journal) ClaimDue(ctx context.Context, now time.Time) ([]ScheduledTask, error) {
 	rows, err := j.pool.Query(ctx, `
-		UPDATE scheduled_task SET next_run_at = NULL, last_run_at = $1
+		UPDATE scheduled_task SET next_run_at = NULL, claimed_at = $1
 		WHERE id IN (
 			SELECT id FROM scheduled_task
 			WHERE enabled = true AND next_run_at IS NOT NULL AND next_run_at <= $1
@@ -105,9 +113,40 @@ func (j *Journal) ClaimDue(ctx context.Context, now time.Time) ([]ScheduledTask,
 	return out, rows.Err()
 }
 
-// FinishTask 记录执行结果与下次时间。
+// RecoverStaleClaims 找回领取后超时未回填的任务。
+//
+// @remarks 只清 claimed_at 并把任务返回给调用方；下次时间由调用方按 cron 重算，
+// 因为 store 不依赖调度包。并行实例各自拿到互不重叠的行。
+func (j *Journal) RecoverStaleClaims(ctx context.Context, now time.Time, staleAfter time.Duration) ([]ScheduledTask, error) {
+	rows, err := j.pool.Query(ctx, `
+		UPDATE scheduled_task SET claimed_at = NULL
+		WHERE claimed_at IS NOT NULL AND claimed_at < $1
+		RETURNING id, name, cron, timezone, chat_id, channel, prompt, enabled`, now.Add(-staleAfter))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTask, 0)
+	for rows.Next() {
+		var t ScheduledTask
+		if err := rows.Scan(&t.ID, &t.Name, &t.Cron, &t.Timezone, &t.ChatID, &t.Channel, &t.Prompt, &t.Enabled); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ReleaseClaim 为僵尸任务写回下次时间与状态，不修改 last_run_at（它并未真正执行）。
+func (j *Journal) ReleaseClaim(ctx context.Context, id string, next time.Time, status string) error {
+	_, err := j.pool.Exec(ctx, `
+		UPDATE scheduled_task SET next_run_at = $2, last_status = $3 WHERE id = $1 AND claimed_at IS NULL`, id, next, status)
+	return err
+}
+
+// FinishTask 记录执行结果与下次时间，并清除领取标记。
 func (j *Journal) FinishTask(ctx context.Context, id string, next time.Time, status string) error {
 	_, err := j.pool.Exec(ctx, `
-		UPDATE scheduled_task SET next_run_at = $2, last_status = $3, last_run_at = now() WHERE id = $1`, id, next, status)
+		UPDATE scheduled_task SET next_run_at = $2, last_status = $3, last_run_at = now(), claimed_at = NULL WHERE id = $1`, id, next, status)
 	return err
 }
