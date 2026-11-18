@@ -187,7 +187,10 @@ type Journal interface {
 	MarkDeliveryCalling(ctx context.Context, key, token string) (bool, error)
 	FinishDelivery(ctx context.Context, key, token, state, errText, externalID string, next time.Time) (bool, error)
 	RecoverDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
-	// RecoverStaleRuns 回收失去执行者的非终态运行；exclude 是本进程正在执行的会话。
+	// RecoverStaleRuns 回收失去执行者的非终态运行；exclude 是本进程正在执行的运行 ID。
+	//
+	// @remarks 必须按运行 ID 排除，不能按会话：重启时旧运行与新运行可能同属一个会话，
+	// 按会话排除会让旧运行永远无法回收，那张卡片就永远停在「处理中」。
 	RecoverStaleRuns(ctx context.Context, cutoff, now time.Time, exclude []string) ([]*Run, error)
 	// MarkCardClosed 记录卡片已写入终态。
 	MarkCardClosed(ctx context.Context, id string) error

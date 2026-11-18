@@ -757,7 +757,8 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 // @remarks 进程被 kill 或崩溃后心跳不再刷新，数据库里的 running 行没有任何执行者；
 // 不清理会让卡片永远停在「处理中」。判定依据是 heartbeat_at（历史数据回落到
 // started_at），与运行时长无关，所以长任务不会被误杀。
-// exclude 是本进程正在执行的会话，作为心跳写入失败时的兜底。
+// exclude 是本进程正在执行的运行 ID——必须按 ID 而不是会话排除：重启时同一会话
+// 里可能并存「已死的旧运行」和「刚启动的新运行」，按会话排除会让旧运行永远回收不掉。
 func (j *Journal) RecoverStaleRuns(ctx context.Context, cutoff, now time.Time, exclude []string) ([]*core.Run, error) {
 	if exclude == nil {
 		exclude = []string{}
@@ -768,7 +769,7 @@ func (j *Journal) RecoverStaleRuns(ctx context.Context, cutoff, now time.Time, e
 		WHERE state IN ('running', 'stopping')
 		  AND COALESCE(heartbeat_at, started_at) IS NOT NULL
 		  AND COALESCE(heartbeat_at, started_at) < $1
-		  AND conversation_id <> ALL($3)
+		  AND id <> ALL($3)
 		RETURNING id, conversation_id, chat_id, trace_id, input_ids, card_handle`, cutoff, now, exclude)
 	if err != nil {
 		return nil, err

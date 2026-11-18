@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/moying/agenthub/internal/agent"
+	"github.com/moying/agenthub/internal/channel"
 	"github.com/moying/agenthub/internal/core"
 	"github.com/moying/agenthub/internal/store"
 )
@@ -90,6 +91,117 @@ func TestRecoverStaleRuns(t *testing.T) {
 	}
 	if ch.count() != 1 {
 		t.Fatalf("不应重复投递，实际 %d", ch.count())
+	}
+}
+
+// TestRecoverStaleRunsInConversationWithLiveRun 覆盖真实踩到的场景：
+// 重启后消息被重新排队，同一会话里同时存在「已死的旧运行」和「刚启动的新运行」。
+//
+// @remarks 旧实现按会话排除，旧运行永远回收不掉，卡片永久停在「处理中」。
+// 这里用真实运行路径构造该场景，锁住两件事：
+// 旧运行必须被回收；新运行的输入不能被旧运行的回收误标成 stopped。
+func TestRecoverStaleRunsInConversationWithLiveRun(t *testing.T) {
+	url := testDatabaseURL(t)
+	ctx := context.Background()
+	db, err := store.Open(ctx, url, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE message_state, run_state, delivery_state`); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := store.NewJournal(db)
+	presenter := &fakePresenter{}
+	blocked := &blockingAgent{started: make(chan struct{}), release: make(chan struct{})}
+	engine := core.New(blocked, &captureChannel{}, nil)
+	engine.SetJournal(journal)
+	engine.SetPresenter(presenter)
+	engine.SetStaleRunAfter(time.Minute)
+
+	conv := "aiops:inc_shared"
+	if _, err := engine.Submit(ctx, channel.Inbound{
+		Channel: "aiops", Tenant: "aiops", ConversationKey: conv,
+		ExternalID: "incident:inc_shared:firing",
+		Chat:       channel.Chat{ID: "oc_chat", Kind: "group"},
+		Sender:     channel.Sender{OpenID: "alertmanager"},
+		Text:       "诊断", MsgType: "text", NoReply: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	flushDone := make(chan struct{})
+	go func() { defer close(flushDone); _ = engine.Flush(ctx) }()
+	select {
+	case <-blocked.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("新运行未启动")
+	}
+
+	runs := engine.Runs()
+	if len(runs) != 1 {
+		t.Fatalf("运行数 = %d, want 1", len(runs))
+	}
+	liveID := runs[0].ID
+	sharedInput := runs[0].InputIDs[0]
+
+	// 插入一条同会话、同输入、心跳早已停止的旧运行，卡片还挂着。
+	now := time.Now()
+	dead := &core.Run{
+		ID: "run_dead", ConversationID: conv, ChatID: "oc_chat",
+		State: "running", InputIDs: []string{sharedInput},
+		StartedAt: now.Add(-10 * time.Minute), HeartbeatAt: now.Add(-10 * time.Minute),
+		CardHandle: "om_dead_card", TraceID: "tr_dead",
+	}
+	if err := journal.SaveRun(ctx, dead); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := engine.RecoverStaleRuns(ctx); n != 1 {
+		t.Fatalf("回收数 = %d, want 1（旧运行必须被回收）", n)
+	}
+
+	_, loaded, err := journal.LoadRecent(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]*core.Run{}
+	for _, r := range loaded {
+		byID[r.ID] = r
+	}
+	if got := byID["run_dead"]; got == nil || got.State != "interrupted" {
+		t.Fatalf("旧运行应被回收: %+v", got)
+	}
+	if got := byID[liveID]; got == nil || got.State != "running" {
+		t.Fatalf("新运行不应被回收: %+v", got)
+	}
+
+	// 旧卡片被关掉。
+	if !strings.Contains(presenter.body, "中断") {
+		t.Fatalf("旧卡片应写入中断说明，实际 %q", presenter.body)
+	}
+
+	// 关键：与仍在执行的新运行共享的输入不能被标成 stopped。
+	var status string
+	if err := db.Pool().QueryRow(ctx, `SELECT status FROM message_state WHERE id = $1`, sharedInput).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status == "stopped" {
+		t.Fatal("共享输入被旧运行的回收误标为 stopped，仍在执行的新运行会被弄坏")
+	}
+	// 新运行仍可被停止：active 不能被旧运行的回收清掉。
+	if !engine.Stop(conv) {
+		t.Fatal("新运行的 active 被误清，已无法停止")
+	}
+
+	close(blocked.release)
+	select {
+	case <-flushDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("收尾超时")
 	}
 }
 

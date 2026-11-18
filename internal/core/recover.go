@@ -64,10 +64,24 @@ func (e *Engine) RecoverStaleRuns(ctx context.Context) int {
 		return 0
 	}
 	e.mu.Lock()
+	// 按运行 ID 排除本进程正在执行的任务。不能按会话排除：重启时同一个会话里
+	// 可能同时存在「已死掉的旧运行」和「刚启动的新运行」，按会话排除会让旧运行
+	// 永远无法回收，那张卡片就永远停在「处理中」。
 	active := make([]string, 0, len(e.active))
-	for conv, runID := range e.active {
+	for _, runID := range e.active {
 		if runID != "" && runID != "pending" {
-			active = append(active, conv)
+			active = append(active, runID)
+		}
+	}
+	// 正在执行的新运行占用的消息：重启后消息被重新排队，旧运行与新运行的
+	// InputIDs 是同一批。回收旧运行时不能把这些消息标成 stopped，否则会
+	// 把仍在执行的新运行输入弄坏。
+	busy := make(map[string]struct{})
+	for _, runID := range e.active {
+		if r := e.runs[runID]; r != nil {
+			for _, id := range r.InputIDs {
+				busy[id] = struct{}{}
+			}
 		}
 	}
 	staleAfter := e.staleRunAfter
@@ -89,11 +103,24 @@ func (e *Engine) RecoverStaleRuns(ctx context.Context) int {
 			existing.EndedAt = run.EndedAt
 			existing.Error = run.Error
 		}
-		delete(e.active, run.ConversationID)
-		delete(e.cancels, run.ConversationID)
+		// 只清理指向这个已死运行的会话状态。同一会话里可能已经有新的运行在跑
+		// （重启后消息被重新排队），此时绝不能删掉它的 active 和 cancel，
+		// 否则会破坏「同会话单活动运行」并让新运行无法被停止。
+		if e.active[run.ConversationID] == run.ID {
+			delete(e.active, run.ConversationID)
+			delete(e.cancels, run.ConversationID)
+		}
 		e.mu.Unlock()
 		e.log.Warn("stale run recovered as interrupted", "run", run.ID, "conversation", run.ConversationID)
-		if err := e.journal.SetMessageStatus(ctx, run.InputIDs, "stopped"); err != nil {
+		// 只标记确实不再被任何在执行运行占用的输入。
+		stopped := make([]string, 0, len(run.InputIDs))
+		for _, id := range run.InputIDs {
+			if _, inUse := busy[id]; inUse {
+				continue
+			}
+			stopped = append(stopped, id)
+		}
+		if err := e.journal.SetMessageStatus(ctx, stopped, "stopped"); err != nil {
 			e.log.Warn("mark stale run inputs failed", "run", run.ID, "error", err)
 		}
 		const body = "处理进程已中断，本次没有产出结果。请重新发送。"
