@@ -51,6 +51,11 @@ func applySkillSelection(src, dst string, allowed []string) error {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	for _, entry := range entries {
+		// 管理台把停用/归档技能放在 .disabled / .archived 下；这些目录必须整体跳过，
+		// 否则「停用」只是列表里看不见，pi 仍然能读到并执行。
+		if entry.IsDir() && (entry.Name() == ".disabled" || entry.Name() == ".archived") {
+			continue
+		}
 		name := strings.TrimSuffix(entry.Name(), ".md")
 		if len(allow) > 0 && !allow[entry.Name()] && !allow[name] {
 			continue

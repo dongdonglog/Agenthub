@@ -86,3 +86,35 @@ func TestLinkSkillExecutables(t *testing.T) {
 		t.Fatalf("stale link should be removed, err=%v", err)
 	}
 }
+
+// TestApplySkillSelectionSkipsDisabled 停用/归档的技能不能进入 pi 工作区。
+//
+// @remarks 管理台把停用技能挪到 skills/.disabled、归档挪到 skills/.archived。
+// 这些目录必须整体跳过，否则「停用」只是列表里看不见，pi 仍然能读到并执行。
+func TestApplySkillSelectionSkipsDisabled(t *testing.T) {
+	agentDir := t.TempDir()
+	skills := filepath.Join(agentDir, "skills")
+	for _, name := range []string{"alpha", ".disabled/old", ".archived/gone"} {
+		dir := filepath.Join(skills, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ws := t.TempDir()
+	// allowed 为空表示「不限制」：这时最容易把停用技能一并复制过去。
+	if err := applySkillSelection(skills, filepath.Join(ws, "skills"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "skills", "alpha", "SKILL.md")); err != nil {
+		t.Fatalf("启用技能应被复制: %v", err)
+	}
+	for _, name := range []string{".disabled", ".archived"} {
+		if _, err := os.Stat(filepath.Join(ws, "skills", name)); !os.IsNotExist(err) {
+			t.Fatalf("%s 不应被复制进工作区，err=%v", name, err)
+		}
+	}
+}
