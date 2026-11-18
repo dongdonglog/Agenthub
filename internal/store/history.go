@@ -43,7 +43,7 @@ func (j *Journal) ListGenerations(ctx context.Context, limit int) ([]Generation,
 // ListGenerationMessages 读取某个会话代的消息。
 func (j *Journal) ListGenerationMessages(ctx context.Context, conv string, generation, limit int) ([]core.Message, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, sender_name, text, msg_type, status, created_at, sent_by_admin
+		SELECT `+messageColumns+`
 		FROM message_state
 		WHERE conversation_id = $1 AND generation = $2
 		ORDER BY created_at ASC LIMIT $3`, conv, generation, limit)
@@ -53,12 +53,11 @@ func (j *Journal) ListGenerationMessages(ctx context.Context, conv string, gener
 	defer rows.Close()
 	var out []core.Message
 	for rows.Next() {
-		var m core.Message
-		if err := rows.Scan(&m.ID, &m.Role, &m.Generation, &m.TraceID, &m.ConversationID, &m.ChatID,
-			&m.ExternalID, &m.SenderOpenID, &m.SenderName, &m.Text, &m.MsgType, &m.Status, &m.CreatedAt, &m.SentByAdmin); err != nil {
+		m, err := scanMessage(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, m)
+		out = append(out, *m)
 	}
 	return out, rows.Err()
 }

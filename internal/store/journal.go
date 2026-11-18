@@ -29,10 +29,12 @@ func NewJournal(db *DB) *Journal {
 // SaveMessage 写入消息；重复（同会话同外部 ID）返回 false。
 func (j *Journal) SaveMessage(ctx context.Context, m *core.Message) (bool, error) {
 	tag, err := j.pool.Exec(ctx, `
-		INSERT INTO message_state (id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, sender_name, text, msg_type, status, created_at, sent_by_admin)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		INSERT INTO message_state (id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, sender_name, text, msg_type, status, created_at, sent_by_admin, case_id, no_reply, read_only, tool_allow)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		ON CONFLICT (conversation_id, external_id) DO NOTHING`,
-		m.ID, defaultRole(m.Role), defaultGeneration(m.Generation), m.TraceID, m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID, m.SenderName, m.Text, m.MsgType, m.Status, m.CreatedAt, m.SentByAdmin)
+		m.ID, defaultRole(m.Role), defaultGeneration(m.Generation), m.TraceID, m.ConversationID, m.ChatID, m.ExternalID, m.SenderOpenID,
+		m.SenderName, m.Text, m.MsgType, m.Status, m.CreatedAt, m.SentByAdmin,
+		m.CaseID, m.NoReply, m.ReadOnly, mustJSON(m.ToolAllow))
 	if err != nil {
 		return false, err
 	}
@@ -595,19 +597,44 @@ func (j *Journal) LoadReactions(ctx context.Context, limit int) (map[string]stri
 	return out, rows.Err()
 }
 
+// messageColumns 是 message_state 的完整列，读取与写入顺序保持一致。
+const messageColumns = `id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, sender_name, text, msg_type, status, created_at, sent_by_admin, case_id, no_reply, read_only, tool_allow`
+
+// messageScanner 是消息行的扫描目标。
+type messageScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanMessage 读取一行消息，含重启恢复必须保留的语义字段。
+//
+// @remarks no_reply/read_only/tool_allow 丢失会导致恢复后的消息去回复内部合成 ID，
+// 以及只读诊断变成可写运行。
+func scanMessage(row messageScanner) (*core.Message, error) {
+	m := &core.Message{}
+	var tools []byte
+	if err := row.Scan(&m.ID, &m.Role, &m.Generation, &m.TraceID, &m.ConversationID, &m.ChatID,
+		&m.ExternalID, &m.SenderOpenID, &m.SenderName, &m.Text, &m.MsgType, &m.Status, &m.CreatedAt,
+		&m.SentByAdmin, &m.CaseID, &m.NoReply, &m.ReadOnly, &tools); err != nil {
+		return nil, err
+	}
+	if len(tools) > 0 {
+		_ = json.Unmarshal(tools, &m.ToolAllow)
+	}
+	return m, nil
+}
+
 // LoadRecent 读取最近的消息与运行，用于重启后恢复管理台视图。
 func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, []*core.Run, error) {
 	rows, err := j.pool.Query(ctx, `
-		SELECT id, role, generation, trace_id, conversation_id, chat_id, external_id, sender, sender_name, text, msg_type, status, created_at, sent_by_admin
+		SELECT `+messageColumns+`
 		FROM message_state ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
 	}
 	var messages []*core.Message
 	for rows.Next() {
-		m := &core.Message{}
-		if err := rows.Scan(&m.ID, &m.Role, &m.Generation, &m.TraceID, &m.ConversationID, &m.ChatID, &m.ExternalID, &m.SenderOpenID,
-			&m.SenderName, &m.Text, &m.MsgType, &m.Status, &m.CreatedAt, &m.SentByAdmin); err != nil {
+		m, err := scanMessage(rows)
+		if err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
