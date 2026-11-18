@@ -109,6 +109,20 @@ func New(cfg Config) *Runtime {
 	return &Runtime{cfg: cfg}
 }
 
+// guardExtension 返回 guard 扩展的路径，供子调查进程复用。
+//
+// @remarks 按文件名匹配而不是取切片第一个元素：扩展清单的顺序属于装配细节，
+// 让它承载「哪一个是 guard」的语义，一旦顺序变化就会静默失效——
+// 只读模式还在，但子调查不再受同一个 guard 约束。
+func (r *Runtime) guardExtension() string {
+	for _, path := range r.cfg.Extensions {
+		if strings.Contains(filepath.Base(path), "guard") {
+			return path
+		}
+	}
+	return ""
+}
+
 // Cleanup 删除某个会话代的工作区与会话文件。
 func (r *Runtime) Cleanup(conv string, generation int) error {
 	base := sessionKey(conv, generation)
@@ -379,8 +393,8 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 		"AGENTHUB_APPROVAL_DIR=" + filepath.Join(ws, "approvals"),
 		"AGENTHUB_CASE_ID=" + in.CaseID,
 	}
-	if len(r.cfg.Extensions) > 0 {
-		env = append(env, "AGENTHUB_GUARD_EXTENSION="+r.cfg.Extensions[0])
+	if guard := r.guardExtension(); guard != "" {
+		env = append(env, "AGENTHUB_GUARD_EXTENSION="+guard)
 	}
 	if in.ReadOnly {
 		env = append(env, "AGENTHUB_READONLY=1")
