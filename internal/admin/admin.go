@@ -119,76 +119,7 @@ func (s *Server) Handler() http.Handler {
 		http.FileServer(http.FS(staticSub)).ServeHTTP(rw, r)
 	})))
 
-	mux.HandleFunc("GET /admin/api/v1/overview", s.handleOverview)
-	mux.HandleFunc("GET /admin/api/v1/sessions", s.handleSessions)
-	mux.HandleFunc("GET /admin/api/v1/sessions/{id}", s.handleSession)
-	mux.HandleFunc("PUT /admin/api/v1/sessions/{id}/profile", s.handleSessionProfile)
-	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/apply-config", s.handleSessionApplyConfig)
-	mux.HandleFunc("POST /admin/api/v1/sessions/apply-config", s.handleSessionsApplyConfig)
-	mux.HandleFunc("POST /admin/api/v1/sessions/{id}/reset", s.handleSessionReset)
-	mux.HandleFunc("POST /admin/api/v1/sessions/reset", s.handleSessionsReset)
-	mux.HandleFunc("POST /admin/api/v1/deliveries/{key}/retry", s.handleDeliveryRetry)
-	mux.HandleFunc("GET /admin/api/v1/employees", s.handleEmployees)
-	mux.HandleFunc("GET /admin/api/v1/cases", s.handleCases)
-	mux.HandleFunc("GET /admin/api/v1/cases/{id}", s.handleCase)
-	mux.HandleFunc("POST /admin/api/v1/cases/{id}/handoff", s.handleCaseHandoff)
-	mux.HandleFunc("POST /admin/api/v1/cases/{id}/resolve", s.handleCaseResolve)
-	mux.HandleFunc("POST /admin/api/v1/cases/{id}/postmortem", s.handleCasePostmortem)
-	mux.HandleFunc("POST /admin/api/v1/cases/{id}/feedback", s.handleCaseFeedback)
-	mux.HandleFunc("POST /admin/api/v1/cases/{id}/review", s.handleCaseReview)
-	mux.HandleFunc("GET /admin/api/v1/cases/{id}/report", s.handleCaseReportGet)
-	mux.HandleFunc("PUT /admin/api/v1/cases/{id}/report", s.handleCaseReportPut)
-	mux.HandleFunc("GET /admin/api/v1/reports", s.handleReports)
-	mux.HandleFunc("POST /admin/api/v1/cases/{id}/report/send", s.handleCaseReportSend)
-	mux.HandleFunc("POST /admin/api/v1/cases", s.handleCaseCreate)
-	mux.HandleFunc("GET /admin/api/v1/employees/{id}/stats", s.handleEmployeeStats)
-	mux.HandleFunc("PUT /admin/api/v1/employees/{id}", s.handleEmployeeUpdate)
-	mux.HandleFunc("POST /admin/api/v1/cases/{id}/approvals", s.handleCaseApprovalCreate)
-	mux.HandleFunc("POST /admin/api/v1/approvals/{id}/approve", s.handleApprovalDecide)
-	mux.HandleFunc("POST /admin/api/v1/approvals/{id}/reject", s.handleApprovalDecide)
-	mux.HandleFunc("GET /admin/api/v1/incidents", s.handleIncidents)
-	mux.HandleFunc("GET /admin/api/v1/incidents/{id}", s.handleIncident)
-	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/ack", s.handleIncidentAck)
-	mux.HandleFunc("POST /admin/api/v1/incidents/{id}/resolve", s.handleIncidentResolve)
-	mux.HandleFunc("GET /admin/api/v1/queue", s.handleQueue)
-	mux.HandleFunc("GET /admin/api/v1/tasks", s.handleTasks)
-	mux.HandleFunc("POST /admin/api/v1/tasks", s.handleTasks)
-	mux.HandleFunc("GET /admin/api/v1/tasks/{id}", s.handleTask)
-	mux.HandleFunc("PUT /admin/api/v1/tasks/{id}", s.handleTask)
-	mux.HandleFunc("DELETE /admin/api/v1/tasks/{id}", s.handleTask)
-	mux.HandleFunc("POST /admin/api/v1/tasks/{id}/run", s.handleTaskRun)
-	mux.HandleFunc("PUT /admin/api/v1/sessions/{id}/priority", s.handleSessionPriority)
-	mux.HandleFunc("GET /admin/api/v1/runs", s.handleRuns)
-	mux.HandleFunc("GET /admin/api/v1/runs/{id}", s.handleRunDetail)
-	mux.HandleFunc("GET /admin/api/v1/artifacts/{id}", s.handleArtifact)
-
-	mux.HandleFunc("GET /admin/api/v1/skills", s.handleSkills)
-	mux.HandleFunc("GET /admin/api/v1/skills/{name}", s.handleSkill)
-	mux.HandleFunc("PUT /admin/api/v1/skills/{name}", s.handleSkill)
-	mux.HandleFunc("PUT /admin/api/v1/skills/{name}/status", s.handleSkillStatus)
-	mux.HandleFunc("POST /admin/api/v1/skills/import", s.handleSkillImport)
-	mux.HandleFunc("GET /admin/api/v1/skills/{name}/files", s.handleSkillFiles)
-	mux.HandleFunc("GET /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
-	mux.HandleFunc("PUT /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
-	mux.HandleFunc("DELETE /admin/api/v1/skills/{name}/files/{path...}", s.handleSkillFile)
-	mux.HandleFunc("DELETE /admin/api/v1/skills/{name}", s.handleSkill)
-
-	mux.HandleFunc("GET /admin/api/v1/mcps", s.handleMCPs)
-	mux.HandleFunc("PUT /admin/api/v1/mcps/{name}", s.handleMCP)
-	mux.HandleFunc("DELETE /admin/api/v1/mcps/{name}", s.handleMCP)
-
-	mux.HandleFunc("GET /admin/api/v1/settings", s.handleSettings)
-	mux.HandleFunc("GET /admin/api/v1/model", s.handleModel)
-	mux.HandleFunc("PUT /admin/api/v1/model", s.handleModel)
-	mux.HandleFunc("POST /admin/api/v1/model/test", s.handleModelTest)
-	mux.HandleFunc("GET /admin/api/v1/profiles", s.handleProfiles)
-	mux.HandleFunc("PUT /admin/api/v1/profiles/{name}", s.handleProfile)
-	mux.HandleFunc("DELETE /admin/api/v1/profiles/{name}", s.handleProfile)
-	mux.HandleFunc("PUT /admin/api/v1/profiles/{name}/apply", s.handleProfileApply)
-	mux.HandleFunc("GET /admin/api/v1/history", s.handleHistory)
-	mux.HandleFunc("GET /admin/api/v1/history/{conversation}/{generation}", s.handleHistoryDetail)
-	mux.HandleFunc("GET /admin/api/v1/audits", s.handleAudits)
-	mux.HandleFunc("POST /admin/api/v1/test", s.handleTest)
+	s.registerAPI(mux)
 	return s.withAuth(mux)
 }
 
@@ -313,19 +244,6 @@ func (s *Server) handleIndex(rw http.ResponseWriter, r *http.Request) {
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = rw.Write(data)
-}
-
-func (s *Server) handleAsset(name, contentType string) http.HandlerFunc {
-	return func(rw http.ResponseWriter, _ *http.Request) {
-		data, err := staticFS.ReadFile(name)
-		if err != nil {
-			http.Error(rw, "not found", http.StatusNotFound)
-			return
-		}
-		rw.Header().Set("Content-Type", contentType)
-		rw.Header().Set("Cache-Control", "no-cache")
-		_, _ = rw.Write(data)
-	}
 }
 
 type modelView struct {
@@ -1911,13 +1829,6 @@ func priorityResponse(e *core.Engine, id string) any {
 		return p
 	}
 	return nil
-}
-
-func maskKey(key string) string {
-	if len(key) <= 4 {
-		return "****"
-	}
-	return "****" + key[len(key)-4:]
 }
 
 func (s *Server) handleSettings(rw http.ResponseWriter, _ *http.Request) {

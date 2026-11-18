@@ -1,0 +1,2342 @@
+openapi: 3.1.0
+info:
+  title: AgentHub API
+  summary: 飞书/钉钉里的 AI SRE 数字同事 — HTTP 接口
+  version: 0.4.0
+  description: |
+    AgentHub 在一个 Go 二进制里对外暴露两个 HTTP 面，端口不同、信任边界也不同：
+
+    | 面 | 默认端口 | 用途 | 鉴权 |
+    |---|---|---|---|
+    | **接入面** | 8787 | `/healthz`、`/metrics`、告警与工单 webhook | 按来源 token（可选） |
+    | **管理面** | 8788 | 案件、报告、会话、技能、模型配置 | 管理令牌（生产必须） |
+
+    管理面没有内置登录：令牌只区分 admin / operator / view 三档，真正的身份边界
+    应由前置网关承担。未配置任何令牌时管理面**完全不鉴权**，仅供本地调试。
+
+    ## 约定
+
+    - 请求与响应均为 `application/json; charset=utf-8`，响应带 `Cache-Control: no-store`。
+    - 错误统一为 `{"error": "<中文说明>"}`，HTTP 状态码表达类别。
+    - 写请求（`POST`/`PUT`/`DELETE`）在**配置了令牌**时额外要求 `X-Requested-With: agenthub`，
+      作为 CSRF 兜底；只读令牌执行写操作返回 403。
+    - 分页有两种风格：以 `{items,total,page,size}` 返回的内存集合，和以
+      `{items,total,limit,offset}` 返回的数据库集合。`size` 上限 100。
+    - 时间统一 RFC 3339。作为查询参数时也接受 `YYYY-MM-DD`。
+    - 时间筛选参数 `from` / `to` 无法解析时按「未提供」处理，不报错。
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://127.0.0.1:8788
+    description: 管理面（默认仅监听回环）
+  - url: http://127.0.0.1:8787
+    description: 接入面（healthz / metrics / webhook）
+
+tags:
+  - name: overview
+    description: 运行概览
+  - name: sessions
+    description: 会话、运行队列与投递
+  - name: cases
+    description: 案件、报告、反馈与评审
+  - name: approvals
+    description: 受控动作审批
+  - name: incidents
+    description: 告警聚合事故
+  - name: employees
+    description: 数字员工与统计
+  - name: tasks
+    description: 定时任务
+  - name: skills
+    description: 技能库（管理台维护）
+  - name: mcps
+    description: MCP 服务器配置
+  - name: config
+    description: 模型路由、Profile 与部署设置
+  - name: history
+    description: 历史会话代与审计
+  - name: ingest
+    description: 告警与工单接入（接入面）
+  - name: ops
+    description: 健康与指标（接入面）
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------- 概览
+  /admin/api/v1/overview:
+    get:
+      tags: [overview]
+      summary: 运行概览
+      description: 首页卡片数据；全部为内存态快照，不查库。
+      responses:
+        "200":
+          description: 概览
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [active_profile, runtime, version, channel, feishu, model, counts]
+                properties:
+                  active_profile: { type: string, description: 当前生效的 Profile 名称，可为空 }
+                  runtime: { type: string, example: pi }
+                  pi_version: { type: string, example: "1.4.0" }
+                  version: { type: string, example: "0.4.0" }
+                  channel: { type: string, enum: [feishu, dingtalk, off] }
+                  transport: { type: string, description: 飞书通道形态：long_conn 或 webhook }
+                  feishu: { type: string, enum: [connected, reconnecting, connecting, unknown] }
+                  model:
+                    type: object
+                    properties:
+                      provider: { type: string }
+                      model: { type: string }
+                      base_url: { type: string }
+                      has_key: { type: boolean }
+                      echo: { type: boolean, description: 无模型凭据时为 true，此时使用回显执行器 }
+                  counts:
+                    type: object
+                    properties:
+                      conversations: { type: integer }
+                      runs: { type: integer }
+                      skills: { type: integer }
+                      mcps: { type: integer }
+
+  # -------------------------------------------------------------- 会话
+  /admin/api/v1/sessions:
+    get:
+      tags: [sessions]
+      summary: 会话列表
+      description: |
+        按最近活跃排序。`kind=user`（默认）排除定时任务会话；`kind=all` 返回全部。
+        内部会话（管理台自检）默认不出现，`include_internal=1` 才包含。
+      parameters:
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [user, all, p2p, group, scheduled, unknown]
+            default: user
+        - name: q
+          in: query
+          description: 对显示名与 ID 做不区分大小写的子串匹配
+          schema: { type: string }
+        - name: include_internal
+          in: query
+          schema: { type: string, enum: ["1"] }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 分页会话
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/SessionInfo" }
+
+  /admin/api/v1/sessions/{id}:
+    get:
+      tags: [sessions]
+      summary: 会话详情
+      description: |
+        消息与运行来自进程内存，重启即丢失；需要历史时用 `/history`。
+        会话不存在时返回 404 而非空对象。
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: 会话详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  profile: { type: string, nullable: true }
+                  priority: { $ref: "#/components/schemas/Priority", nullable: true }
+                  messages:
+                    type: array
+                    items: { $ref: "#/components/schemas/Message" }
+                  runs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Run" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/sessions/{id}/profile:
+    put:
+      tags: [sessions]
+      summary: 给单个会话换 Profile
+      description: 只影响该会话，不改全局生效 Profile。下一批运行时生效。
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: 已绑定
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  profile: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/sessions/{id}/apply-config:
+    post:
+      tags: [sessions]
+      summary: 把当前生效 Profile 应用到单个会话
+      description: 同时重建该会话的工作区配置（技能与 mcp.json 裁剪）。
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: 已应用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  profile: { type: string }
+
+  /admin/api/v1/sessions/apply-config:
+    post:
+      tags: [sessions]
+      summary: 把当前生效 Profile 应用到所有会话
+      description: 只作用于各会话的当前代；已过期的代不会被触碰。
+      responses:
+        "200":
+          description: 已应用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  profile: { type: string }
+                  sessions: { type: integer, description: 受影响的会话数 }
+
+  /admin/api/v1/sessions/{id}/reset:
+    post:
+      tags: [sessions]
+      summary: 重置单个会话（递增会话代）
+      description: |
+        正在运行的批次会先写 `stopping` 再中止，最终状态为 `interrupted`；
+        旧代消息不会进入新代上下文，旧代工作区可被清理。
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  stopped: { type: boolean, description: 是否中止了一个正在运行的批次 }
+                  generation: { type: integer, description: 新的会话代 }
+
+  /admin/api/v1/sessions/reset:
+    post:
+      tags: [sessions]
+      summary: 重置所有用户会话
+      description: 跳过内部会话。
+      responses:
+        "200":
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  sessions: { type: integer }
+
+  /admin/api/v1/sessions/{id}/priority:
+    put:
+      tags: [sessions]
+      summary: 调整会话调度优先级
+      description: 数值越大越先被调度，0 为默认。
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [priority]
+              properties:
+                priority: { type: integer }
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  priority: { type: integer }
+
+  /admin/api/v1/deliveries/{key}/retry:
+    post:
+      tags: [sessions]
+      summary: 手动重试一条投递
+      description: |
+        仅对 `failed` 或 `ambiguous` 状态有意义。`ambiguous`（发送结果未知）
+        **不会**自动重发，只有这个接口能推动，避免在群里出现重复消息。
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: 投递幂等键，形如 `run_<id>:result`
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已重新入队
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400":
+          description: 该投递不处于可重试状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # -------------------------------------------------------------- 员工
+  /admin/api/v1/employees:
+    get:
+      tags: [employees]
+      summary: 数字员工列表
+      description: 未接入案件存储时返回空列表而非报错。
+      responses:
+        "200":
+          description: 员工列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Employee" }
+                  total: { type: integer }
+
+  /admin/api/v1/employees/{id}:
+    put:
+      tags: [employees]
+      summary: 新建或更新数字员工
+      description: 按 `id` 做 upsert；`allowed_tools` 为空表示不限制工具。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Employee" }
+      responses:
+        "200":
+          description: 保存后的员工
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Employee" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /admin/api/v1/employees/{id}/stats:
+    get:
+      tags: [employees]
+      summary: 员工绩效统计
+      description: 案件数、解决数、反馈分布、平均解决时长、CSAT 与人工评审均分。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 统计
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee_id: { type: string }
+                  cases: { type: integer }
+                  resolved: { type: integer }
+                  useful: { type: integer }
+                  not_useful: { type: integer }
+                  avg_resolve_ms: { type: number, format: double }
+                  csat: { type: number, format: double, description: 0-5 分均值，无反馈时为 0 }
+                  reviews: { type: integer }
+                  avg_evidence: { type: number, format: double }
+                  avg_root_cause: { type: number, format: double }
+                  avg_safety: { type: number, format: double }
+                  avg_usefulness: { type: number, format: double }
+                  avg_honesty: { type: number, format: double }
+
+  # -------------------------------------------------------------- 案件
+  /admin/api/v1/cases:
+    get:
+      tags: [cases]
+      summary: 案件列表
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, example: open }
+        - name: type
+          in: query
+          schema: { type: string, example: incident }
+        - name: source
+          in: query
+          schema: { type: string, example: alertmanager }
+        - name: q
+          in: query
+          description: 标题/摘要关键词
+          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: 案件分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/OffsetPaged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Case" }
+    post:
+      tags: [cases]
+      summary: 手动创建技术支持工单
+      description: 内部转成一条 `ticket` 类型案件并触发一次技术支持运行。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                summary: { type: string }
+                service: { type: string }
+                environment: { type: string }
+                priority: { type: string, description: 影响 SLA 计算 }
+                requester: { type: string }
+      responses:
+        "200":
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503":
+          description: 工单入口未启用
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/api/v1/cases/{id}:
+    get:
+      tags: [cases]
+      summary: 案件详情
+      description: |
+        一次性返回案件页面需要的全部投影。告警来源的案件会附带 `incident`，
+        这样使用者不必在「事故」和「案件」两个页面之间跳。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      responses:
+        "200":
+          description: 案件详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  case: { $ref: "#/components/schemas/Case" }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/CaseEvent" }
+                  feedback:
+                    type: array
+                    items: { $ref: "#/components/schemas/CaseFeedback" }
+                  reviews:
+                    type: array
+                    items: { $ref: "#/components/schemas/CaseReview" }
+                  report: { $ref: "#/components/schemas/CaseReport", nullable: true }
+                  approvals:
+                    type: array
+                    items: { $ref: "#/components/schemas/Approval" }
+                  run: { $ref: "#/components/schemas/Run", nullable: true }
+                  incident: { $ref: "#/components/schemas/Incident", nullable: true }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/cases/{id}/handoff:
+    post:
+      tags: [cases]
+      summary: 生成交接摘要
+      description: 汇总未闭环事件为纯文本，并写入一条 `handoff` 案件事件。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      responses:
+        "200":
+          description: 交接文本
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  summary: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/cases/{id}/resolve:
+    post:
+      tags: [cases]
+      summary: 人工关闭案件
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      responses:
+        "200":
+          description: 已关闭
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  /admin/api/v1/cases/{id}/postmortem:
+    post:
+      tags: [cases]
+      summary: 生成复盘草稿
+      description: 返回 Markdown 草稿，根因与行动项留空待人工补全。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      responses:
+        "200":
+          description: 复盘草稿
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  markdown: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/cases/{id}/feedback:
+    post:
+      tags: [cases]
+      summary: 提交案件反馈
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict]
+              properties:
+                verdict: { type: string, enum: [useful, not_useful] }
+                note: { type: string }
+                actor: { type: string, default: admin }
+                csat: { type: integer, minimum: 0, maximum: 5, default: 0 }
+      responses:
+        "200":
+          description: 已记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /admin/api/v1/cases/{id}/review:
+    post:
+      tags: [cases]
+      summary: 提交人工评审
+      description: 五个维度各 0-3 分，用于衡量诊断质量而非满意度。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reviewer: { type: string, default: admin }
+                evidence: { type: integer, minimum: 0, maximum: 3 }
+                root_cause: { type: integer, minimum: 0, maximum: 3 }
+                safety: { type: integer, minimum: 0, maximum: 3 }
+                usefulness: { type: integer, minimum: 0, maximum: 3 }
+                honesty: { type: integer, minimum: 0, maximum: 3 }
+                note: { type: string }
+      responses:
+        "200":
+          description: 已记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400":
+          description: 评分越界
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/api/v1/cases/{id}/report:
+    get:
+      tags: [cases]
+      summary: 读取处置报告
+      description: |
+        没有已保存报告时会**即时生成一份草稿**（问题取自案件、证据取自最近一次运行输出、
+        动作取自审批记录），但不会落库。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      responses:
+        "200":
+          description: 案件与报告
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  case: { $ref: "#/components/schemas/Case" }
+                  report: { $ref: "#/components/schemas/CaseReport" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [cases]
+      summary: 保存处置报告
+      description: |
+        `status=final` 会同时关闭案件并写入两条事件；其他值一律按 `draft` 处理。
+        `problem` 不能为空。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseReport" }
+      responses:
+        "200":
+          description: 保存后的报告
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /admin/api/v1/cases/{id}/report/send:
+    post:
+      tags: [cases]
+      summary: 把处置报告发到案件群
+      description: 未保存过报告时发送即时草稿。通道不支持 Markdown 时降级为纯文本。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      responses:
+        "200":
+          description: 已发送
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          description: 报告发送未启用
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/api/v1/reports:
+    get:
+      tags: [cases]
+      summary: 报告列表
+      description: 最多 100 条，按更新时间倒序；时间筛选作用于报告而非案件。
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: 报告与所属案件
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        report: { $ref: "#/components/schemas/CaseReport" }
+                        case: { $ref: "#/components/schemas/Case", nullable: true }
+                  total: { type: integer }
+
+  # -------------------------------------------------------------- 审批
+  /admin/api/v1/cases/{id}/approvals:
+    post:
+      tags: [approvals]
+      summary: 创建动作审批申请
+      description: |
+        写操作只有这一条通路：申请 → 人批准 → 受限执行器校验 namespace allowlist 后执行。
+        模型只能「申请」，不能执行。
+      parameters:
+        - $ref: "#/components/parameters/CaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, params]
+              properties:
+                action: { type: string, enum: [k8s_scale, k8s_restart] }
+                params:
+                  type: object
+                  description: 传给 executor 的原始参数，批准时重新校验
+                  additionalProperties: true
+                actor: { type: string, default: admin }
+      responses:
+        "200":
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Approval" }
+        "400":
+          description: 动作不在白名单
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/api/v1/approvals/{id}/approve:
+    post:
+      tags: [approvals]
+      summary: 批准并立即执行
+      description: 执行失败会写进 `result` 并追加案件事件，接口本身仍返回 200。
+      parameters:
+        - $ref: "#/components/parameters/ApprovalId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actor: { type: string, default: admin }
+      responses:
+        "200":
+          description: 已批准
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: approved }
+        "409":
+          description: 审批不存在或已处理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/api/v1/approvals/{id}/reject:
+    post:
+      tags: [approvals]
+      summary: 拒绝
+      parameters:
+        - $ref: "#/components/parameters/ApprovalId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actor: { type: string, default: admin }
+      responses:
+        "200":
+          description: 已拒绝
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: rejected }
+        "409":
+          description: 审批不存在或已处理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # -------------------------------------------------------------- 事故
+  /admin/api/v1/incidents:
+    get:
+      tags: [incidents]
+      summary: 事故列表
+      description: 事故是告警聚合事实，先于案件存在；一个事故最多对应一个案件。
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, example: firing }
+        - name: service
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: 事故分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/OffsetPaged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Incident" }
+
+  /admin/api/v1/incidents/{id}:
+    get:
+      tags: [incidents]
+      summary: 事故详情
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 事故、事件流与关联案件
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  incident: { $ref: "#/components/schemas/Incident" }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/CaseEvent" }
+                  case: { $ref: "#/components/schemas/Case", nullable: true }
+                  run: { $ref: "#/components/schemas/Run", nullable: true }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/incidents/{id}/ack:
+    post:
+      tags: [incidents]
+      summary: 认领事故
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actor: { type: string, default: admin }
+      responses:
+        "200":
+          description: 已认领
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  /admin/api/v1/incidents/{id}/resolve:
+    post:
+      tags: [incidents]
+      summary: 手动恢复事故
+      description: 关联的案件会被一并关闭。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actor: { type: string, default: admin }
+      responses:
+        "200":
+          description: 已恢复的事故
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Incident" }
+        "409":
+          description: 事故不存在或已恢复
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # -------------------------------------------------------------- 运行
+  /admin/api/v1/queue:
+    get:
+      tags: [sessions]
+      summary: 排队快照
+      description: 按会话聚合的待处理消息数、优先级与最早入队时间。
+      responses:
+        "200":
+          description: 队列
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/QueueItem" }
+                  total: { type: integer }
+
+  /admin/api/v1/runs:
+    get:
+      tags: [sessions]
+      summary: 运行列表
+      description: 内存态，最多保留约 200 条。
+      responses:
+        "200":
+          description: 运行列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Run" }
+                  total: { type: integer }
+
+  /admin/api/v1/runs/{id}:
+    get:
+      tags: [sessions]
+      summary: 运行详情
+      description: 含阶段/工具事件、投递与产物。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 运行详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run: { $ref: "#/components/schemas/Run" }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/RunEvent" }
+                  deliveries:
+                    type: array
+                    items: { $ref: "#/components/schemas/Delivery" }
+                  artifacts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Artifact" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/artifacts/{id}:
+    get:
+      tags: [sessions]
+      summary: 下载产物
+      description: 二进制流；`Content-Disposition` 为 attachment，文件名按 RFC 5987 编码。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 产物内容
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # -------------------------------------------------------------- 定时任务
+  /admin/api/v1/tasks:
+    get:
+      tags: [tasks]
+      summary: 定时任务列表
+      responses:
+        "200":
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ScheduledTask" }
+                  total: { type: integer }
+        "503":
+          description: 未接数据库
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [tasks]
+      summary: 新建定时任务
+      description: |
+        5 段 cron。`timezone` 默认 `Asia/Shanghai`，`channel` 默认 `feishu`。
+        `name`、`chat_id`、`prompt` 必填。启用时立即计算 `next_run_at`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduledTaskInput" }
+      responses:
+        "200":
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduledTask" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /admin/api/v1/tasks/{id}:
+    get:
+      tags: [tasks]
+      summary: 任务详情
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 任务
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduledTask" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [tasks]
+      summary: 更新任务
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduledTaskInput" }
+      responses:
+        "200":
+          description: 更新后的任务
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduledTask" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [tasks]
+      summary: 删除任务
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  /admin/api/v1/tasks/{id}/run:
+    post:
+      tags: [tasks]
+      summary: 立即执行一次
+      description: 不影响既有的 cron 计划。
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 已触发
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          description: 调度器未启用
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # -------------------------------------------------------------- 技能
+  /admin/api/v1/skills:
+    get:
+      tags: [skills]
+      summary: 技能列表
+      description: |
+        读取 `<data>/pi/agent/skills`。`status` 由所在子目录决定：
+        正常 / `.disabled/` / `.archived/`。`references` 是被多少个 Profile 引用。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 技能分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Skill" }
+
+  /admin/api/v1/skills/{name}:
+    get:
+      tags: [skills]
+      summary: 技能详情
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "200":
+          description: 技能
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Skill" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [skills]
+      summary: 写入技能正文
+      description: 内容为空会被拒绝。目录式技能写的是 `SKILL.md`。
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  name: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [skills]
+      summary: 删除技能
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  /admin/api/v1/skills/{name}/status:
+    put:
+      tags: [skills]
+      summary: 停用 / 归档 / 恢复技能
+      description: 通过移动到 `.disabled/` / `.archived/` 子目录实现；这两个目录里的技能不会被注入工作区。
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, disabled, archived] }
+      responses:
+        "200":
+          description: 已切换
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  name: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /admin/api/v1/skills/import:
+    post:
+      tags: [skills]
+      summary: 导入技能 ZIP
+      description: |
+        上限 20 MiB。ZIP 里可以是多个 `<name>/SKILL.md`，也可以是扁平的 `<name>.md`。
+        `references/` 不会被当成技能。默认跳过同名技能，`overwrite=1` 才覆盖。
+      parameters:
+        - name: overwrite
+          in: query
+          schema: { type: string, enum: ["1"] }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200":
+          description: 已导入
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  imported:
+                    type: array
+                    items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /admin/api/v1/skills/{name}/files:
+    get:
+      tags: [skills]
+      summary: 技能目录文件列表
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "200":
+          description: 文件列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path: { type: string, description: 相对技能根目录 }
+                        size: { type: integer, format: int64 }
+                  total: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin/api/v1/skills/{name}/files/{path}:
+    get:
+      tags: [skills]
+      summary: 读取技能内的文件
+      description: 路径越界（`..`、绝对路径）会被拒绝。
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillPath"
+      responses:
+        "200":
+          description: 文件内容
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: { type: string }
+                  content: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [skills]
+      summary: 写入技能内的文件
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [skills]
+      summary: 删除技能内的文件
+      parameters:
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillPath"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  # -------------------------------------------------------------- MCP
+  /admin/api/v1/mcps:
+    get:
+      tags: [mcps]
+      summary: MCP 列表
+      description: 来自 `<data>/mcp.yaml`。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: MCP 分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCP" }
+
+  /admin/api/v1/mcps/{name}:
+    put:
+      tags: [mcps]
+      summary: 保存 MCP
+      description: 保存后立即重建 pi 配置；`transport` 默认为 `stdio`。
+      parameters:
+        - $ref: "#/components/parameters/MCPName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCP" }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  name: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [mcps]
+      summary: 删除 MCP
+      parameters:
+        - $ref: "#/components/parameters/MCPName"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  # -------------------------------------------------------------- 配置
+  /admin/api/v1/settings:
+    get:
+      tags: [config]
+      summary: 只读部署设置
+      description: |
+        模型与飞书凭据来自 `.env`，**改了要重启**；模型路由（providers/models/routes）
+        走 `/model` 热更新，不在这里。
+      responses:
+        "200":
+          description: 设置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  model:
+                    type: object
+                    properties:
+                      provider: { type: string }
+                      model: { type: string }
+                      base_url: { type: string }
+                      has_key: { type: boolean }
+                      note: { type: string }
+                  feishu:
+                    type: object
+                    properties:
+                      transport: { type: string }
+                      allowed_users:
+                        type: array
+                        items: { type: string }
+                      allowed_chats:
+                        type: array
+                        items: { type: string }
+                      require_at: { type: boolean }
+                  storage:
+                    type: object
+                    properties:
+                      data_dir: { type: string }
+
+  /admin/api/v1/model:
+    get:
+      tags: [config]
+      summary: 读取模型路由配置
+      description: 返回前会清空所有 provider 的 `api_key`，只保留结构。
+      responses:
+        "200":
+          description: 配置与候选健康
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config: { $ref: "#/components/schemas/ModelConfig" }
+                  health:
+                    type: array
+                    items: { $ref: "#/components/schemas/CandidateHealth" }
+    put:
+      tags: [config]
+      summary: 保存模型路由配置（热更新）
+      description: |
+        `api_key` 留空表示沿用原值，因此前端可以安全地回传脱敏后的配置。
+        保存前会做结构校验，失败返回 400。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelConfig" }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  config: { $ref: "#/components/schemas/ModelConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /admin/api/v1/model/test:
+    post:
+      tags: [config]
+      summary: 测试一条模型线路
+      description: 60 秒超时；失败返回 502 并带上游错误。
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                route: { type: string, default: main }
+      responses:
+        "200":
+          description: 可用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  route: { type: string }
+        "502":
+          description: 线路不可用
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/api/v1/profiles:
+    get:
+      tags: [config]
+      summary: Profile 列表
+      description: Profile 决定会话能看见哪些技能与哪些 MCP；空数组表示不限制。
+      responses:
+        "200":
+          description: Profile 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Profile" }
+                  total: { type: integer }
+                  active: { type: string }
+
+  /admin/api/v1/profiles/{name}:
+    put:
+      tags: [config]
+      summary: 保存 Profile
+      parameters:
+        - $ref: "#/components/parameters/ProfileName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Profile" }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  name: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [config]
+      summary: 删除 Profile
+      parameters:
+        - $ref: "#/components/parameters/ProfileName"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  /admin/api/v1/profiles/{name}/apply:
+    put:
+      tags: [config]
+      summary: 切换全局生效 Profile
+      description: 只改变默认值；已绑定具体 Profile 的会话不受影响，需要另外调 `/sessions/apply-config`。
+      parameters:
+        - $ref: "#/components/parameters/ProfileName"
+      responses:
+        "200":
+          description: 已切换
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  active: { type: string }
+
+  # -------------------------------------------------------------- 历史
+  /admin/api/v1/history:
+    get:
+      tags: [history]
+      summary: 历史会话代列表
+      description: 只有接数据库时才有数据；内存模式返回空列表。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 会话代分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Generation" }
+
+  /admin/api/v1/history/{conversation}/{generation}:
+    get:
+      tags: [history]
+      summary: 某个会话代的消息与运行
+      description: |
+        `runs` 只包含输入消息落在本代内的运行；跨代的运行不会出现在这里。
+      parameters:
+        - name: conversation
+          in: path
+          required: true
+          schema: { type: string }
+        - name: generation
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 消息与运行
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Message" }
+                      runs:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            run: { $ref: "#/components/schemas/Run" }
+                            events:
+                              type: array
+                              items: { $ref: "#/components/schemas/RunEvent" }
+        "400":
+          description: 代不是数字
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/api/v1/audits:
+    get:
+      tags: [history]
+      summary: 审计日志
+      description: 最近 200 条，倒序。写操作都会留下一条；只读操作不留。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 审计分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paged"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/AuditEntry" }
+
+  # -------------------------------------------------------------- 试跑
+  /admin/api/v1/test:
+    post:
+      tags: [config]
+      summary: 管理台在线试跑一次执行器
+      description: |
+        直接调用当前执行器，不经过案件、不入队、不投递。用于验证模型与工具链路是否通。
+        120 秒超时。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+      responses:
+        "200":
+          description: 执行结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output: { type: string }
+                  latency_ms: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "502":
+          description: 执行器报错
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: 执行器未就绪
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # ============================================================== 接入面
+  /healthz:
+    get:
+      tags: [ops]
+      summary: 健康检查
+      description: |
+        任一已注册检查返回 false 时整体 503，响应体里逐项列出 `ok` 与 `detail`。
+        该端口默认 8787。
+      servers:
+        - url: http://127.0.0.1:8787
+      security: []
+      responses:
+        "200":
+          description: 全部健康
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: 有检查未通过
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /metrics:
+    get:
+      tags: [ops]
+      summary: Prometheus 指标
+      servers:
+        - url: http://127.0.0.1:8787
+      security: []
+      responses:
+        "200":
+          description: 文本格式指标
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/alerts/{source}:
+    post:
+      tags: [ingest]
+      summary: 告警 webhook
+      description: |
+        支持 `alertmanager`、`grafana`、`generic`、`pagerduty`。请求体为各平台原生格式，
+        归一化、去重后聚合成事故，再产出案件并触发只读诊断运行。
+
+        鉴权：配置了 token 时校验 `Authorization: Bearer <token>`，
+        回退到 `X-Alertmanager-Token`。可按来源设置不同 token，未配置的来源回退到全局 token。
+        超过每分钟上限返回 429。请求体上限 2 MiB。
+      servers:
+        - url: http://127.0.0.1:8787
+      security:
+        - alertToken: []
+        - alertmanagerToken: []
+      parameters:
+        - name: source
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [alertmanager, grafana, generic, pagerduty]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: 平台原生 webhook 载荷
+              additionalProperties: true
+      responses:
+        "202":
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: accepted }
+                  alerts: { type: integer, description: 归一化后的告警条数 }
+                  source: { type: string }
+        "400":
+          description: 载荷无法解析
+          content:
+            text/plain:
+              schema: { type: string }
+        "401":
+          description: token 不正确
+          content:
+            text/plain:
+              schema: { type: string }
+        "429":
+          description: 触发按来源限流
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/tickets:
+    post:
+      tags: [ingest]
+      summary: 工单 webhook
+      description: |
+        创建一条技术支持案件并触发运行，带知识库检索。
+        鉴权同告警：`Authorization: Bearer <token>` 或 `X-Ticket-Token`。请求体上限 1 MiB。
+      servers:
+        - url: http://127.0.0.1:8787
+      security:
+        - alertToken: []
+        - ticketToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                summary: { type: string }
+                service: { type: string }
+                environment: { type: string }
+                priority: { type: string }
+                requester: { type: string }
+      responses:
+        "202":
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: accepted }
+                  case_id: { type: string }
+        "400":
+          description: 载荷无法解析
+          content:
+            text/plain:
+              schema: { type: string }
+        "401":
+          description: token 不正确
+          content:
+            text/plain:
+              schema: { type: string }
+
+# ================================================================ 组件
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        管理令牌，三档：admin（全权）、operator（可写）、view（只读）。
+        也可用 `POST /admin/login?token=...` 换取 `agenthub_admin` Cookie。
+        全部未配置时管理面不鉴权。
+    alertToken:
+      type: http
+      scheme: bearer
+      description: 接入面共享 token（`AGENTHUB_AIOPS_TOKEN`）。
+    alertmanagerToken:
+      type: apiKey
+      in: header
+      name: X-Alertmanager-Token
+      description: Alertmanager 常用 header 形式鉴权。
+    ticketToken:
+      type: apiKey
+      in: header
+      name: X-Ticket-Token
+      description: 工单系统的 header 形式鉴权。
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Size:
+      name: size
+      in: query
+      description: 每页条数，上限 100
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 0, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    From:
+      name: from
+      in: query
+      description: 起始时间（RFC 3339 或 YYYY-MM-DD），无法解析时忽略
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      description: 结束时间（RFC 3339 或 YYYY-MM-DD），无法解析时忽略
+      schema: { type: string, format: date-time }
+    SessionId:
+      name: id
+      in: path
+      required: true
+      description: 会话标识，形如 `feishu:p2p:ou_xxx` 或 `aiops:inc_xxx`
+      schema: { type: string }
+    CaseId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    ApprovalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    TaskId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    SkillName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    SkillPath:
+      name: path
+      in: path
+      required: true
+      description: 相对技能根目录的路径，禁止 `..` 与绝对路径
+      schema: { type: string }
+    MCPName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    ProfileName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: 请求体非法
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, description: 中文说明，不含密钥与敏感载荷 }
+
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, example: ok }
+
+    Paged:
+      type: object
+      required: [items, total, page, size]
+      properties:
+        items: { type: array, items: {} }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    OffsetPaged:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: {} }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    SessionInfo:
+      type: object
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [p2p, group, scheduled, unknown]
+        chat_id: { type: string }
+        user_id: { type: string }
+        display_name: { type: string }
+        chat_name: { type: string }
+        user_name: { type: string }
+        messages: { type: integer }
+        last_active: { type: string }
+        internal: { type: boolean, description: 管理台自检会话 }
+
+    Message:
+      type: object
+      description: 内存态消息；字段名与 Go 结构体一致（无 json tag）
+      properties:
+        ID: { type: string }
+        Role: { type: string, enum: [user, assistant] }
+        Generation: { type: integer }
+        TraceID: { type: string }
+        ConversationID: { type: string }
+        CaseID: { type: string }
+        ChatID: { type: string }
+        ChatKind: { type: string }
+        ExternalID: { type: string }
+        NoReply: { type: boolean }
+        SentByAdmin: { type: boolean }
+        ReadOnly: { type: boolean }
+        ToolAllow:
+          type: array
+          items: { type: string }
+        SenderOpenID: { type: string }
+        SenderName: { type: string }
+        Text: { type: string }
+        MsgType: { type: string }
+        Status: { type: string, enum: [queued, processing, done, failed, stopped] }
+        Attachments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        CreatedAt: { type: string, format: date-time }
+
+    Run:
+      type: object
+      description: 内存态运行记录；字段名与 Go 结构体一致
+      properties:
+        ID: { type: string }
+        ConversationID: { type: string }
+        CaseID: { type: string }
+        ChatID: { type: string }
+        Round: { type: integer }
+        State: { type: string, enum: [running, completed, failed, interrupted] }
+        InputIDs:
+          type: array
+          items: { type: string }
+        Output: { type: string }
+        Error: { type: string }
+        StartedAt: { type: string, format: date-time }
+        EndedAt: { type: string, format: date-time, description: 零值表示仍在运行 }
+        InputTokens: { type: integer }
+        OutputTokens: { type: integer }
+        TraceID: { type: string }
+        HeartbeatAt: { type: string, format: date-time }
+        CardHandle: { type: string }
+        CardClosed: { type: boolean }
+
+    RunEvent:
+      type: object
+      properties:
+        run_id: { type: string }
+        kind: { type: string, enum: [phase, tool] }
+        name: { type: string }
+        detail: { type: string }
+        duration_ms: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+
+    Delivery:
+      type: object
+      properties:
+        RunID: { type: string }
+        IdempotencyKey: { type: string }
+        ChatID: { type: string }
+        ReplyTo: { type: string }
+        Text: { type: string }
+        Kind: { type: string, enum: [text, file, image, zip] }
+        Name: { type: string }
+        ArtifactID: { type: string }
+        ArtifactPath: { type: string }
+        State: { type: string, enum: [pending, sending, retrying, sent, failed, ambiguous] }
+        Error: { type: string }
+        ExternalID: { type: string }
+        Attempts: { type: integer }
+        CreatedAt: { type: string, format: date-time }
+        SendStartedAt: { type: string, format: date-time }
+        LeaseOwner: { type: string }
+        LeaseToken: { type: string }
+        LeaseExpiresAt: { type: string, format: date-time }
+        SendPhase: { type: string, enum: [claimed, calling] }
+        NextAttempt: { type: string, format: date-time }
+        TraceID: { type: string }
+
+    Artifact:
+      type: object
+      properties:
+        id: { type: string }
+        run_id: { type: string }
+        conversation_id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { type: string }
+        created_at: { type: string, format: date-time }
+
+    QueueItem:
+      type: object
+      properties:
+        conversation_id: { type: string }
+        queued: { type: integer }
+        priority: { type: integer }
+        oldest: { type: string, format: date-time }
+        effective: { type: integer, description: 计入优先级的有效排位 }
+
+    Priority:
+      type: object
+      additionalProperties: true
+
+    Employee:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        role: { type: string }
+        mission: { type: string }
+        status: { type: string }
+        chat_id: { type: string }
+        allowed_tools:
+          type: array
+          items: { type: string }
+          description: 空表示不限制
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Case:
+      type: object
+      required: [id, title, status]
+      properties:
+        id: { type: string }
+        employee_id: { type: string }
+        type: { type: string, example: incident }
+        source: { type: string, enum: [alertmanager, grafana, generic, pagerduty, manual] }
+        source_id: { type: string, description: 告警来源时等于事故 ID }
+        title: { type: string }
+        summary: { type: string }
+        severity: { type: string }
+        status: { type: string, enum: [open, waiting_human, acknowledged, resolved, closed] }
+        requester: { type: string }
+        service: { type: string }
+        environment: { type: string }
+        chat_id: { type: string }
+        sla_due_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+
+    CaseEvent:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        case_id: { type: string }
+        kind:
+          type: string
+          description: "如 created / acknowledged / diagnosis / handoff / report / review / feedback / approval / action / resolved / postmortem"
+        actor: { type: string }
+        text: { type: string }
+        created_at: { type: string, format: date-time }
+
+    CaseFeedback:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        case_id: { type: string }
+        actor: { type: string }
+        verdict: { type: string, enum: [useful, not_useful] }
+        note: { type: string }
+        csat: { type: integer, minimum: 0, maximum: 5 }
+        created_at: { type: string, format: date-time }
+
+    CaseReview:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        case_id: { type: string }
+        reviewer: { type: string }
+        evidence: { type: integer, minimum: 0, maximum: 3 }
+        root_cause: { type: integer, minimum: 0, maximum: 3 }
+        safety: { type: integer, minimum: 0, maximum: 3 }
+        usefulness: { type: integer, minimum: 0, maximum: 3 }
+        honesty: { type: integer, minimum: 0, maximum: 3 }
+        note: { type: string }
+        created_at: { type: string, format: date-time }
+
+    CaseReport:
+      type: object
+      required: [problem]
+      properties:
+        case_id: { type: string, readOnly: true }
+        problem: { type: string, description: 必填 }
+        impact: { type: string }
+        evidence: { type: string }
+        root_cause: { type: string }
+        actions: { type: string }
+        verification: { type: string }
+        prevention: { type: string }
+        status: { type: string, enum: [draft, final], default: draft }
+        author: { type: string }
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
+    Approval:
+      type: object
+      properties:
+        id: { type: string }
+        case_id: { type: string }
+        action: { type: string, enum: [k8s_scale, k8s_restart] }
+        params:
+          type: object
+          additionalProperties: true
+        status: { type: string, enum: [pending, approved, rejected] }
+        requested_by: { type: string }
+        approved_by: { type: string }
+        result: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Incident:
+      type: object
+      properties:
+        id: { type: string }
+        fingerprint: { type: string }
+        status: { type: string, enum: [firing, acknowledged, resolved] }
+        severity: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        service: { type: string }
+        environment: { type: string }
+        chat_id: { type: string }
+        alert_count: { type: integer }
+        acknowledged_by: { type: string }
+        acknowledged_at: { type: string, format: date-time, nullable: true }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ScheduledTaskInput:
+      type: object
+      required: [name, chat_id, prompt]
+      properties:
+        name: { type: string }
+        cron:
+          type: string
+          description: 5 段 cron 表达式
+          example: "0 9 * * 1-5"
+        timezone: { type: string, default: Asia/Shanghai }
+        chat_id: { type: string }
+        channel: { type: string, default: feishu }
+        prompt: { type: string }
+        enabled: { type: boolean, default: false }
+
+    ScheduledTask:
+      allOf:
+        - $ref: "#/components/schemas/ScheduledTaskInput"
+        - type: object
+          properties:
+            id: { type: string }
+            next_run_at: { type: string, format: date-time, nullable: true, description: 停用时为 null }
+            last_run_at: { type: string, format: date-time, nullable: true }
+            last_status: { type: string, description: 最近一次执行结果 }
+            created_at: { type: string, format: date-time }
+
+    Skill:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        content: { type: string }
+        status: { type: string, enum: [active, disabled, archived] }
+        files: { type: integer }
+        bytes: { type: integer, format: int64 }
+        executable: { type: boolean, description: 是否含可执行文件（会加入会话 PATH） }
+        flat: { type: boolean, description: true 表示扁平式 `<name>.md` }
+        updated_at: { type: string }
+        references: { type: integer, description: 被多少个 Profile 引用 }
+
+    MCP:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        transport: { type: string, enum: [stdio], default: stdio }
+        command: { type: string }
+        args:
+          type: array
+          items: { type: string }
+        url: { type: string }
+        enabled: { type: boolean }
+
+    Profile:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        skills:
+          type: array
+          items: { type: string }
+          description: 空表示不限制
+        mcps:
+          type: array
+          items: { type: string }
+          description: 空表示不限制
+
+    ModelConfig:
+      type: object
+      description: 模型路由配置 v2（providers / models / routes）
+      properties:
+        providers:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              api_key:
+                type: string
+                description: 读取时恒为空；写入时留空表示沿用原值
+              base_url: { type: string }
+        models:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        routes:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    CandidateHealth:
+      type: object
+      properties:
+        route: { type: string }
+        candidate: { type: string, description: 候选标识，形如 provider/model }
+        open: { type: boolean, description: 熔断是否打开 }
+        failures: { type: integer, description: 连续失败次数 }
+        open_until: { type: string, format: date-time, description: 熔断到期时间 }
+        last_error: { type: string }
+        last_latency_ms: { type: integer, format: int64 }
+
+    Generation:
+      type: object
+      properties:
+        conversation_id: { type: string }
+        generation: { type: integer }
+        messages: { type: integer }
+        last_active: { type: string, format: date-time }
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        actor: { type: string, description: 来自 `X-AA-Operator` 头，可为空 }
+        action: { type: string, example: case.report }
+        target: { type: string }
+        detail: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+        checks:
+          type: object
+          description: 检查名 → 状态值；`ok` / `error` / `skipped`
+          additionalProperties: { type: string }
