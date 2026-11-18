@@ -81,7 +81,8 @@ AGENTHUB_AIOPS_MAX_ALERTS=20
 - `incident`：按 Alertmanager `groupKey` 聚合，含状态、级别、服务、环境、告警数、认领人；
 - `alert_event`：单条告警原始标签/注解，按 `fingerprint + status + startsAt` 去重；
 - `incident_event`：时间线（告警、认领、恢复、人工操作）；
-- 管理台「运维事故」可查看列表、时间线、认领。
+- 管理台不再单独提供「运维事故」页：告警聚合、认领与手动恢复都在案件详情里，
+  一个案件对应一个告警组，避免同一件事在两个页面之间跳转。
 
 ### 2.3 诊断运行
 
@@ -234,10 +235,9 @@ Tempo 已在本地 2.6 容器验证：
 
 ### 2.13 时间筛选
 
-案件、事故、报告列表支持 `from` / `to`（RFC3339 或 `YYYY-MM-DD`）：
+案件与报告列表支持 `from` / `to`（RFC3339 或 `YYYY-MM-DD`）：
 
 - `/cases?from=...&to=...`
-- `/incidents?from=...&to=...`
 - `/reports?from=...&to=...`
 
 工作台支持 24h / 7d / 30d / 全部。

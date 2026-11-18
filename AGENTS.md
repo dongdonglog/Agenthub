@@ -94,7 +94,7 @@ CI（`.github/workflows/ci.yml`）另外跑 `go test -race ./...` 与 `CGO_ENABL
 | `channel` | 与平台无关的入站消息、出站请求与能力声明（含 `Reactor`、`ArtifactSender`） | `channel.go` |
 | `platform/feishu` | 飞书长连接/webhook、事件解析、卡片、表情投影、附件下载、管理员干预、审批卡片 | `client.go`、`dispatch.go`、`event.go`、`presenter.go`、`card_action.go`、`approval_card.go` |
 | `platform/dingtalk` | 钉钉 Stream、命令、附件、纯文本投递（**无卡片**） | `channel.go`、`commands.go`、`attachments.go` |
-| `aiops` | Alertmanager/Grafana/通用/PagerDuty webhook → 事故 → 案件 → 只读诊断运行 | `http.go`、`aiops.go`、`catalog.go` |
+| `aiops` | Alertmanager/Grafana/通用/PagerDuty webhook → 告警聚合 → 案件 → 只读诊断运行 | `http.go`、`aiops.go`、`catalog.go` |
 | `alerting` | 各告警平台 webhook 归一化 | `event.go`、`adapters.go` |
 | `support` | 工单 webhook → 案件 → 技术支持员工运行，带知识库检索 | `http.go`、`support.go` |
 | `knowledge` | 导入 Markdown 知识库（`<team>/` 子目录做团队隔离） | `ingest.go` |

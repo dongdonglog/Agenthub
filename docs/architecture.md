@@ -186,7 +186,7 @@ queued ──▶ running ──▶ completed
 | `scheduled_task` | 定时任务 | `claimed_at` 标记领取；`next_run_at` 驱动调度 |
 | `audit_log` | 管理面审计 | 追加写 |
 | `reaction_projection` | 表情六态投影 | 按消息 ID |
-| `incident` / `alert_event` / `incident_event` | 事故、告警、时间线 | 按 fingerprint 去重 |
+| `incident` / `alert_event` / `incident_event` | 告警聚合事实、单条告警、时间线 | 按 fingerprint 去重；对用户收敛在案件页展示 |
 | `employee` / `case_item` / `case_event` | 数字员工、案件、时间线 | 案件按 `(source, source_id)` 幂等 |
 | `case_feedback` / `case_review` / `case_report` | 反馈、复盘、处置报告 | 报告以 `draft` 起步 |
 | `approval_request` | 动作审批 | 只有 `pending` 可被决定 |

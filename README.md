@@ -48,14 +48,14 @@ AgentHub 把这些动作收进一个案件：
 | **pi 诊断** | skills、prompts、extensions、subagent、compaction；Prometheus/Loki/Tempo/K8s 通过 MCP 查证据 |
 | **处置报告** | pi 通过 `submit_report` 提交结构化报告；Go 保存草稿，人补根因/验证后定稿、关闭、发飞书 |
 | **审批动作** | pi 通过 `request_approval` 申请 K8s scale/restart；Go 校验并推审批卡片，批准后由受限执行器执行 |
-| **案件闭环** | 告警聚合、时间线、SLA、交接、复盘、手动恢复；案件/事故/报告支持时间筛选 |
+| **案件闭环** | 告警聚合、时间线、SLA、交接、复盘、手动恢复；案件/报告支持时间筛选 |
 | **MCP 工具网关** | 一个 `agenthub-ops-mcp` 聚合内置工具与外部 MCP；前缀、只读策略、allow/deny、审计、超时隔离 |
 | **可治理** | 只读 guard、tool_result 脱敏、审批、admin/operator/view RBAC、审计、HA 选主、备份恢复 |
 
 ## 一次告警怎么走
 
 1. Alertmanager 把告警推到 `POST /api/v1/alerts/alertmanager`；
-2. AgentHub 归一化、去重、创建 incident 和 case；
+2. AgentHub 归一化、去重、聚合告警并创建案件；
 3. pi 带着案件上下文、SRE skill 和 MCP 工具启动；
 4. pi 查 Prometheus/Loki/Tempo/K8s，输出诊断；
 5. pi 调 `submit_report` 提交报告草稿；需要变更时调 `request_approval` 申请动作；
@@ -153,15 +153,12 @@ React + TypeScript + Vite，构建产物嵌入 Go 二进制；浅色/深色切�
 
 | 页面 | 内容 |
 |---|---|
-| 工作台 | 处理中案件、等待人工、firing 事故、报告数量 |
-| 案件 | 状态/类型/时间/关键词筛选；诊断、证据、审批、报告 |
-| 事故 | 告警聚合、认领、手动恢复、关联案件与诊断 |
+| 工作台 | 处理中案件、等待人工、firing 告警组、报告数量 |
+| 案件 | 状态/类型/时间/关键词筛选；告警聚合、诊断、证据、审批、报告 |
 | 报告 | pi 自动草稿，人工定稿、下载、发飞书 |
 | 系统 | 运行概览、会话、Skill、MCP、定时任务、审计、设置 |
 
 ![案件详情](docs/images/admin-case.png)
-
-![事故详情](docs/images/admin-incident.png)
 
 ![处置报告](docs/images/admin-report.png)
 
@@ -186,10 +183,23 @@ AgentHub 的分工是：
 当前主线是 **`v0.4.0` 之后的开发版**，适合内网或受控环境的小团队试用；生产发布以 GitHub Releases 为准。
 
 - 默认只读，写操作审批；K8s 动作仅支持 allowlist 内的 scale/restart；
-- 飞书/钉钉长连接由 PostgreSQL advisory lock 选主，单活而非无状态多活；
+- 飞书/钉钉长连接由 PostgreSQL advisory lock 选主，单活入口；会话执行另有数据库租约，多实例不会重复跑同一会话；
+- `AGENTHUB_ENV=production` 必须配置管理面令牌，否则拒绝启动；
 - 钉钉回复依赖 `sessionWebhook`，卡片未接入；
 - 没有多租户、SLO/错误预算、生产长跑/压测/灾备；
 - 已跑通真实 Alertmanager + Prometheus/Loki + 真实模型的 20 条独立告警，但仍是合成事件，不等于 20 个生产事故。
+
+## 不接飞书先看效果
+
+不需要飞书应用、也不需要模型密钥：
+
+```bash
+./scripts/demo.sh                                        # 起一个本地实例
+./scripts/verify.sh http://127.0.0.1:20901 http://127.0.0.1:20902   # 推一条告警
+```
+
+没有模型凭据时会自动改用回显执行器，链路照常跑通，管理台在
+`http://127.0.0.1:20902/admin/`。
 
 ## 文档
 
