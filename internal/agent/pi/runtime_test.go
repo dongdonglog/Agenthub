@@ -59,6 +59,31 @@ func input(conv string) agent.Input {
 	}
 }
 
+func TestRuntimePassesReadOnlyEnv(t *testing.T) {
+	rt, _, _ := newTestRuntime(t, "env", 5*time.Second)
+	// 生产装配里 cmd/agentd 会设置 Model="main"；测试运行时默认空，这里补齐。
+	rt.cfg.Model = "main"
+	in := input("feishu:chat:user")
+	in.ReadOnly = true
+	in.CaseID = "case_env_1"
+	out, err := rt.Run(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 这里守的是真实踩过的坑：runProcess 曾把 cmd.Env 赋值两次，
+	// 第二次覆盖第一次，导致只读 guard 在子进程里根本看不到 AGENTHUB_READONLY。
+	for _, want := range []string{
+		"READONLY=1",
+		"CASE=case_env_1",
+		"PROVIDER=agenthub",
+		"MODEL=main",
+	} {
+		if !strings.Contains(out.Text, want) {
+			t.Fatalf("子进程环境缺少 %q: %s", want, out.Text)
+		}
+	}
+}
+
 func TestRuntimeCompleted(t *testing.T) {
 	rt, sessions, workspaces := newTestRuntime(t, "completed", 5*time.Second)
 	out, err := rt.Run(context.Background(), input("feishu:chat:user"))

@@ -152,6 +152,14 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 		return agent.Output{}, err
 	}
 	_ = os.Remove(filepath.Join(reportDir, "report.json"))
+	// 审批申请目录每次运行清空，避免上一批的申请被重复提交。
+	approvalDir := filepath.Join(ws, "approvals")
+	if err := os.RemoveAll(approvalDir); err != nil {
+		return agent.Output{}, err
+	}
+	if err := os.MkdirAll(approvalDir, 0o755); err != nil {
+		return agent.Output{}, err
+	}
 	if err := prepareRunOutbox(ws, in.RunID); err != nil {
 		return agent.Output{}, err
 	}
@@ -200,6 +208,7 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	}
 	if err == nil {
 		out.Artifacts = collectRunArtifacts(ws, in.RunID, started)
+		out.Approvals = collectApprovalRequests(approvalDir)
 		if raw, readErr := os.ReadFile(filepath.Join(reportDir, "report.json")); readErr == nil {
 			out.Report = raw
 		} else if strings.TrimSpace(out.Text) != "" && in.CaseID != "" {
@@ -213,9 +222,69 @@ func (r *Runtime) Run(ctx context.Context, in agent.Input) (agent.Output, error)
 	return out, err
 }
 
+// collectApprovalRequests 读取 pi 提交的动作申请。
+//
+// @remarks 只接受本次运行目录下的普通 .json 文件；出错或超大文件直接跳过，
+// 让调用方按空申请处理，不影响主运行结果。
+func collectApprovalRequests(dir string) []json.RawMessage {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []json.RawMessage
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.Size() > 64<<10 {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		if !json.Valid(raw) {
+			continue
+		}
+		out = append(out, json.RawMessage(raw))
+	}
+	return out
+}
+
 func sessionKey(conv string, generation int) string {
 	sum := sha1.Sum([]byte(conv))
 	return hex.EncodeToString(sum[:])[:16] + fmt.Sprintf("-g%d", generation)
+}
+
+// mergeEnv 把 base 与 override 合并为 KEY=VALUE 列表，同名时 override 生效。
+//
+// @remarks 子进程环境必须是完整的（否则会丢掉 HOME 等），所以以 os.Environ() 为底；
+// 但同一批注入的变量必须真的生效，不能被基底里的同名值覆盖后再拼接出重复项。
+func mergeEnv(base, override []string) []string {
+	merged := make(map[string]string, len(base)+len(override))
+	order := make([]string, 0, len(base)+len(override))
+	put := func(item string) {
+		key, _, ok := strings.Cut(item, "=")
+		if !ok || key == "" {
+			return
+		}
+		if _, seen := merged[key]; !seen {
+			order = append(order, key)
+		}
+		merged[key] = item
+	}
+	for _, item := range base {
+		put(item)
+	}
+	for _, item := range override {
+		put(item)
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, merged[key])
+	}
+	return out
 }
 
 var errAborted = errors.New("pi 运行被中止")
@@ -295,10 +364,20 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = ws
+	pathValue := filepath.Join(ws, ".agenthub-bin")
+	if current := os.Getenv("PATH"); current != "" {
+		pathValue += string(os.PathListSeparator) + current
+	}
 	env := []string{
+		"PATH=" + pathValue,
 		"PI_PROVIDER=" + provider,
 		"PI_MODEL=" + model,
 		"PI_BIN=" + r.cfg.Bin,
+		"PI_CODING_AGENT_DIR=" + filepath.Join(ws, ".agenthub-agent"),
+		"AGENTHUB_OUTBOX_DIR=" + filepath.Join(ws, "outbox"),
+		"AGENTHUB_REPORT_DIR=" + filepath.Join(ws, "reports"),
+		"AGENTHUB_APPROVAL_DIR=" + filepath.Join(ws, "approvals"),
+		"AGENTHUB_CASE_ID=" + in.CaseID,
 	}
 	if len(r.cfg.Extensions) > 0 {
 		env = append(env, "AGENTHUB_GUARD_EXTENSION="+r.cfg.Extensions[0])
@@ -306,18 +385,7 @@ func (r *Runtime) runProcess(ctx context.Context, ws, session, prompt string, in
 	if in.ReadOnly {
 		env = append(env, "AGENTHUB_READONLY=1")
 	}
-	cmd.Env = append(cmd.Env, env...)
-	pathValue := filepath.Join(ws, ".agenthub-bin")
-	if current := os.Getenv("PATH"); current != "" {
-		pathValue += string(os.PathListSeparator) + current
-	}
-	cmd.Env = append(os.Environ(),
-		"PATH="+pathValue,
-		"PI_CODING_AGENT_DIR="+filepath.Join(ws, ".agenthub-agent"),
-		"AGENTHUB_OUTBOX_DIR="+filepath.Join(ws, "outbox"),
-		"AGENTHUB_REPORT_DIR="+filepath.Join(ws, "reports"),
-		"AGENTHUB_CASE_ID="+in.CaseID,
-	)
+	cmd.Env = mergeEnv(os.Environ(), env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

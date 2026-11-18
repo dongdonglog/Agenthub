@@ -36,6 +36,18 @@ func main() {
 				"content": []any{map[string]any{"type": "text", "text": "部分文本"}},
 			}})
 			emit(map[string]any{"type": "agent_settled", "aborted": false})
+		case "env":
+			// 回显关键环境变量，用于断言子进程真的收到了注入值。
+			text := "READONLY=" + os.Getenv("AGENTHUB_READONLY") +
+				";CASE=" + os.Getenv("AGENTHUB_CASE_ID") +
+				";PROVIDER=" + os.Getenv("PI_PROVIDER") +
+				";MODEL=" + os.Getenv("PI_MODEL")
+			emit(map[string]any{"type": "agent_start"})
+			emit(map[string]any{"type": "message_end", "message": map[string]any{
+				"role": "assistant", "stopReason": "stop",
+				"content": []any{map[string]any{"type": "text", "text": text}},
+			}})
+			emit(map[string]any{"type": "agent_settled", "aborted": false})
 		case "hang":
 			time.Sleep(30 * time.Second)
 		}

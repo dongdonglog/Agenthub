@@ -298,7 +298,7 @@ func run() int {
 	skillDirs := []string{}
 	promptDirs := []string{}
 	if piPackageDir != "" {
-		for _, name := range []string{"agenthub-guard.ts", "agenthub-redact.ts", "agenthub-compaction.ts", "agenthub-subagent.ts", "agenthub-report.ts"} {
+		for _, name := range []string{"agenthub-guard.ts", "agenthub-redact.ts", "agenthub-compaction.ts", "agenthub-subagent.ts", "agenthub-report.ts", "agenthub-approval.ts"} {
 			if _, err := os.Stat(filepath.Join(piPackageDir, "extensions", name)); err == nil {
 				extensions = append(extensions, filepath.Join(piPackageDir, "extensions", name))
 			}
@@ -390,10 +390,24 @@ func run() int {
 			ID: "tech-support", Name: "技术支持", Title: "技术支持数字同事", Role: "tech-support",
 			Mission: "接住支持工单，查知识/历史工单，给出可执行步骤，无法解决时升级人工。",
 			Status:  "active", ChatID: cfg.Support.ChatID,
-			AllowedTools: []string{"read", "bash", "grep", "find", "ls", "tool_search", "ops_investigate", "submit_report"},
+			AllowedTools: []string{"read", "bash", "grep", "find", "ls", "tool_search", "ops_investigate", "submit_report", "request_approval"},
 		}, time.Now()); err != nil {
 			logger.Warn("seed support employee failed", "error", err)
 		}
+	}
+	// notifyApproval 把审批卡片推到案件群；非飞书通道或未绑定群时静默跳过。
+	// 申请本身已经落库，卡片只是通知，失败不影响审批流程。
+	notifyApproval := func(ctx context.Context, approval *store.Approval) error {
+		fc, ok := ch.(*feishu.Channel)
+		if !ok || caseStore == nil {
+			return nil
+		}
+		c, err := caseStore.GetCase(ctx, approval.CaseID)
+		if err != nil || c == nil || c.ChatID == "" {
+			return err
+		}
+		_, err = fc.Client().CreateCard(ctx, c.ChatID, "", feishu.ApprovalCard(approval))
+		return err
 	}
 	if caseStore != nil {
 		engine.SetReportSink(func(ctx context.Context, caseID string, raw []byte) error {
@@ -412,6 +426,30 @@ func run() int {
 				return err
 			}
 			return caseStore.AddCaseEvent(ctx, caseID, "report", "pi", "pi 已提交处置报告草稿", time.Now())
+		})
+		engine.SetApprovalSink(func(ctx context.Context, caseID string, raw json.RawMessage) error {
+			req, params, err := action.ParseRequest(raw)
+			if err != nil {
+				return err
+			}
+			approval, err := caseStore.CreateApproval(ctx, caseID, req.Action, params, "pi", time.Now())
+			if err != nil {
+				return err
+			}
+			text := fmt.Sprintf("pi 申请 %s：%s/%s", req.Action, req.Namespace, req.Deployment)
+			if req.Reason != "" {
+				text += "；理由：" + req.Reason
+			}
+			if err := caseStore.AddCaseEvent(ctx, caseID, "approval", "pi", text, time.Now()); err != nil {
+				logger.Warn("record approval event failed", "approval", approval.ID, "error", err)
+			}
+			// 审批卡片失败不影响申请落库；值班人仍能在案件页处理。
+			if notifyApproval != nil {
+				if err := notifyApproval(ctx, approval); err != nil {
+					logger.Warn("notify approval failed", "approval", approval.ID, "error", err)
+				}
+			}
+			return nil
 		})
 	}
 	if knowledgeStore != nil {
@@ -603,18 +641,7 @@ func run() int {
 			_, err = fc.Client().SendText(ctx, c.ChatID, "", text)
 			return err
 		},
-		NotifyApproval: func(ctx context.Context, approval *store.Approval) error {
-			fc, ok := ch.(*feishu.Channel)
-			if !ok || caseStore == nil {
-				return nil
-			}
-			c, err := caseStore.GetCase(ctx, approval.CaseID)
-			if err != nil || c == nil || c.ChatID == "" {
-				return err
-			}
-			_, err = fc.Client().CreateCard(ctx, c.ChatID, "", feishu.ApprovalCard(approval))
-			return err
-		},
+		NotifyApproval: notifyApproval,
 		History: func(ctx context.Context) ([]store.Generation, error) {
 			if journal == nil {
 				return nil, nil

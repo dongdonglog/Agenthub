@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -64,6 +65,9 @@ type Output struct {
 	Usage  Usage
 	// Artifacts 是本次运行写入工作区 outbox 的产物。
 	Artifacts []channel.Artifact
+	// Approvals 是本次运行申请、等待人工审批的受控动作；每项是一份原始 JSON。
+	// 只表示「申请」，是否执行由审批结果与部署侧 allowlist 决定。
+	Approvals []json.RawMessage
 }
 
 // Agent 执行一批输入并返回结果。

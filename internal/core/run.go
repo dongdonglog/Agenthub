@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -254,6 +255,14 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 			e.log.Warn("save pi report failed", "case", batch[0].CaseID, "error", err)
 		}
 	}
+	// 动作申请只登记待审批，不执行；执行发生在上限明确的审批路径里。
+	if run.State == "completed" && len(out.Approvals) > 0 && batch[0].CaseID != "" {
+		for _, raw := range out.Approvals {
+			if err := e.saveApproval(ctx, batch[0].CaseID, raw); err != nil {
+				e.log.Warn("save pi approval request failed", "case", batch[0].CaseID, "error", err)
+			}
+		}
+	}
 
 	e.projectReaction(batch[0], run.State)
 	var artifactDeliveries []*Delivery
@@ -433,4 +442,11 @@ func (e *Engine) saveReport(ctx context.Context, caseID string, raw []byte) erro
 		return nil
 	}
 	return e.reportSink(ctx, caseID, raw)
+}
+
+func (e *Engine) saveApproval(ctx context.Context, caseID string, raw json.RawMessage) error {
+	if e.approvalSink == nil {
+		return nil
+	}
+	return e.approvalSink(ctx, caseID, raw)
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,31 +29,32 @@ type Engine struct {
 	log   *slog.Logger
 	now   func() time.Time
 
-	messages    map[string]*Message
-	order       map[string][]string
-	dedupe      map[string]string
-	runs        map[string]*Run
-	runOrder    []string
-	active      map[string]string
-	cancels     map[string]context.CancelFunc
-	deliveries  map[string]*Delivery
-	sent        map[string]bool
-	seq         map[string]int64
-	runSeq      int64
-	journal     Journal
-	presenter   Presenter
-	metrics     Metrics
-	generations map[string]int
-	profiles    map[string]ProfileSelection
-	profileSrc  func() ProfileSelection
-	identities  map[string]Identity
-	priority    map[string]int
-	rounds      map[string]int
-	genCleaner  func(conv string, generation int)
-	events      map[string][]RunEvent
-	artifacts   map[string]*Artifact
-	artifactDir string
-	reportSink  func(ctx context.Context, caseID string, raw []byte) error
+	messages     map[string]*Message
+	order        map[string][]string
+	dedupe       map[string]string
+	runs         map[string]*Run
+	runOrder     []string
+	active       map[string]string
+	cancels      map[string]context.CancelFunc
+	deliveries   map[string]*Delivery
+	sent         map[string]bool
+	seq          map[string]int64
+	runSeq       int64
+	journal      Journal
+	presenter    Presenter
+	metrics      Metrics
+	generations  map[string]int
+	profiles     map[string]ProfileSelection
+	profileSrc   func() ProfileSelection
+	identities   map[string]Identity
+	priority     map[string]int
+	rounds       map[string]int
+	genCleaner   func(conv string, generation int)
+	events       map[string][]RunEvent
+	artifacts    map[string]*Artifact
+	artifactDir  string
+	reportSink   func(ctx context.Context, caseID string, raw []byte) error
+	approvalSink func(ctx context.Context, caseID string, raw json.RawMessage) error
 	// artifactMaxBytes / artifactMaxCount / artifactMaxTotal 限制单次产物交付。
 	artifactMaxBytes int64
 	artifactMaxCount int
@@ -213,6 +215,14 @@ func (e *Engine) SetNow(fn func() time.Time) {
 // SetReportSink 设置 pi 处置报告回写钩子。
 func (e *Engine) SetReportSink(fn func(ctx context.Context, caseID string, raw []byte) error) {
 	e.reportSink = fn
+}
+
+// SetApprovalSink 设置 pi 动作申请回写钩子。
+//
+// @remarks 回调只负责「记录申请并请人审批」，不得执行动作；
+// 执行仍由审批通过后的受控路径完成。
+func (e *Engine) SetApprovalSink(fn func(ctx context.Context, caseID string, raw json.RawMessage) error) {
+	e.approvalSink = fn
 }
 
 // SetConcurrency 限制跨会话并发运行数；n <= 0 表示不限制。

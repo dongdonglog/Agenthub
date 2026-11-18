@@ -4,7 +4,7 @@
   "private": true,
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./extensions/agenthub-guard.ts", "./extensions/agenthub-redact.ts", "./extensions/agenthub-compaction.ts", "./extensions/agenthub-subagent.ts", "./extensions/agenthub-report.ts"],
+    "extensions": ["./extensions/agenthub-guard.ts", "./extensions/agenthub-redact.ts", "./extensions/agenthub-compaction.ts", "./extensions/agenthub-subagent.ts", "./extensions/agenthub-report.ts", "./extensions/agenthub-approval.ts"],
     "skills": ["./skills"],
     "prompts": ["./prompts"]
   }
