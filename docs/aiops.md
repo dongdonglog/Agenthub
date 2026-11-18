@@ -244,9 +244,11 @@ Tempo 已在本地 2.6 容器验证：
 
 ### 2.14 审批与受控动作
 
-- 案件详情可创建 `k8s_scale` / `k8s_restart` 审批；创建后向案件群发送飞书审批卡片（需 `CARD_ACTION_ENABLED` 和 `ADMIN_USERS`）；
+- **pi 可以发起申请**：`request_approval` 工具把动作申请写入工作区 `approvals/*.json`，
+  Go 侧校验后创建 `approval_request` 并推审批卡片；模型不能直接执行；
+- 案件详情也可手动创建 `k8s_scale` / `k8s_restart` 审批；创建后向案件群发送飞书审批卡片（需 `CARD_ACTION_ENABLED` 和 `ADMIN_USERS`）；
 - 飞书卡片批准/拒绝与工作台共用审批状态机；
-- 审批通过后由 `internal/action` 执行；
+- 审批通过后由 `internal/action` 重新校验参数与 namespace allowlist 再执行；
 - namespace allowlist（`AGENTHUB_K8S_NAMESPACES`）、replicas 1–20、只支持 scale/restart；
 - 所有动作写审计和案件时间线；
 - 未配置 `AGENTHUB_K8S_ENABLED` 时只记录审批，不执行。
@@ -303,7 +305,8 @@ POST /api/v1/alerts/{source}
 1. **Tempo/K8s/Git/Argo 只读工具**：Prometheus/Loki 已接入，链路、K8s、变更还没；
 2. **告警相关性**：同一根因的多条告警仍需聚类/抑制，而不是每个 group 都开案；
 3. **评估闭环**：缺历史事故回放、人工反馈和准确率看板；
-4. **审批与动作执行**：目前只建议动作，不执行写操作；
+4. **审批与动作执行**：pi 已可申请受控动作、人批准后执行；但可用动作仍限于 K8s scale/restart，
+   回滚与更多动作类型尚未覆盖；
 5. **多租户/权限**：按团队隔离案件和工具权限；
 6. **HA**：飞书长连接仍是单实例入口。
 

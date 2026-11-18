@@ -7,6 +7,12 @@
 
 ### Added
 
+- `request_approval` 扩展：pi 可申请受控动作（K8s scale/restart），Go 校验形状后创建 `approval_request`
+  并推审批卡片；执行仍由审批通过后的 `internal/action` 完成；
+- 定时任务崩溃恢复：`ClaimDue` 记录 `claimed_at`，`RecoverStaleClaims` 找回超时未回填的领取（迁移 0036）；
+- CI 增加 PostgreSQL service 与串行的 `test-db` 步骤，数据库用例不再是永久 `t.Skip`；
+- `.claude/skills/` 三个仓库内技能：dev-loop（验证闭环）、onboard（接手路径）、change-map（改动落点）；
+- `CLAUDE.md` 指向 `AGENTS.md`，避免两份说明分叉。
 - pi 原生 SRE 包：guard（含证据门禁）/redact/compaction/subagent 扩展、sre/tech-support skills、diagnose/handoff/postmortem prompts；
 - Tempo trace 查询、K8s 只读工具与审批后 scale/restart 真实环境验证；员工级工具授权与知识团队隔离；PostgreSQL advisory lock 多实例单活入口；管理台 admin/operator/view RBAC；审批与受控 K8s scale/restart 动作；技术支持工单入口与 tech-support 员工；案件反馈与员工绩效；Tempo trace 与 K8s 只读工具；数字员工/统一案件/工作台/交接/复盘草稿；服务目录；Prometheus/Loki 只读 MCP 自动注册并接入 pi；
 - AIOps：Alertmanager webhook、事故/告警事件/时间线、只读诊断、管理台事故页；

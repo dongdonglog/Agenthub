@@ -47,6 +47,7 @@ AgentHub 把这些动作收进一个案件：
 | **告警接入** | Alertmanager、Grafana、通用 webhook、PagerDuty；统一事件模型、去重、恢复、按来源 token 与限流 |
 | **pi 诊断** | skills、prompts、extensions、subagent、compaction；Prometheus/Loki/Tempo/K8s 通过 MCP 查证据 |
 | **处置报告** | pi 通过 `submit_report` 提交结构化报告；Go 保存草稿，人补根因/验证后定稿、关闭、发飞书 |
+| **审批动作** | pi 通过 `request_approval` 申请 K8s scale/restart；Go 校验并推审批卡片，批准后由受限执行器执行 |
 | **案件闭环** | 告警聚合、时间线、SLA、交接、复盘、手动恢复；案件/事故/报告支持时间筛选 |
 | **MCP 工具网关** | 一个 `agenthub-ops-mcp` 聚合内置工具与外部 MCP；前缀、只读策略、allow/deny、审计、超时隔离 |
 | **可治理** | 只读 guard、tool_result 脱敏、审批、admin/operator/view RBAC、审计、HA 选主、备份恢复 |
@@ -57,8 +58,8 @@ AgentHub 把这些动作收进一个案件：
 2. AgentHub 归一化、去重、创建 incident 和 case；
 3. pi 带着案件上下文、SRE skill 和 MCP 工具启动；
 4. pi 查 Prometheus/Loki/Tempo/K8s，输出诊断；
-5. pi 调 `submit_report` 提交报告草稿；
-6. 人在案件页补根因、验证，定稿后关闭案件；
+5. pi 调 `submit_report` 提交报告草稿；需要变更时调 `request_approval` 申请动作；
+6. 人在案件页补根因、验证，定稿后关闭案件；动作申请经审批后才由受限执行器执行；
 7. 报告可以下载 Markdown，也可以发回飞书群。
 
 ## 快速开始
