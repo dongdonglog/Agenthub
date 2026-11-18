@@ -1,14 +1,3 @@
-export type Employee = {
-  id: string;
-  name: string;
-  title: string;
-  role: string;
-  mission: string;
-  status: string;
-  chat_id: string;
-  allowed_tools?: string[];
-};
-
 export type CaseItem = {
   id: string;
   employee_id: string;
@@ -83,13 +72,6 @@ export type Incident = {
   created_at: string;
   updated_at: string;
   resolved_at?: string;
-};
-export type IncidentEvent = { id: number; kind: string; actor: string; text: string; created_at: string };
-export type IncidentDetail = {
-  incident: Incident;
-  events: IncidentEvent[];
-  case?: CaseItem | null;
-  run?: Run | null;
 };
 
 export const statusKind = (status: string) =>
