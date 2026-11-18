@@ -104,8 +104,20 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 			e.log.Warn("presenter open failed; fallback to text", "error", err, "run", run.ID)
 		} else {
 			cardHandle = handle
+			// 立刻持久化卡片句柄：进程若在此后崩溃，回收时才能把这张卡片改成中断态，
+			// 否则它会永远停在「处理中」。
+			e.mu.Lock()
+			run.CardHandle = handle
+			e.mu.Unlock()
+			if e.journal != nil {
+				if err := e.journal.SaveRun(ctx, run); err != nil {
+					e.log.Warn("persist card handle failed", "run", run.ID, "error", err)
+				}
+			}
 		}
 	}
+	stopHeartbeat := e.startRunHeartbeat(runCtx, run.ID)
+	defer stopHeartbeat()
 
 	lastProgress := time.Time{}
 	updateCard := func(phase string) {
@@ -229,6 +241,8 @@ func (e *Engine) runBatch(ctx context.Context, conv string) error {
 			e.log.Warn("presenter close failed; fallback to text", "error", err, "run", run.ID)
 		} else {
 			cardDone = true
+			// 记录卡片已收尾；失败时保持 false，由巡检重试，卡片不会停在「处理中」。
+			run.CardClosed = true
 		}
 	}
 

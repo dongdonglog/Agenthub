@@ -51,6 +51,12 @@ type Run struct {
 	InputTokens  int
 	OutputTokens int
 	TraceID      string
+	// HeartbeatAt 是执行者最后一次存活的时间；停止刷新即说明进程已消失。
+	HeartbeatAt time.Time
+	// CardHandle 是「处理中」卡片的句柄，供任意实例在回收时把它改成中断态。
+	CardHandle string
+	// CardClosed 表示卡片已写入终态；未关闭的会被巡检反复重试。
+	CardClosed bool
 }
 
 // Delivery 是一次结果投递。
@@ -174,6 +180,8 @@ type Journal interface {
 	SaveGeneration(ctx context.Context, conversationID string, generation int) error
 	LoadGenerations(ctx context.Context) (map[string]int, error)
 	SaveRun(ctx context.Context, r *Run) error
+	// HeartbeatRun 刷新运行心跳；停止刷新即表示执行进程已消失。
+	HeartbeatRun(ctx context.Context, id string, at time.Time) error
 	SaveDelivery(ctx context.Context, d *Delivery) error
 	ClaimDelivery(ctx context.Context, key, owner, token string, lease time.Duration) (*Delivery, bool, error)
 	MarkDeliveryCalling(ctx context.Context, key, token string) (bool, error)
@@ -181,6 +189,12 @@ type Journal interface {
 	RecoverDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
 	// RecoverStaleRuns 回收失去执行者的非终态运行；exclude 是本进程正在执行的会话。
 	RecoverStaleRuns(ctx context.Context, cutoff, now time.Time, exclude []string) ([]*Run, error)
+	// MarkCardClosed 记录卡片已写入终态。
+	MarkCardClosed(ctx context.Context, id string) error
+	// LoadUnclosedCards 返回已结束但卡片尚未收尾的运行。
+	LoadUnclosedCards(ctx context.Context, limit int) ([]*Run, error)
+	// BumpCardCloseAttempt 记录一次结算失败；返回累计次数。
+	BumpCardCloseAttempt(ctx context.Context, id string) (int, error)
 	SaveArtifact(ctx context.Context, a *Artifact) error
 	LoadArtifacts(ctx context.Context, runID string) ([]*Artifact, error)
 	LoadArtifact(ctx context.Context, id string) (*Artifact, error)

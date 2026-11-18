@@ -131,9 +131,9 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		reactions:          make(map[string]string),
 		deliveryOwner:      newLeaseToken(),
 		deliveryLease:      2 * time.Minute,
-		// staleRunAfter 远大于单次运行上限（PI_TIMEOUT_SECONDS 默认 600s），
-		// 超时仍未结束的 running 视为进程已消失。
-		staleRunAfter: 30 * time.Minute,
+		// 按心跳判定执行者是否存活：心跳间隔 10s，超过 1 分钟没刷新即视为进程已消失。
+		// 这样卡片最迟在 1 分钟内被改成中断态，而不是一直停在「处理中」。
+		staleRunAfter: runHeartbeatTimeout,
 		retryDelay: func(attempt int) time.Duration {
 			d := time.Duration(1<<uint(attempt)) * time.Second
 			if d > 30*time.Second {

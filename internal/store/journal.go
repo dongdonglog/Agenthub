@@ -54,8 +54,8 @@ func (j *Journal) SetMessageStatus(ctx context.Context, ids []string, status str
 func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 	inputs, _ := json.Marshal(r.InputIDs)
 	_, err := j.pool.Exec(ctx, `
-		INSERT INTO run_state (id, conversation_id, chat_id, round_no, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		INSERT INTO run_state (id, conversation_id, chat_id, round_no, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id, heartbeat_at, card_handle, card_closed)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		ON CONFLICT (id) DO UPDATE SET
 			state = EXCLUDED.state,
 			output = EXCLUDED.output,
@@ -63,8 +63,71 @@ func (j *Journal) SaveRun(ctx context.Context, r *core.Run) error {
 			ended_at = EXCLUDED.ended_at,
 			input_tokens = EXCLUDED.input_tokens,
 			output_tokens = EXCLUDED.output_tokens,
-			trace_id = EXCLUDED.trace_id`,
-		r.ID, r.ConversationID, r.ChatID, r.Round, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt, r.InputTokens, r.OutputTokens, r.TraceID)
+			trace_id = EXCLUDED.trace_id,
+			heartbeat_at = EXCLUDED.heartbeat_at,
+			card_handle = EXCLUDED.card_handle,
+			card_closed = EXCLUDED.card_closed`,
+		r.ID, r.ConversationID, r.ChatID, r.Round, r.State, inputs, r.Output, r.Error, r.StartedAt, r.EndedAt,
+		r.InputTokens, r.OutputTokens, r.TraceID, nullTime(r.HeartbeatAt), r.CardHandle, r.CardClosed)
+	return err
+}
+
+// MarkCardClosed 记录卡片已写入终态。
+func (j *Journal) MarkCardClosed(ctx context.Context, id string) error {
+	_, err := j.pool.Exec(ctx, `
+		UPDATE run_state SET card_closed = true WHERE id = $1`, id)
+	return err
+}
+
+// BumpCardCloseAttempt 记录一次卡片结算失败，返回累计失败次数。
+func (j *Journal) BumpCardCloseAttempt(ctx context.Context, id string) (int, error) {
+	var attempts int
+	err := j.pool.QueryRow(ctx, `
+		UPDATE run_state SET card_close_attempts = card_close_attempts + 1
+		WHERE id = $1
+		RETURNING card_close_attempts`, id).Scan(&attempts)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return attempts, err
+}
+
+// LoadUnclosedCards 返回已结束但卡片尚未收尾的运行。
+//
+// @remarks 覆盖「运行跑完了，但改卡片那一步失败」这条路径：卡片会一直停在
+// 「处理中」，必须由巡检重试，不能只处理进程崩溃。
+func (j *Journal) LoadUnclosedCards(ctx context.Context, limit int) ([]*core.Run, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := j.pool.Query(ctx, `
+		SELECT id, conversation_id, chat_id, state, output, error, trace_id, card_handle
+		FROM run_state
+		WHERE card_handle <> '' AND card_closed = false AND state NOT IN ('running', 'stopping')
+		ORDER BY ended_at DESC NULLS LAST
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*core.Run
+	for rows.Next() {
+		r := &core.Run{}
+		if err := rows.Scan(&r.ID, &r.ConversationID, &r.ChatID, &r.State, &r.Output, &r.Error, &r.TraceID, &r.CardHandle); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// HeartbeatRun 刷新运行心跳；只有非终态运行会被更新。
+//
+// @remarks 进程被 kill 后心跳停止，其它实例据此判定执行者已消失。
+func (j *Journal) HeartbeatRun(ctx context.Context, id string, at time.Time) error {
+	_, err := j.pool.Exec(ctx, `
+		UPDATE run_state SET heartbeat_at = $2
+		WHERE id = $1 AND state IN ('running', 'stopping')`, id, at)
 	return err
 }
 
@@ -650,7 +713,7 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	}
 
 	runRows, err := j.pool.Query(ctx, `
-		SELECT id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id
+		SELECT id, conversation_id, state, input_ids, output, error, started_at, ended_at, input_tokens, output_tokens, trace_id, heartbeat_at, card_handle, card_closed
 		FROM run_state ORDER BY started_at DESC NULLS LAST LIMIT $1`, limit)
 	if err != nil {
 		return nil, nil, err
@@ -660,8 +723,9 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	for runRows.Next() {
 		r := &core.Run{}
 		var inputs []byte
-		var started, ended *time.Time
-		if err := runRows.Scan(&r.ID, &r.ConversationID, &r.State, &inputs, &r.Output, &r.Error, &started, &ended, &r.InputTokens, &r.OutputTokens, &r.TraceID); err != nil {
+		var started, ended, heartbeat *time.Time
+		if err := runRows.Scan(&r.ID, &r.ConversationID, &r.State, &inputs, &r.Output, &r.Error, &started, &ended,
+			&r.InputTokens, &r.OutputTokens, &r.TraceID, &heartbeat, &r.CardHandle, &r.CardClosed); err != nil {
 			return nil, nil, err
 		}
 		_ = json.Unmarshal(inputs, &r.InputIDs)
@@ -671,35 +735,41 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 		if ended != nil {
 			r.EndedAt = *ended
 		}
+		if heartbeat != nil {
+			r.HeartbeatAt = *heartbeat
+		}
 		runs = append(runs, r)
 	}
 	return messages, runs, nil
 }
 
-// RecoverStaleRuns 把超时仍处于非终态的运行标记为 interrupted。
+// RecoverStaleRuns 回收心跳已停止的非终态运行，并返回卡片句柄。
 //
-// @remarks 进程崩溃后内存中的运行状态随之消失，数据库里的 running 行没有
-// 任何执行者；不清理会让卡片永远停在「处理中」。exclude 是本进程正在执行的
-// 会话，避免误伤；cutoff 取足够长（远超单次运行上限）以免杀掉其它实例的长任务。
+// @remarks 进程被 kill 或崩溃后心跳不再刷新，数据库里的 running 行没有任何执行者；
+// 不清理会让卡片永远停在「处理中」。判定依据是 heartbeat_at（历史数据回落到
+// started_at），与运行时长无关，所以长任务不会被误杀。
+// exclude 是本进程正在执行的会话，作为心跳写入失败时的兜底。
 func (j *Journal) RecoverStaleRuns(ctx context.Context, cutoff, now time.Time, exclude []string) ([]*core.Run, error) {
 	if exclude == nil {
 		exclude = []string{}
 	}
 	rows, err := j.pool.Query(ctx, `
 		UPDATE run_state
-		SET state = 'interrupted', ended_at = $2, error = '进程中断，未产出结果'
-		WHERE state IN ('running', 'stopping') AND started_at IS NOT NULL AND started_at < $1
+		SET state = 'interrupted', ended_at = $2, error = '执行进程已中断'
+		WHERE state IN ('running', 'stopping')
+		  AND COALESCE(heartbeat_at, started_at) IS NOT NULL
+		  AND COALESCE(heartbeat_at, started_at) < $1
 		  AND conversation_id <> ALL($3)
-		RETURNING id, conversation_id, chat_id, trace_id, input_ids`, cutoff, now, exclude)
+		RETURNING id, conversation_id, chat_id, trace_id, input_ids, card_handle`, cutoff, now, exclude)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*core.Run
 	for rows.Next() {
-		r := &core.Run{State: "interrupted", EndedAt: now, Error: "进程中断，未产出结果"}
+		r := &core.Run{State: "interrupted", EndedAt: now, Error: "执行进程已中断"}
 		var inputs []byte
-		if err := rows.Scan(&r.ID, &r.ConversationID, &r.ChatID, &r.TraceID, &inputs); err != nil {
+		if err := rows.Scan(&r.ID, &r.ConversationID, &r.ChatID, &r.TraceID, &inputs, &r.CardHandle); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(inputs, &r.InputIDs)

@@ -340,13 +340,7 @@ func run() int {
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
 	engine.SetQueueTTL(time.Duration(cfg.QueueTTLSeconds) * time.Second)
 	engine.SetDeliveryLease(time.Duration(cfg.DeliveryLeaseSeconds) * time.Second)
-	// 运行上限的 3 倍作为「已失去执行者」的判定阈值，下限 30 分钟，
-	// 保证正常执行中的长任务不会被误回收。
-	staleAfter := 3 * time.Duration(cfg.Pi.TimeoutSeconds) * time.Second
-	if staleAfter < 30*time.Minute {
-		staleAfter = 30 * time.Minute
-	}
-	engine.SetStaleRunAfter(staleAfter)
+	// 不使用「运行时长」判定：真正在跑的长任务会持续刷新心跳，不会被误回收。
 	engine.SetOutboundQPS(cfg.OutboundQPS)
 	engine.SetProfileSource(func() core.ProfileSelection {
 		active := profiles.Active()
@@ -1066,18 +1060,25 @@ func deliveryRecoveryLoop(ctx context.Context, engine *core.Engine, logger *slog
 	}
 }
 
-// staleRunRecoveryLoop 回收失去执行者的运行。
+// staleRunRecoveryLoop 让「处理中」卡片一定会收尾。
 //
-// @remarks 启动先跑一次（崩溃重启后立即清理上次遗留的 running），之后每 5 分钟巡检。
-// 不清理会让卡片永远停在「处理中」。
+// @remarks 做两件事，缺一不可：
+//  1. 回收心跳已停止的运行（执行进程被 kill 或崩溃），把卡片改成中断态；
+//  2. 收尾「运行已结束、但改卡片那步失败」的卡片，持续重试直到成功。
+//
+// 启动先跑一次（崩溃重启后立刻清理上次遗留），之后每 20 秒巡检——
+// 保证卡片最迟 1 分钟出头就离开「处理中」，不会长期悬着。
 func staleRunRecoveryLoop(ctx context.Context, engine *core.Engine, logger *slog.Logger) {
 	run := func() {
 		if n := engine.RecoverStaleRuns(ctx); n > 0 {
 			logger.Warn("recovered stale runs", "count", n)
 		}
+		if n := engine.SweepUnclosedCards(ctx); n > 0 {
+			logger.Info("settled unclosed cards", "count", n)
+		}
 	}
 	run()
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {

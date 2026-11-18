@@ -2,6 +2,8 @@ package core_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,5 +90,62 @@ func TestRecoverStaleRuns(t *testing.T) {
 	}
 	if ch.count() != 1 {
 		t.Fatalf("不应重复投递，实际 %d", ch.count())
+	}
+}
+
+// TestSweepUnclosedCards 覆盖「运行已结束，但改卡片那步失败」这条路径。
+//
+// @remarks 只回收 running 是不够的：运行正常结束后如果 Close 卡片失败，
+// 卡片同样会停在「处理中」。巡检必须持续重试直到成功。
+func TestSweepUnclosedCards(t *testing.T) {
+	url := testDatabaseURL(t)
+	ctx := context.Background()
+	db, err := store.Open(ctx, url, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(ctx, db, "../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool().Exec(ctx, `TRUNCATE message_state, run_state, delivery_state`); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := store.NewJournal(db)
+	now := time.Now()
+	run := &core.Run{
+		ID: "run_card", ConversationID: "aiops:inc_card", ChatID: "oc_chat",
+		State: "completed", Output: "诊断完成", StartedAt: now.Add(-time.Minute),
+		EndedAt: now, TraceID: "tr_card", CardHandle: "card_open_1",
+	}
+	if err := journal.SaveRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+
+	presenter := &fakePresenter{}
+	engine := core.New(agent.Echo{}, &captureChannel{}, nil)
+	engine.SetJournal(journal)
+	engine.SetPresenter(presenter)
+
+	// 第一次结算失败：卡片仍是「处理中」，且未被标记为已关闭。
+	presenter.closeErr = errors.New("feishu 500")
+	if n := engine.SweepUnclosedCards(ctx); n != 0 {
+		t.Fatalf("失败时收尾数 = %d, want 0", n)
+	}
+	if pending, err := journal.LoadUnclosedCards(ctx, 10); err != nil || len(pending) != 1 {
+		t.Fatalf("失败的卡片应留在待收尾列表: %v %v", pending, err)
+	}
+
+	// 恢复后重试成功：卡片写入终态，并从待收尾列表消失。
+	presenter.closeErr = nil
+	if n := engine.SweepUnclosedCards(ctx); n != 1 {
+		t.Fatalf("重试收尾数 = %d, want 1", n)
+	}
+	if pending, err := journal.LoadUnclosedCards(ctx, 10); err != nil || len(pending) != 0 {
+		t.Fatalf("收尾后不应再有待处理卡片: %v %v", pending, err)
+	}
+	if !strings.Contains(presenter.body, "诊断完成") {
+		t.Fatalf("卡片应写入运行输出，实际 body = %q", presenter.body)
 	}
 }
