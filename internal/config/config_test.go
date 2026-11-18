@@ -109,6 +109,35 @@ func TestRejectsInvalidDBURL(t *testing.T) {
 	}
 }
 
+// TestProductionRequiresAdminToken 守住启动闸门：生产环境管理面必须有令牌。
+//
+// @remarks 管理面有 69 条路由且包含 K8s scale/restart 写操作，令牌全空等于
+// 完全放行。允许「忘了配」比拒绝启动危险得多。
+func TestProductionRequiresAdminToken(t *testing.T) {
+	t.Setenv("AGENTHUB_ENV", "production")
+	if _, err := config.Load(""); err == nil {
+		t.Fatal("production 无管理面令牌应拒绝启动")
+	}
+
+	// 任一令牌存在即可放行。
+	for _, name := range []string{"AGENTHUB_ADMIN_TOKEN", "AGENTHUB_ADMIN_OPERATOR_TOKEN", "AGENTHUB_ADMIN_VIEW_TOKEN"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "tok")
+			if _, err := config.Load(""); err != nil {
+				t.Fatalf("配置了 %s 应允许启动: %v", name, err)
+			}
+		})
+	}
+}
+
+// TestDevelopmentAllowsNoAdminToken 开发环境保持宽松，便于本地冒烟。
+func TestDevelopmentAllowsNoAdminToken(t *testing.T) {
+	t.Setenv("AGENTHUB_ENV", "development")
+	if _, err := config.Load(""); err != nil {
+		t.Fatalf("开发环境不应强制令牌: %v", err)
+	}
+}
+
 func TestErrorDoesNotLeakSecret(t *testing.T) {
 	t.Setenv("AGENTHUB_CHANNEL", "feishu")
 	t.Setenv("FEISHU_APP_ID", "cli_leak_check")

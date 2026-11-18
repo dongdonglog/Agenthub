@@ -447,6 +447,15 @@ func (c *Config) Validate() error {
 	if c.MaxConcurrentRuns <= 0 {
 		c.MaxConcurrentRuns = 4
 	}
+	// 生产环境必须配管理面令牌。
+	//
+	// @remarks 管理面有 69 条路由，其中包含 K8s scale/restart 这类写操作。
+	// 令牌全空等于完全放行，只在内网且前置网关时才是可接受的噪声级风险；
+	// 生产环境直接拒绝启动，避免「忘了配」变成「默认不设防」。
+	if c.Env == "production" &&
+		c.Admin.Token == "" && c.Admin.OperatorToken == "" && c.Admin.ViewToken == "" {
+		return errors.New("production 环境必须设置 AGENTHUB_ADMIN_TOKEN（或 operator/view 令牌），管理面不能无鉴权对外")
+	}
 	if c.RateLimitPerMin < 0 {
 		return errors.New("rate_limit_per_min 不能为负数")
 	}
