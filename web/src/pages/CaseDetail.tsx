@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Badge, Breadcrumbs, Button, Card, Field, Input, Modal, PageHeader, Skeleton, useAsync, useToast } from "../components/ui";
-import { statusKind, type Approval, type CaseDetail as Detail } from "../types";
+import { severityKind, statusKind, type Approval, type CaseDetail as Detail } from "../types";
 
 export function CaseDetail() {
   const { id = "" } = useParams();
@@ -38,7 +38,19 @@ export function CaseDetail() {
   if (!detail.data?.case) return <Card title="案件不存在"><Button onClick={() => navigate("/cases")}>返回案件列表</Button></Card>;
 
   const c = detail.data.case;
+  const incident = detail.data.incident ?? null;
   const overdue = c.sla_due_at && c.status !== "resolved" && c.status !== "closed" && new Date(c.sla_due_at).getTime() < Date.now();
+  // 事故认领/恢复直接复用事故接口，案件页不再需要跳转。
+  const actIncident = async (path: "ack" | "resolve") => {
+    if (!incident) return;
+    try {
+      await api(`/incidents/${encodeURIComponent(incident.id)}/${path}`, {
+        method: "POST", body: JSON.stringify({ actor: "admin" }),
+      });
+      show("已更新");
+      reload();
+    } catch (err) { show((err as Error).message, true); }
+  };
   return (
     <div className="stack">
       <Breadcrumbs items={[{ label: "案件", to: "/cases" }, { label: c.id }]} />
@@ -51,10 +63,25 @@ export function CaseDetail() {
         <Badge kind={statusKind(c.status)}>{c.status}</Badge>
         <Badge kind={c.severity === "critical" ? "danger" : "warn"}>{c.severity || "未分级"}</Badge>
         <Badge>{c.type}</Badge>
-        {c.source === "alertmanager" ? <Link className="badge" to={`/incidents/${c.source_id}`}>查看事故</Link> : null}
         {c.sla_due_at ? <span className={overdue ? "danger-text small" : "muted small"}>SLA {new Date(c.sla_due_at).toLocaleString()}{overdue ? "（已超时）" : ""}</span> : null}
       </div>
       <Card title="摘要"><div style={{ whiteSpace: "pre-wrap" }}>{c.summary || c.title}</div></Card>
+
+      {incident ? (
+        <Card title="告警聚合" actions={<span className="muted small">按告警组去重 {incident.alert_count} 条</span>}>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <Badge kind={statusKind(incident.status)}>{incident.status}</Badge>
+            <Badge kind={severityKind(incident.severity)}>{incident.severity || "未分级"}</Badge>
+            <span className="muted small">服务 {incident.service || "—"}</span>
+            {incident.acknowledged_by ? <span className="muted small">认领：{incident.acknowledged_by}</span> : null}
+            <span className="mono muted small">{incident.id}</span>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            {incident.status !== "resolved" ? <Button onClick={() => actIncident("ack")}>认领事故</Button> : null}
+            {incident.status !== "resolved" ? <Button className="danger" onClick={() => actIncident("resolve")}>手动恢复</Button> : null}
+          </div>
+        </Card>
+      ) : null}
 
       <Card title="诊断输出" actions={detail.data.run ? <span className="muted small">{detail.data.run.State} · {detail.data.run.InputTokens} in / {detail.data.run.OutputTokens} out</span> : null}>
         {detail.data.run ? (

@@ -962,7 +962,18 @@ func (s *Server) handleCase(rw http.ResponseWriter, r *http.Request) {
 			run, _ = s.opts.Journal.LatestRunForConversation(r.Context(), conv)
 		}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"case": c, "events": events, "feedback": feedback, "reviews": reviews, "report": report, "approvals": approvals, "run": run})
+	// 告警来源的案件把事故细节一并带上：事故是告警聚合事实，案件是工作项，
+	// 对使用者而言应在一个页面里看完，不必在「事故」和「案件」之间来回跳。
+	var incident any
+	if c.Source == "alertmanager" && s.opts.Incidents != nil {
+		if inc, _ := s.opts.Incidents.GetIncident(r.Context(), c.SourceID); inc != nil {
+			incident = inc
+		}
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{
+		"case": c, "events": events, "feedback": feedback, "reviews": reviews,
+		"report": report, "approvals": approvals, "run": run, "incident": incident,
+	})
 }
 
 func (s *Server) handleCaseHandoff(rw http.ResponseWriter, r *http.Request) {

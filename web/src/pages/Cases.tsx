@@ -46,7 +46,7 @@ export function Cases() {
           </Select>
           <Select value={type} onChange={(event) => change(setType)(event.target.value)}>
             <option value="">全部类型</option>
-            <option value="incident">事故</option>
+            <option value="incident">告警</option>
             <option value="ticket">工单</option>
           </Select>
           <TimeFilter from={from} to={to} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); setPage(1); }} />

@@ -64,6 +64,8 @@ export type CaseDetail = {
   report?: CaseReport | null;
   approvals?: Approval[];
   run?: Run | null;
+  // 告警来源的案件会带上事故聚合信息，避免用户再跳到「事故」页。
+  incident?: Incident | null;
 };
 
 export type Incident = {

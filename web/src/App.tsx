@@ -9,8 +9,6 @@ import { Skills, SkillDetail } from "./pages/Skills";
 import { MCPs, MCPDetail } from "./pages/MCPs";
 import { Tasks, TaskDetail } from "./pages/Tasks";
 import { Audits } from "./pages/Audits";
-import { Incidents } from "./pages/Incidents";
-import { IncidentDetail } from "./pages/IncidentDetail";
 import { Cases } from "./pages/Cases";
 import { CaseDetail } from "./pages/CaseDetail";
 import { Workbench } from "./pages/Workbench";
@@ -33,8 +31,9 @@ export function App() {
                 <Route path="/cases/:id" element={<CaseDetail />} />
                 <Route path="/cases/:id/report" element={<CaseReport />} />
                 <Route path="/reports" element={<Reports />} />
-                <Route path="/incidents" element={<Incidents />} />
-                <Route path="/incidents/:id" element={<IncidentDetail />} />
+                {/* 事故已并入案件：告警聚合信息在案件详情里展示，旧链接重定向过去。 */}
+                <Route path="/incidents" element={<Navigate to="/cases" replace />} />
+                <Route path="/incidents/:id" element={<Navigate to="/cases" replace />} />
                 <Route path="/sessions" element={<Sessions />} />
                 <Route path="/sessions/:id" element={<SessionDetail />} />
                 <Route path="/history" element={<History />} />
