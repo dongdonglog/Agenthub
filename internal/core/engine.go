@@ -69,6 +69,8 @@ type Engine struct {
 	// deliveryOwner 标识当前进程；deliveryLease 是单次发送领取的租约。
 	deliveryOwner string
 	deliveryLease time.Duration
+	// staleRunAfter 是判定「运行已失去执行者」的阈值。
+	staleRunAfter time.Duration
 	reactor       channel.Reactor
 	reactions     map[string]string
 	reactionMu    sync.Mutex
@@ -129,6 +131,9 @@ func New(a agent.Agent, ch channel.Channel, log *slog.Logger) *Engine {
 		reactions:          make(map[string]string),
 		deliveryOwner:      newLeaseToken(),
 		deliveryLease:      2 * time.Minute,
+		// staleRunAfter 远大于单次运行上限（PI_TIMEOUT_SECONDS 默认 600s），
+		// 超时仍未结束的 running 视为进程已消失。
+		staleRunAfter: 30 * time.Minute,
 		retryDelay: func(attempt int) time.Duration {
 			d := time.Duration(1<<uint(attempt)) * time.Second
 			if d > 30*time.Second {
@@ -269,6 +274,15 @@ func (e *Engine) SetDeliveryLease(lease time.Duration) {
 	e.mu.Lock()
 	if lease > 0 {
 		e.deliveryLease = lease
+	}
+	e.mu.Unlock()
+}
+
+// SetStaleRunAfter 设置判定「运行已失去执行者」的阈值；应明显大于单次运行上限。
+func (e *Engine) SetStaleRunAfter(d time.Duration) {
+	e.mu.Lock()
+	if d > 0 {
+		e.staleRunAfter = d
 	}
 	e.mu.Unlock()
 }

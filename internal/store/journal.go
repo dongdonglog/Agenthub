@@ -649,6 +649,38 @@ func (j *Journal) LoadRecent(ctx context.Context, limit int) ([]*core.Message, [
 	return messages, runs, nil
 }
 
+// RecoverStaleRuns 把超时仍处于非终态的运行标记为 interrupted。
+//
+// @remarks 进程崩溃后内存中的运行状态随之消失，数据库里的 running 行没有
+// 任何执行者；不清理会让卡片永远停在「处理中」。exclude 是本进程正在执行的
+// 会话，避免误伤；cutoff 取足够长（远超单次运行上限）以免杀掉其它实例的长任务。
+func (j *Journal) RecoverStaleRuns(ctx context.Context, cutoff, now time.Time, exclude []string) ([]*core.Run, error) {
+	if exclude == nil {
+		exclude = []string{}
+	}
+	rows, err := j.pool.Query(ctx, `
+		UPDATE run_state
+		SET state = 'interrupted', ended_at = $2, error = '进程中断，未产出结果'
+		WHERE state IN ('running', 'stopping') AND started_at IS NOT NULL AND started_at < $1
+		  AND conversation_id <> ALL($3)
+		RETURNING id, conversation_id, chat_id, trace_id, input_ids`, cutoff, now, exclude)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*core.Run
+	for rows.Next() {
+		r := &core.Run{State: "interrupted", EndedAt: now, Error: "进程中断，未产出结果"}
+		var inputs []byte
+		if err := rows.Scan(&r.ID, &r.ConversationID, &r.ChatID, &r.TraceID, &inputs); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(inputs, &r.InputIDs)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // LatestRunForConversation 返回一个会话最近一次运行。
 func (j *Journal) LatestRunForConversation(ctx context.Context, conversationID string) (*core.Run, error) {
 	r := &core.Run{}

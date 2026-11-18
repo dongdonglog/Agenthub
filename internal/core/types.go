@@ -179,6 +179,8 @@ type Journal interface {
 	MarkDeliveryCalling(ctx context.Context, key, token string) (bool, error)
 	FinishDelivery(ctx context.Context, key, token, state, errText, externalID string, next time.Time) (bool, error)
 	RecoverDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	// RecoverStaleRuns 回收失去执行者的非终态运行；exclude 是本进程正在执行的会话。
+	RecoverStaleRuns(ctx context.Context, cutoff, now time.Time, exclude []string) ([]*Run, error)
 	SaveArtifact(ctx context.Context, a *Artifact) error
 	LoadArtifacts(ctx context.Context, runID string) ([]*Artifact, error)
 	LoadArtifact(ctx context.Context, id string) (*Artifact, error)

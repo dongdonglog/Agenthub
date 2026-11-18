@@ -41,13 +41,18 @@ CASE=$(curl -sf "${AUTH[@]}" "$ADMIN/admin/api/v1/cases?q=${SERVICE}" | jq -r '.
 echo "    incident=${INCIDENT} case=${CASE}"
 
 echo "==> 4/4 等待诊断报告（最多 5 分钟）"
+# 注意：/cases/{id}/report 在没有真实报告时会用案件标题拼一份兜底草稿，
+# 所以必须查 /reports（只返回已入库的 case_report），否则会误报成功。
+REPORT=""
 for _ in $(seq 1 60); do
-  REPORT=$(curl -sf "${AUTH[@]}" "$ADMIN/admin/api/v1/cases/${CASE}/report" | jq -r '.report.problem // empty')
+  REPORT=$(curl -sf "${AUTH[@]}" "$ADMIN/admin/api/v1/reports" \
+    | jq -r --arg case "$CASE" '.items[] | select(.report.case_id == $case) | .report.problem' | head -1)
   [ -n "$REPORT" ] && break
   sleep 5
 done
 [ -n "${REPORT:-}" ] || {
-  echo "5 分钟内没有报告；检查模型/pi 是否可用（案例页可见运行详情）" >&2
+  echo "5 分钟内没有真实报告入库；检查模型/pi 是否可用（案例页可见运行详情）" >&2
+  echo "注意：案件页看到的草稿可能来自标题兜底，不代表 pi 已产出。" >&2
   exit 1
 }
 

@@ -340,6 +340,13 @@ func run() int {
 	engine.SetRateLimit(cfg.RateLimitPerMin, time.Minute)
 	engine.SetQueueTTL(time.Duration(cfg.QueueTTLSeconds) * time.Second)
 	engine.SetDeliveryLease(time.Duration(cfg.DeliveryLeaseSeconds) * time.Second)
+	// 运行上限的 3 倍作为「已失去执行者」的判定阈值，下限 30 分钟，
+	// 保证正常执行中的长任务不会被误回收。
+	staleAfter := 3 * time.Duration(cfg.Pi.TimeoutSeconds) * time.Second
+	if staleAfter < 30*time.Minute {
+		staleAfter = 30 * time.Minute
+	}
+	engine.SetStaleRunAfter(staleAfter)
 	engine.SetOutboundQPS(cfg.OutboundQPS)
 	engine.SetProfileSource(func() core.ProfileSelection {
 		active := profiles.Active()
@@ -725,6 +732,7 @@ func run() int {
 	}()
 	go flushLoop(workCtx, engine, logger)
 	go deliveryRecoveryLoop(workCtx, engine, logger)
+	go staleRunRecoveryLoop(workCtx, engine, logger)
 	if db != nil {
 		go purgeLoop(ctx, db, filepath.Join(cfg.Storage.Dir, "artifacts"), cfg.RetentionDays, logger)
 	}
@@ -1054,6 +1062,29 @@ func deliveryRecoveryLoop(ctx context.Context, engine *core.Engine, logger *slog
 			return
 		case <-ticker.C:
 			engine.RecoverDeliveries(ctx)
+		}
+	}
+}
+
+// staleRunRecoveryLoop 回收失去执行者的运行。
+//
+// @remarks 启动先跑一次（崩溃重启后立即清理上次遗留的 running），之后每 5 分钟巡检。
+// 不清理会让卡片永远停在「处理中」。
+func staleRunRecoveryLoop(ctx context.Context, engine *core.Engine, logger *slog.Logger) {
+	run := func() {
+		if n := engine.RecoverStaleRuns(ctx); n > 0 {
+			logger.Warn("recovered stale runs", "count", n)
+		}
+	}
+	run()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
 		}
 	}
 }
