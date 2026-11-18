@@ -204,6 +204,7 @@ AgentHub 的分工是：
 ## 文档
 
 - [最佳实践](docs/best-practices.md)
+- [HTTP 接口（OpenAPI）](docs/openapi.yaml)
 - [AIOps / 数字员工](docs/aiops.md)
 - [工具链与 MCP 网关](docs/tools.md)
 - [部署指南](docs/deploy.md)
